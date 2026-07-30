@@ -18,3 +18,5 @@ Thumbs.db
 
 # Test-Fixtures mit ggf. sensiblen/privaten Inhalten
 tests/fixtures/*.pdf
+
+tests/output/
