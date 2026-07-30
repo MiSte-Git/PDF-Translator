@@ -54,6 +54,13 @@ _FOOTER_MARGIN = 5.0
 # justification) within a single column.
 _COLUMN_SPLIT_THRESHOLD = 50.0
 
+# Terms that mark the start of an untranslatable metadata chunk (e.g. an
+# account/address line) within an otherwise-translatable page-0 block - see
+# _split_first_page_metadata(). Comparison is case-insensitive. Kept as a
+# plain list, separate from the split logic itself, so it can later be
+# exposed as a per-document, UI-editable list instead of a hardcoded one.
+FIRST_PAGE_ANCHOR_TERMS = ["Issuer Address", "Asset Matrix"]
+
 
 def _group_lines_by_x0(
     lines: list[dict], threshold: float
@@ -106,6 +113,79 @@ def _parse_color(color_int: int) -> tuple[int, int, int]:
 def _line_text(raw_spans: list[dict]) -> str:
     """Concatenate a raw PyMuPDF line's span texts."""
     return "".join(span["text"] for span in raw_spans)
+
+
+def _split_first_page_metadata(
+    group: list[dict], anchor_terms: list[str]
+) -> list[list[dict]]:
+    """Split a page-0 line group into an untranslatable metadata part and a
+    translatable rest, if any line contains one of `anchor_terms` (e.g. an
+    "Issuer Address:" line immediately followed by the account address
+    itself, both currently part of the same block as a following title/
+    subtitle line - confirmed via tests/manual_inspect_address_block.py).
+
+    The metadata part covers the first anchor line, its non-blank
+    continuation lines (e.g. the address text), and - if a blank-line gap
+    right after it is immediately followed by another anchor line (e.g. a
+    second "Asset Matrix:" line further down the same block) - that chunk
+    too, repeating until the next content after a gap is not itself an
+    anchor line. The rest of the group (starting at that first non-metadata
+    content; any blank lines right before it stay attached, matching how
+    _build_text_spans() already drops leading blank-line markers) becomes
+    the second part.
+
+    Returns [group] unchanged if no anchor term is found, or if the split
+    would leave either part empty.
+    """
+    def line_text(line: dict) -> str:
+        return _line_text(line.get("spans", [])).strip()
+
+    def has_anchor(line: dict) -> bool:
+        text = line_text(line).lower()
+        return any(term.lower() in text for term in anchor_terms)
+
+    anchor_idx = next((i for i, line in enumerate(group) if has_anchor(line)), None)
+    if anchor_idx is None:
+        return [group]
+
+    end = anchor_idx
+    while end < len(group):
+        end += 1
+        while end < len(group) and line_text(group[end]):
+            end += 1  # skip the chunk's non-blank continuation lines
+        gap_end = end
+        while gap_end < len(group) and not line_text(group[gap_end]):
+            gap_end += 1  # skip the blank-line gap after the chunk
+        if gap_end < len(group) and has_anchor(group[gap_end]):
+            end = gap_end
+            continue  # another metadata chunk follows - keep extending
+        break
+
+    metadata_part, rest_part = group[:end], group[end:]
+    if not metadata_part or not rest_part:
+        return [group]
+    return [metadata_part, rest_part]
+
+
+def _insert_bbox_for(
+    lines: list[dict], bbox: tuple[float, float, float, float]
+) -> tuple[float, float, float, float] | None:
+    """Tighten bbox's y0 to the first non-blank line in `lines`.
+
+    _build_text_spans() drops leading blank lines (they have no
+    representable width/content once turned into spans/HTML), so inserting
+    into bbox as-is - which spans every source line including any leading
+    blank ones - would place text too high, inside space the blank lines
+    used to occupy. Returns None (meaning "use bbox as-is") if the first
+    line is already non-blank, or if - which should not happen for a block
+    with any real text - no non-blank line is found.
+    """
+    first_nonblank = next(
+        (line for line in lines if _line_text(line.get("spans", [])).strip()), None
+    )
+    if first_nonblank is None or first_nonblank is lines[0]:
+        return None
+    return (bbox[0], first_nonblank["bbox"][1], bbox[2], bbox[3])
 
 
 def _line_is_all_bold(raw_spans: list[dict]) -> bool:
@@ -339,10 +419,17 @@ class PyMuPdfEngine:
         sub-groups of lines with similar x0 (see _group_lines_by_x0), each
         becoming its own TextBlock with a tight bbox - this avoids a union
         bbox that spans a paragraph starting next to an image and continuing
-        full-width below it. A block/group is marked non-translatable if it
-        overlaps a link annotation, the template's header/footer zones, or
-        (on page_index == 0 only) the template's first_page_zones. Blocks
-        with only whitespace text are skipped. Each block's spans list is
+        full-width below it. On page_index == 0, each such group is then
+        further split on FIRST_PAGE_ANCHOR_TERMS (see
+        _split_first_page_metadata()): a metadata chunk like "Issuer
+        Address:" plus its address line, which would otherwise share one
+        block with a following title/subtitle line, becomes its own
+        non-translatable TextBlock, separate from the (normally
+        translatable) rest. A block/group is marked non-translatable if it
+        overlaps a link annotation, the template's header/footer zones, (on
+        page_index == 0 only) the template's first_page_zones, or is the
+        metadata half of a FIRST_PAGE_ANCHOR_TERMS split. Blocks with only
+        whitespace text are skipped. Each block's spans list is
         also populated (see _build_text_spans): one TextSpan per PyMuPDF
         span on real text lines, a PARAGRAPH_BREAK_MARKER TextSpan for each
         blank/whitespace-only source line (a genuine paragraph break), and a
@@ -370,60 +457,73 @@ class PyMuPdfEngine:
                 continue
 
             for group in _group_lines_by_x0(lines, _COLUMN_SPLIT_THRESHOLD):
-                spans = [span for line in group for span in line.get("spans", [])]
-                if not spans:
-                    continue
-
-                text = "\n".join(
-                    "".join(span["text"] for span in line.get("spans", []))
-                    for line in group
-                ).strip()
-                if not text:
-                    continue
-
-                first_span = spans[0]
-                color = _parse_color(first_span.get("color", 0))
-                flags = first_span.get("flags", 0)
-                bbox = _union_bbox([tuple(line["bbox"]) for line in group])
-                text_spans = _build_text_spans(group)
-
-                translatable = not any(
-                    block_overlaps(bbox, link_bbox) for link_bbox in link_bboxes
+                subgroups = (
+                    _split_first_page_metadata(group, FIRST_PAGE_ANCHOR_TERMS)
+                    if page_index == 0
+                    else [group]
                 )
-                if translatable and self._template is not None:
-                    header_bbox = self._template.header_bbox
-                    footer_bbox = self._template.footer_bbox
-                    if header_bbox is not None and block_overlaps(bbox, header_bbox):
-                        translatable = False
-                    elif footer_bbox is not None and block_overlaps(bbox, footer_bbox):
+                is_metadata_split = len(subgroups) == 2
+
+                for subgroup_index, subgroup in enumerate(subgroups):
+                    spans = [span for line in subgroup for span in line.get("spans", [])]
+                    if not spans:
+                        continue
+
+                    text = "\n".join(
+                        "".join(span["text"] for span in line.get("spans", []))
+                        for line in subgroup
+                    ).strip()
+                    if not text:
+                        continue
+
+                    first_span = spans[0]
+                    color = _parse_color(first_span.get("color", 0))
+                    flags = first_span.get("flags", 0)
+                    bbox = _union_bbox([tuple(line["bbox"]) for line in subgroup])
+                    insert_bbox = _insert_bbox_for(subgroup, bbox)
+                    text_spans = _build_text_spans(subgroup)
+
+                    translatable = not any(
+                        block_overlaps(bbox, link_bbox) for link_bbox in link_bboxes
+                    )
+                    if translatable and self._template is not None:
+                        header_bbox = self._template.header_bbox
+                        footer_bbox = self._template.footer_bbox
+                        if header_bbox is not None and block_overlaps(bbox, header_bbox):
+                            translatable = False
+                        elif footer_bbox is not None and block_overlaps(bbox, footer_bbox):
+                            translatable = False
+
+                    if (
+                        translatable
+                        and self._template is not None
+                        and page_index == 0
+                        and self._template.first_page_zones is not None
+                        and any(
+                            block_overlaps(bbox, zone)
+                            for zone in self._template.first_page_zones
+                        )
+                    ):
                         translatable = False
 
-                if (
-                    translatable
-                    and self._template is not None
-                    and page_index == 0
-                    and self._template.first_page_zones is not None
-                    and any(
-                        block_overlaps(bbox, zone)
-                        for zone in self._template.first_page_zones
-                    )
-                ):
-                    translatable = False
+                    if is_metadata_split and subgroup_index == 0:
+                        translatable = False  # the anchor-term metadata chunk
 
-                blocks.append(
-                    TextBlock(
-                        page_index=page_index,
-                        bbox=bbox,
-                        text=text,
-                        font_name=first_span.get("font", ""),
-                        font_size=first_span.get("size", 0.0),
-                        color=color,
-                        bold=bool(flags & _BOLD_FLAG),
-                        italic=bool(flags & _ITALIC_FLAG),
-                        translatable=translatable,
-                        spans=text_spans,
+                    blocks.append(
+                        TextBlock(
+                            page_index=page_index,
+                            bbox=bbox,
+                            text=text,
+                            font_name=first_span.get("font", ""),
+                            font_size=first_span.get("size", 0.0),
+                            color=color,
+                            bold=bool(flags & _BOLD_FLAG),
+                            italic=bool(flags & _ITALIC_FLAG),
+                            translatable=translatable,
+                            spans=text_spans,
+                            insert_bbox=insert_bbox,
+                        )
                     )
-                )
 
         return blocks
 
@@ -538,7 +638,12 @@ class PyMuPdfEngine:
         """
         assert self._doc is not None, "Document not opened. Call open() first."
         page = self._doc[block.page_index]
-        rect = fitz.Rect(*block.bbox)
+        # insert_bbox (see TextBlock), not bbox, is the actual insertion
+        # target: bbox may include leading blank source lines that
+        # _build_text_spans() drops, and inserting into bbox as-is would
+        # then place text too high, inside the space those lines used to
+        # occupy.
+        rect = fitz.Rect(*(block.insert_bbox if block.insert_bbox is not None else block.bbox))
 
         if block.spans:
             max_y1 = _max_rect_y1(page, self._template)

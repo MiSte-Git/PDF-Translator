@@ -52,6 +52,15 @@ class TextBlock:
     An empty list means uniform formatting; font_name/font_size/color/bold/
     italic above still hold the first span's formatting either way, for
     code that doesn't use spans yet."""
+    insert_bbox: tuple[float, float, float, float] | None = None
+    """bbox to actually insert translated text into, or None to use bbox
+    as-is. bbox is the union of every source line including any leading
+    blank ones (kept as the overlap-check/reported extent - see
+    PyMuPdfEngine.extract_blocks()); leading blank lines are dropped when
+    spans are built (they carry no representable width), so inserting into
+    bbox as-is would place text too high, in space the blank lines used to
+    occupy. insert_bbox tightens y0 to the first non-blank source line
+    while leaving y1/x0/x1 unchanged."""
 
 @dataclass
 class PageInfo:
