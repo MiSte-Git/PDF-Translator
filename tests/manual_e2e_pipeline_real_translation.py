@@ -22,8 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pipeline.pdf.base import TextBlock
 from pipeline.pdf.pymupdf_engine import PyMuPdfEngine, spans_to_html
 from pipeline.translation.cost_control import (
+    GOOGLE_PRICING,
     TranslationBudgetGuard,
-    estimate_cost,
     get_month_usage,
 )
 from pipeline.translation.google_provider import GoogleTranslateProvider
@@ -54,7 +54,9 @@ def main() -> None:
     engine = PyMuPdfEngine(template=TEMPLATE)
     engine.open(pdf_path)
 
-    provider = TranslationBudgetGuard(GoogleTranslateProvider(), max_chars_per_run=200_000)
+    provider = TranslationBudgetGuard(
+        GoogleTranslateProvider(), pricing=GOOGLE_PRICING, max_chars_per_run=200_000
+    )
 
     blocks = collect_translatable_blocks(engine)
     if not blocks:
@@ -66,13 +68,14 @@ def main() -> None:
     # what actually gets sent to Google (and billed/logged), not block.text.
     original_html = [spans_to_html(block.spans) for block in blocks]
     char_count, estimated_cost = provider.estimate_run(original_html)
-    print(f"Estimated: {char_count} characters, ~${estimated_cost:.2f} (this month's usage so far: {get_month_usage()})")
+    usage_so_far = get_month_usage(GOOGLE_PRICING.provider_name)
+    print(f"Estimated: {char_count} characters, ~${estimated_cost:.2f} (this month's usage so far: {usage_so_far})")
 
     if not provider.confirm_run(original_html):
         print("Aborted: translation not confirmed. Nothing was changed or saved.")
         return
 
-    usage_before = get_month_usage()
+    usage_before = get_month_usage(GOOGLE_PRICING.provider_name)
     translated_html = [
         provider.translate_html(html, target_lang=TARGET_LANG, source_lang=SOURCE_LANG).text
         for html in original_html
@@ -104,8 +107,8 @@ def main() -> None:
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     engine.save(str(OUTPUT_PATH))
 
-    billed_chars = get_month_usage() - usage_before
-    actual_cost = estimate_cost(billed_chars, usage_before)
+    billed_chars = get_month_usage(GOOGLE_PRICING.provider_name) - usage_before
+    actual_cost = provider.estimate_cost(billed_chars, usage_before)
 
     print()
     print(f"blocks translated: {total_blocks}")

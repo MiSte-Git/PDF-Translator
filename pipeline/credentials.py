@@ -43,3 +43,8 @@ def set_api_key(key_name: str, value: str) -> None:
 def get_google_translate_api_key() -> str:
     """Google Cloud Translation API key from the OS keyring."""
     return get_api_key("google_translate_api_key")
+
+
+def get_deepl_api_key() -> str:
+    """DeepL API key from the OS keyring."""
+    return get_api_key("deepl_api_key")

@@ -3,20 +3,49 @@
 Wraps any TranslationProvider (see base.py) so a caller can see an upfront
 cost estimate, get a confirmation prompt, and be protected by a hard
 per-run character cap, before/while the wrapped provider is actually used.
+Pricing is provider-specific (see PricingModel) since providers differ in
+free-tier size and per-character cost, and usage is logged per provider
+since each has its own account/quota.
 """
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Callable
 
 from pipeline.translation.base import TranslationError, TranslationProvider, TranslationResult
 
-# Google Cloud Translation Basic (v2) pricing, as of 2026. Adjust here if
-# pricing changes or a different provider's pricing should be modeled.
-COST_PER_MILLION_CHARS = 20.0  # USD
-FREE_TIER_CHARS_PER_MONTH = 500_000
+
+@dataclass
+class PricingModel:
+    """A translation provider's pricing, for budget estimation purposes.
+
+    cost_per_million_chars models a simple linear pay-as-you-go price (e.g.
+    Google's per-character billing). For providers with a subscription- or
+    quota-based pricing structure instead (e.g. DeepL Pro), this is only a
+    rough approximation useful for budget warnings - not an exact billing
+    model.
+    """
+    provider_name: str
+    cost_per_million_chars: float
+    free_tier_chars_per_month: int
+
+
+# Google Cloud Translation Basic (v2) pricing, as of 2026.
+GOOGLE_PRICING = PricingModel(
+    provider_name="google", cost_per_million_chars=20.0, free_tier_chars_per_month=500_000
+)
+
+# The free tier here (500,000 chars/month) matches DeepL API Free's actual
+# quota. The paid DeepL API Pro tier is subscription-based (a monthly fee
+# plus a fair-use character allowance), not linear pay-per-character, so
+# cost_per_million_chars is only a rough estimate for the guard's budget
+# warning here, not DeepL's real Pro pricing model.
+DEEPL_PRICING = PricingModel(
+    provider_name="deepl", cost_per_million_chars=20.0, free_tier_chars_per_month=500_000
+)
 
 # Hard ceiling on characters translated by one TranslationBudgetGuard
 # instance (i.e. one pipeline run), overridable per instance.
@@ -46,6 +75,13 @@ def _current_month_key() -> str:
     return date.today().strftime("%Y-%m")
 
 
+def _usage_log_key(provider_name: str, month_key: str) -> str:
+    """Build the usage-log dict key 'provider_name:YYYY-MM'. Usage is
+    tracked per provider since each has its own account/quota/pricing.
+    """
+    return f"{provider_name}:{month_key}"
+
+
 def _read_usage_log() -> dict[str, dict[str, int]]:
     """Read the persistent usage log, or {} if it doesn't exist/is invalid."""
     if not _USAGE_LOG_PATH.exists():
@@ -56,35 +92,23 @@ def _read_usage_log() -> dict[str, dict[str, int]]:
         return {}
 
 
-def get_month_usage(month_key: str | None = None) -> int:
-    """Return characters already logged for `month_key` (default: current
-    month), or 0 if nothing is logged for it yet.
+def get_month_usage(provider_name: str, month_key: str | None = None) -> int:
+    """Return characters already logged for `provider_name` in `month_key`
+    (default: current month), or 0 if nothing is logged for it yet.
     """
-    month_key = month_key or _current_month_key()
-    return _read_usage_log().get(month_key, {}).get("characters", 0)
+    key = _usage_log_key(provider_name, month_key or _current_month_key())
+    return _read_usage_log().get(key, {}).get("characters", 0)
 
 
-def log_usage(char_count: int) -> None:
-    """Add `char_count` to the current month's usage total in the
-    persistent usage log (creating the file/month entry if needed).
+def log_usage(provider_name: str, char_count: int) -> None:
+    """Add `char_count` to `provider_name`'s current-month usage total in
+    the persistent usage log (creating the file/entry if needed).
     """
     data = _read_usage_log()
-    month_key = _current_month_key()
-    month_data = data.setdefault(month_key, {"characters": 0})
-    month_data["characters"] += char_count
+    key = _usage_log_key(provider_name, _current_month_key())
+    entry = data.setdefault(key, {"characters": 0})
+    entry["characters"] += char_count
     _USAGE_LOG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-
-def estimate_cost(char_count: int, already_used_this_month: int) -> float:
-    """Estimate the USD cost of translating `char_count` new characters,
-    given `already_used_this_month` characters already logged this month.
-
-    Characters within the remaining free-tier allowance are free; only the
-    excess is billed at COST_PER_MILLION_CHARS per million characters.
-    """
-    remaining_free = max(FREE_TIER_CHARS_PER_MONTH - already_used_this_month, 0)
-    billable_chars = max(char_count - remaining_free, 0)
-    return billable_chars / 1_000_000 * COST_PER_MILLION_CHARS
 
 
 def _default_confirm(message: str) -> bool:
@@ -95,34 +119,55 @@ def _default_confirm(message: str) -> bool:
 
 class TranslationBudgetGuard:
     """Wraps a TranslationProvider to estimate, log, and cap translation
-    costs. Implements the TranslationProvider protocol itself, so it is a
-    drop-in replacement for the provider it wraps.
+    costs, using provider-specific pricing (see PricingModel). Implements
+    the TranslationProvider protocol itself, so it is a drop-in replacement
+    for the provider it wraps.
     """
 
     def __init__(
         self,
         wrapped_provider: TranslationProvider,
+        pricing: PricingModel,
         max_chars_per_run: int = DEFAULT_MAX_CHARS_PER_RUN,
         confirm_callback: Callable[[str], bool] | None = None,
     ) -> None:
         """wrapped_provider performs the actual translation once budget
-        checks pass. confirm_callback receives a summary message and
-        returns whether to proceed; defaults to a console y/n prompt so a
-        later UI can inject its own confirmation dialog instead.
+        checks pass. pricing supplies the cost/free-tier numbers used for
+        estimates and picks which provider's usage-log entry is read/
+        written (see PricingModel.provider_name). confirm_callback receives
+        a summary message and returns whether to proceed; defaults to a
+        console y/n prompt so a later UI can inject its own confirmation
+        dialog instead.
         """
         self._wrapped = wrapped_provider
+        self._pricing = pricing
         self._max_chars_per_run = max_chars_per_run
         self._confirm = confirm_callback or _default_confirm
         self._chars_used_this_run = 0
 
+    def estimate_cost(self, char_count: int, already_used_this_month: int) -> float:
+        """Estimate the USD cost of translating `char_count` new characters
+        under this guard's pricing, given `already_used_this_month`
+        characters already logged this month for this provider.
+
+        Characters within the remaining free-tier allowance are free; only
+        the excess is billed at pricing.cost_per_million_chars per million
+        characters.
+        """
+        remaining_free = max(
+            self._pricing.free_tier_chars_per_month - already_used_this_month, 0
+        )
+        billable_chars = max(char_count - remaining_free, 0)
+        return billable_chars / 1_000_000 * self._pricing.cost_per_million_chars
+
     def estimate_run(self, texts: list[str]) -> tuple[int, float]:
         """Estimate a full run of not-yet-translated `texts`: total
-        character count and its USD cost, given this month's usage so far.
-        Meant to be called before the actual pipeline run to show the user
-        an upfront summary.
+        character count and its USD cost, given this month's usage so far
+        for this guard's provider. Meant to be called before the actual
+        pipeline run to show the user an upfront summary.
         """
         char_count = sum(len(text) for text in texts)
-        cost = estimate_cost(char_count, get_month_usage())
+        cost = self.estimate_cost(char_count, get_month_usage(self._pricing.provider_name))
         return char_count, cost
 
     def confirm_run(self, texts: list[str]) -> bool:
@@ -139,8 +184,8 @@ class TranslationBudgetGuard:
         """Shared budget-check + call + usage-log logic for translate() and
         translate_html(). Raises BudgetExceededError (without invoking
         `call`) if `char_count` more characters would exceed
-        max_chars_per_run; otherwise calls it and logs `char_count` to the
-        persistent usage log on success.
+        max_chars_per_run; otherwise calls it and logs `char_count` to this
+        guard's provider's persistent usage log on success.
         """
         if self._chars_used_this_run + char_count > self._max_chars_per_run:
             raise BudgetExceededError(
@@ -152,7 +197,7 @@ class TranslationBudgetGuard:
         result = call()
 
         self._chars_used_this_run += char_count
-        log_usage(char_count)
+        log_usage(self._pricing.provider_name, char_count)
         return result
 
     def translate(
