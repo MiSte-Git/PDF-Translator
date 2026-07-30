@@ -24,7 +24,7 @@ class TextSpan:
     A line transition worth keeping as a plain line break (e.g. heading ->
     body text with no blank line between them) is encoded as its own
     TextSpan with text=LINE_BREAK_MARKER. For both marker spans,
-    font_name/font_size/color/bold/italic are unused placeholders.
+    font_name/font_size/color/bold/italic/underline are unused placeholders.
     """
     text: str
     font_name: str
@@ -32,6 +32,7 @@ class TextSpan:
     color: tuple[int, int, int]
     bold: bool
     italic: bool
+    underline: bool
 
 @dataclass
 class TextBlock:

@@ -23,6 +23,17 @@ from pipeline.pdf.template import DocumentTemplate, block_overlaps
 _ITALIC_FLAG = 1 << 1
 _BOLD_FLAG = 1 << 4
 
+# PyMuPDF span "char_flags" bitfield (only populated with accurate values
+# when TEXT_COLLECT_STYLES is passed to get_text() - see extract_blocks()):
+# bit 1 = underline. Verified via tests/manual_inspect_redact_and_underline.py
+# against 1526 Virelicon.pdf's underlined title.
+_CHAR_UNDERLINE_FLAG = 1 << 1
+
+# get_text("dict") flags: PyMuPDF's own TEXTFLAGS_DICT default, plus
+# TEXT_COLLECT_STYLES so span["char_flags"] reliably reports underline (see
+# _CHAR_UNDERLINE_FLAG) instead of only the coarser italic/bold styling.
+_EXTRACT_FLAGS = fitz.TEXTFLAGS_DICT | fitz.TEXT_COLLECT_STYLES
+
 # Base-14 Helvetica variants, keyed by (bold, italic), used as insert_textbox's
 # fontname since the block's original embedded font is not available there.
 _FONT_VARIANTS = {
@@ -234,6 +245,7 @@ def _marker_span(marker_text: str) -> TextSpan:
         color=(0, 0, 0),
         bold=False,
         italic=False,
+        underline=False,
     )
 
 
@@ -261,6 +273,7 @@ def _build_text_spans(group: list[dict]) -> list[TextSpan]:
         if line_text.strip():
             for span in raw_spans:
                 flags = span.get("flags", 0)
+                char_flags = span.get("char_flags", 0)
                 text_spans.append(
                     TextSpan(
                         text=span["text"],
@@ -269,6 +282,7 @@ def _build_text_spans(group: list[dict]) -> list[TextSpan]:
                         color=_parse_color(span.get("color", 0)),
                         bold=bool(flags & _BOLD_FLAG),
                         italic=bool(flags & _ITALIC_FLAG),
+                        underline=bool(char_flags & _CHAR_UNDERLINE_FLAG),
                     )
                 )
             next_line = group[index + 1] if index + 1 < len(group) else None
@@ -291,7 +305,7 @@ def spans_to_html(spans: list[TextSpan]) -> str:
     A PARAGRAPH_BREAK_MARKER span starts a new <p>. A LINE_BREAK_MARKER span
     becomes a <br/> within the current <p> (a line break without the extra
     paragraph spacing). Other spans have their text HTML-escaped and wrapped
-    in (nestable) <b>/<i> tags per their bold/italic flags.
+    in (nestable) <u>/<b>/<i> tags per their underline/bold/italic flags.
     """
     paragraphs: list[str] = []
     current: list[str] = []
@@ -304,6 +318,8 @@ def spans_to_html(spans: list[TextSpan]) -> str:
             current.append("<br/>")
             continue
         escaped = html.escape(span.text)
+        if span.underline:
+            escaped = f"<u>{escaped}</u>"
         if span.italic:
             escaped = f"<i>{escaped}</i>"
         if span.bold:
@@ -439,7 +455,7 @@ class PyMuPdfEngine:
         """
         assert self._doc is not None, "Document not opened. Call open() first."
         page = self._doc[page_index]
-        raw = page.get_text("dict")
+        raw = page.get_text("dict", flags=_EXTRACT_FLAGS)
 
         link_bboxes: list[tuple[float, float, float, float]] = []
         for link in page.get_links():
@@ -570,10 +586,18 @@ class PyMuPdfEngine:
         page.replace_image(image.xref, stream=new_image_bytes)
 
     def redact_block(self, block: TextBlock) -> None:
-        """Cover the original text area of a block with a white-filled redaction."""
+        """Cover the original text area of a block with a white-filled redaction.
+
+        Uses block.insert_bbox (see TextBlock) rather than bbox when set:
+        the redaction must not paint over more area than it needs to, or it
+        also whites out neighboring vector elements (e.g. a separator line
+        sitting in bbox's leading-blank-line space) that are meant to stay
+        untouched.
+        """
         assert self._doc is not None, "Document not opened. Call open() first."
         page = self._doc[block.page_index]
-        page.add_redact_annot(fitz.Rect(*block.bbox), fill=(1, 1, 1))
+        rect = fitz.Rect(*(block.insert_bbox if block.insert_bbox is not None else block.bbox))
+        page.add_redact_annot(rect, fill=(1, 1, 1))
         page.apply_redactions()
 
     def insert_text(
