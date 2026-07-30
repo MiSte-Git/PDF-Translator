@@ -100,8 +100,19 @@ class PdfEngine(Protocol):
         """Cover the original text area of a block (e.g. white fill)."""
         ...
 
-    def insert_text(self, block: TextBlock, text: str, font_size: float) -> bool:
+    def insert_text(
+        self,
+        block: TextBlock,
+        text: str,
+        font_size: float,
+        translated_html: str | None = None,
+    ) -> bool:
         """Insert translated text into a block's area.
+
+        `translated_html`, if given, is inserted as-is instead of text
+        built from block.spans/text - the formatting-preserving path for
+        engines that support it (e.g. via HTML). See implementations for
+        exact fallback behavior.
         Returns True if it fit without overflow, False otherwise.
         """
         ...

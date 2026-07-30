@@ -5,6 +5,14 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 
+class TranslationError(Exception):
+    """Raised when a translation provider fails: missing/invalid credentials,
+    an API error, or an unexpected response. Providers should raise this
+    (not a provider-specific exception) so callers can handle failures
+    uniformly regardless of which provider is in use.
+    """
+
+
 @dataclass
 class TranslationResult:
     """Result of a single translation call, independent of the provider used."""

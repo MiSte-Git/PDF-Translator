@@ -20,3 +20,6 @@ Thumbs.db
 tests/fixtures/*.pdf
 
 tests/output/
+
+# Local translation-cost usage log (per-machine, not shared state)
+pipeline/translation/.usage_log.json

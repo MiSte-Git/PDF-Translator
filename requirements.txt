@@ -1,1 +1,3 @@
 PyMuPDF
+keyring
+requests

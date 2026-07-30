@@ -205,7 +205,7 @@ def _build_text_spans(group: list[dict]) -> list[TextSpan]:
     return text_spans
 
 
-def _spans_to_html(spans: list[TextSpan]) -> str:
+def spans_to_html(spans: list[TextSpan]) -> str:
     """Build <p>-separated HTML from a TextBlock's spans for insert_htmlbox().
 
     A PARAGRAPH_BREAK_MARKER span starts a new <p>. A LINE_BREAK_MARKER span
@@ -247,9 +247,17 @@ def _max_rect_y1(page: fitz.Page, template: DocumentTemplate | None) -> float:
 
 
 def _insert_html_text(
-    page: fitz.Page, rect: fitz.Rect, block: TextBlock, max_y1: float
+    page: fitz.Page,
+    rect: fitz.Rect,
+    block: TextBlock,
+    max_y1: float,
+    translated_html: str | None = None,
 ) -> bool:
-    """Insert block.spans as HTML into rect via page.insert_htmlbox().
+    """Insert HTML into rect via page.insert_htmlbox().
+
+    Uses `translated_html` (e.g. from GoogleTranslateProvider.translate_html())
+    directly if given; otherwise builds untranslated HTML from block.spans
+    via spans_to_html() (formatting-only fallback, same content as before).
 
     Applies the same font-shrink -> width-widen -> height-grow fallback as
     PyMuPdfEngine.insert_text()'s plain-text path, reusing the same
@@ -262,7 +270,7 @@ def _insert_html_text(
     final insert is forced at the capped rect so the text is never silently
     dropped.
     """
-    content_html = _spans_to_html(block.spans)
+    content_html = translated_html if translated_html is not None else spans_to_html(block.spans)
 
     def fits(fontsize: float) -> bool:
         css = f"body {{font-family: sans-serif; font-size: {fontsize}pt;}}"
@@ -468,26 +476,33 @@ class PyMuPdfEngine:
         page.add_redact_annot(fitz.Rect(*block.bbox), fill=(1, 1, 1))
         page.apply_redactions()
 
-    def insert_text(self, block: TextBlock, text: str, font_size: float) -> bool:
+    def insert_text(
+        self,
+        block: TextBlock,
+        text: str,
+        font_size: float,
+        translated_html: str | None = None,
+    ) -> bool:
         """Insert translated text into a block's area.
 
-        If block.spans is non-empty, renders it as HTML via
-        page.insert_htmlbox() (see _spans_to_html()/_insert_html_text()) so
-        mixed formatting within one block (e.g. a bold sub-heading followed
-        by normal body text) is preserved - each PARAGRAPH_BREAK_MARKER span
-        starts a new <p>, each LINE_BREAK_MARKER span becomes a <br/> within
-        the current <p> (line break without extra paragraph spacing, e.g.
-        heading directly followed by body text with no blank line between
-        them), others become escaped text in nestable <b>/<i> tags per
-        their bold/italic flags. CSS uses block.font_size as the
-        starting size and a generic "sans-serif" font-family: MuPDF's
+        If block.spans is non-empty, inserts HTML via page.insert_htmlbox()
+        (see spans_to_html()/_insert_html_text()) so mixed formatting within
+        one block (e.g. a bold sub-heading followed by normal body text) is
+        preserved. If `translated_html` is given, it is used as-is (this is
+        how an already-translated, formatting-preserving result - e.g. from
+        GoogleTranslateProvider.translate_html() - gets inserted; `text` is
+        then ignored). Otherwise the HTML is built from block.spans via
+        spans_to_html(): each PARAGRAPH_BREAK_MARKER span starts a new <p>,
+        each LINE_BREAK_MARKER span becomes a <br/> within the current <p>
+        (line break without extra paragraph spacing, e.g. heading directly
+        followed by body text with no blank line between them), others
+        become escaped text in nestable <b>/<i> tags per their bold/italic
+        flags - this is the untranslated, formatting-only fallback (`text`
+        is still ignored in this branch too). CSS uses block.font_size as
+        the starting size and a generic "sans-serif" font-family: MuPDF's
         Story/CSS engine resolves generic families - and their bold/italic
         variants - internally, so unlike the plain-text path below no
-        per-style Base-14 fontname lookup is needed. NOTE: for this step,
-        span.text (the original/placeholder text already on the block) is
-        what gets rendered - the text/font_size parameters are only used by
-        the plain-text fallback path; wiring real per-span translated text
-        through is future work.
+        per-style Base-14 fontname lookup is needed.
 
         If block.spans is empty (backward compatibility), falls back to the
         original path below: text is first normalized, before any fit
@@ -527,7 +542,7 @@ class PyMuPdfEngine:
 
         if block.spans:
             max_y1 = _max_rect_y1(page, self._template)
-            return _insert_html_text(page, rect, block, max_y1)
+            return _insert_html_text(page, rect, block, max_y1, translated_html)
 
         fontname = _FONT_VARIANTS[(block.bold, block.italic)]
         color = tuple(component / 255 for component in block.color)
