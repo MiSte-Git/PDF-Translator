@@ -48,3 +48,13 @@ def get_google_translate_api_key() -> str:
 def get_deepl_api_key() -> str:
     """DeepL API key from the OS keyring."""
     return get_api_key("deepl_api_key")
+
+
+def get_openai_api_key() -> str:
+    """OpenAI API key from the OS keyring."""
+    return get_api_key("openai_api_key")
+
+
+def get_grok_api_key() -> str:
+    """xAI Grok API key from the OS keyring."""
+    return get_api_key("grok_api_key")

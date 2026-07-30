@@ -1,23 +1,33 @@
-"""TranslationProvider implementation backed by the OpenAI Chat Completions API.
+"""TranslationProvider implementation backed by the xAI Grok Chat Completions API.
 
-OpenAI has no dedicated translate endpoint, so translation is done via a
-prompt instructing the model to return only the translated text.
+The Grok API is OpenAI-compatible (POST /v1/chat/completions with the same
+request/response shape) - see GrokProvider docstring for how the endpoint
+and model were verified. As with OpenAIProvider, there is no dedicated
+translate endpoint, so translation is done via a prompt instructing the
+model to return only the translated text.
 """
 from __future__ import annotations
 
 import requests
 
-from pipeline.credentials import get_openai_api_key
+from pipeline.credentials import get_grok_api_key
 from pipeline.translation.base import TranslationError, TranslationResult
 
-_API_URL = "https://api.openai.com/v1/chat/completions"
+_API_URL = "https://api.x.ai/v1/chat/completions"
 
-# gpt-5-mini: per platform.openai.com/docs/pricing, the GPT-5-family "mini"
-# tier ($0.25/1M input, $2.00/1M output tokens) - newer generation and
-# cheaper input than gpt-4.1-mini ($0.40/$1.60), well suited to a
-# straightforward translation prompt. Overridable per instance if a
-# different model is preferred.
-DEFAULT_MODEL = "gpt-5-mini"
+# grok-4.20-0309-non-reasoning: verified directly against the raw pricing
+# data embedded in docs.x.ai/docs/pricing ($1.25/1M input, $2.50/1M output
+# tokens for prompts < 200k tokens). Chosen over:
+#   - grok-4.5 ($2.00/$6.00) / grok-4.3 ($1.25/$2.50, but defaults to "high"
+#     reasoning effort) - pricier or reasoning-oriented, not needed here.
+#   - grok-4.20-0309-reasoning (same price) - the reasoning-enabled sibling
+#     of this model; translation doesn't need chain-of-thought reasoning.
+#   - grok-4.20-multi-agent-0309 - agentic, not a plain text model.
+#   - grok-build-0.1 ($1.00/$2.00, looks cheapest) - its "aliases" field in
+#     the raw pricing data lists "grok-code-fast-1"/"grok-code-fast", i.e.
+#     it IS xAI's coding model under another name, not a general model.
+# Overridable per instance if a different model is preferred.
+DEFAULT_MODEL = "grok-4.20-0309-non-reasoning"
 
 # Low temperature for consistent, literal translations rather than creative
 # rephrasing.
@@ -25,15 +35,18 @@ _TEMPERATURE = 0.1
 
 
 def _extract_error_message(exc: requests.RequestException) -> str:
-    """Pull a human-readable message out of a failed request: OpenAI's JSON
-    error body (HTTP status + its "error.message" field) if present, else
-    str(exc).
+    """Pull a human-readable message out of a failed request: Grok's JSON
+    error body (HTTP status + its "error" field, OpenAI-compatible shape)
+    if present, else str(exc).
     """
     response = getattr(exc, "response", None)
     if response is None:
         return str(exc)
     try:
-        message = response.json().get("error", {}).get("message")
+        payload = response.json()
+        message = payload.get("error")
+        if isinstance(message, dict):
+            message = message.get("message")
     except ValueError:
         message = None
     if message:
@@ -56,10 +69,17 @@ def _strip_code_fence(text: str) -> str:
     return text
 
 
-class OpenAIProvider:
+class GrokProvider:
     """Implements pipeline.translation.base.TranslationProvider via prompted
-    translation through the OpenAI Chat Completions API, authenticated with
-    a plain API key.
+    translation through the xAI Grok Chat Completions API, authenticated
+    with a plain API key.
+
+    Verified directly against docs.x.ai (raw page data, not summaries or
+    training-data assumptions): the API is OpenAI-compatible and exposes a
+    real, documented POST /v1/chat/completions endpoint (base URL
+    https://api.x.ai/v1) alongside its newer /v1/responses endpoint, with
+    the same request/response schema this provider already used for
+    OpenAIProvider. See DEFAULT_MODEL for how the model was chosen.
     """
 
     def __init__(self, model: str = DEFAULT_MODEL) -> None:
@@ -73,7 +93,7 @@ class OpenAIProvider:
     def _get_api_key(self) -> str:
         if self._api_key is None:
             try:
-                self._api_key = get_openai_api_key()
+                self._api_key = get_grok_api_key()
             except RuntimeError as exc:
                 raise TranslationError(str(exc)) from exc
         return self._api_key
@@ -98,7 +118,7 @@ class OpenAIProvider:
             response.raise_for_status()
         except requests.RequestException as exc:
             raise TranslationError(
-                f"OpenAI API request failed: {_extract_error_message(exc)}"
+                f"Grok API request failed: {_extract_error_message(exc)}"
             ) from exc
         content = response.json()["choices"][0]["message"]["content"]
         return _strip_code_fence(content)
@@ -127,7 +147,7 @@ class OpenAIProvider:
             text=translated,
             source_lang=source_lang or "",
             target_lang=target_lang,
-            provider="openai",
+            provider="grok",
         )
 
     def translate_html(
@@ -139,7 +159,7 @@ class OpenAIProvider:
         """Translate `html` into `target_lang` via a Chat Completions
         prompt that instructs the model to preserve all HTML tags exactly,
         in their original relative position, translating only the text
-        between/around them - OpenAI has no native tag-handling mode like
+        between/around them - Grok has no native tag-handling mode like
         DeepL's tag_handling="html" or Google's format="html", so this is
         spelled out explicitly in the prompt instead.
 
@@ -163,5 +183,5 @@ class OpenAIProvider:
             text=translated,
             source_lang=source_lang or "",
             target_lang=target_lang,
-            provider="openai",
+            provider="grok",
         )
