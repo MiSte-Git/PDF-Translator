@@ -4,11 +4,17 @@ from dataclasses import dataclass
 
 @dataclass
 class DocumentTemplate:
-    """Defines reusable header/footer exclusion zones for PDF documents that
-    share a common layout (e.g. recurring report templates)."""
+    """Defines reusable exclusion zones for PDF documents that share a
+    common layout (e.g. recurring report templates).
+
+    header_bbox/footer_bbox apply to every page. first_page_zones applies
+    only to page_index == 0 (e.g. a fixed metadata block that only appears
+    on the first page, like a title/date/issuer block).
+    """
     name: str
     header_bbox: tuple[float, float, float, float] | None
     footer_bbox: tuple[float, float, float, float] | None
+    first_page_zones: list[tuple[float, float, float, float]] | None = None
 
 
 def block_overlaps(

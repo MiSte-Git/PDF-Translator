@@ -1,6 +1,27 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
+
+# Marks a paragraph break within TextBlock.spans (see TextSpan). Chosen to
+# match the "\n\n" convention PyMuPdfEngine.insert_text() already uses to
+# separate paragraphs, so both representations agree on one marker.
+PARAGRAPH_BREAK_MARKER = "\n\n"
+
+@dataclass
+class TextSpan:
+    """One run of uniformly formatted text within a TextBlock.
+
+    A blank/whitespace-only source line - a real paragraph break, not a mere
+    wrap artifact (see PyMuPdfEngine.extract_blocks()) - is encoded as its
+    own TextSpan with text=PARAGRAPH_BREAK_MARKER instead of real content;
+    its font_name/font_size/color/bold/italic are unused placeholders.
+    """
+    text: str
+    font_name: str
+    font_size: float
+    color: tuple[int, int, int]
+    bold: bool
+    italic: bool
 
 @dataclass
 class TextBlock:
@@ -16,6 +37,11 @@ class TextBlock:
     translatable: bool = True
     """Whether this block should be sent to translation. False for headers,
     footers, and hyperlink text, which must remain unchanged."""
+    spans: list[TextSpan] = field(default_factory=list)
+    """Formatting runs (and paragraph-break markers) in reading order. An
+    empty list means uniform formatting; font_name/font_size/color/bold/
+    italic above still hold the first span's formatting either way, for
+    code that doesn't use spans yet."""
 
 @dataclass
 class PageInfo:

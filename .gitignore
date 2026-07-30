@@ -1,4 +1,20 @@
+# Private/lokale Testdatei
 /2182 INDELEGATA.pdf
 
+# Python
 __pycache__/
 *.pyc
+.venv/
+venv/
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test-Fixtures mit ggf. sensiblen/privaten Inhalten
+tests/fixtures/*.pdf
