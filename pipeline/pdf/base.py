@@ -7,14 +7,24 @@ from typing import Protocol, runtime_checkable
 # separate paragraphs, so both representations agree on one marker.
 PARAGRAPH_BREAK_MARKER = "\n\n"
 
+# Marks a plain line break within TextBlock.spans (see TextSpan) - a line
+# transition worth preserving (e.g. a bold heading immediately followed by
+# normal body text, with no blank line between them) but without the extra
+# paragraph spacing of PARAGRAPH_BREAK_MARKER. Deliberately a single "\n" so
+# it is textually distinct from the "\n\n" paragraph marker.
+LINE_BREAK_MARKER = "\n"
+
 @dataclass
 class TextSpan:
     """One run of uniformly formatted text within a TextBlock.
 
     A blank/whitespace-only source line - a real paragraph break, not a mere
     wrap artifact (see PyMuPdfEngine.extract_blocks()) - is encoded as its
-    own TextSpan with text=PARAGRAPH_BREAK_MARKER instead of real content;
-    its font_name/font_size/color/bold/italic are unused placeholders.
+    own TextSpan with text=PARAGRAPH_BREAK_MARKER instead of real content.
+    A line transition worth keeping as a plain line break (e.g. heading ->
+    body text with no blank line between them) is encoded as its own
+    TextSpan with text=LINE_BREAK_MARKER. For both marker spans,
+    font_name/font_size/color/bold/italic are unused placeholders.
     """
     text: str
     font_name: str
@@ -38,8 +48,8 @@ class TextBlock:
     """Whether this block should be sent to translation. False for headers,
     footers, and hyperlink text, which must remain unchanged."""
     spans: list[TextSpan] = field(default_factory=list)
-    """Formatting runs (and paragraph-break markers) in reading order. An
-    empty list means uniform formatting; font_name/font_size/color/bold/
+    """Formatting runs (and paragraph/line-break markers) in reading order.
+    An empty list means uniform formatting; font_name/font_size/color/bold/
     italic above still hold the first span's formatting either way, for
     code that doesn't use spans yet."""
 

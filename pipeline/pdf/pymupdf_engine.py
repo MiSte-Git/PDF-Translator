@@ -10,6 +10,7 @@ import re
 import fitz
 
 from pipeline.pdf.base import (
+    LINE_BREAK_MARKER,
     PARAGRAPH_BREAK_MARKER,
     ImageBlock,
     PageInfo,
@@ -102,20 +103,81 @@ def _parse_color(color_int: int) -> tuple[int, int, int]:
     )
 
 
+def _line_text(raw_spans: list[dict]) -> str:
+    """Concatenate a raw PyMuPDF line's span texts."""
+    return "".join(span["text"] for span in raw_spans)
+
+
+def _line_is_all_bold(raw_spans: list[dict]) -> bool:
+    """Whether every non-whitespace span on a line has the bold flag set.
+
+    Purely whitespace spans (e.g. a trailing space with its own, reset
+    formatting - common right after a styled run) are ignored, so they
+    don't mask an otherwise fully bold heading line.
+    """
+    meaningful = [span for span in raw_spans if span["text"].strip()]
+    return bool(meaningful) and all(
+        bool(span.get("flags", 0) & _BOLD_FLAG) for span in meaningful
+    )
+
+
+def _needs_line_break(current_raw_spans: list[dict], next_raw_spans: list[dict]) -> bool:
+    """Heuristic: keep a plain line break between two adjacent, non-blank
+    lines that have no blank line between them in the source (which would
+    otherwise become a PARAGRAPH_BREAK_MARKER - see _build_text_spans()).
+
+    Triggers on either: (1) the bold status flips completely between the
+    two lines (e.g. a bold heading immediately followed by normal body
+    text), or (2) the current line ends in sentence-final punctuation
+    (. ! ? :) while the next line starts with an uppercase letter.
+    """
+    if _line_is_all_bold(current_raw_spans) != _line_is_all_bold(next_raw_spans):
+        return True
+    current_text = _line_text(current_raw_spans).strip()
+    next_text = _line_text(next_raw_spans).strip()
+    return (
+        bool(current_text)
+        and bool(next_text)
+        and current_text[-1] in ".!?:"
+        and next_text[0].isupper()
+    )
+
+
+def _marker_span(marker_text: str) -> TextSpan:
+    """Build a structural marker TextSpan (paragraph or line break); its
+    formatting fields are unused placeholders.
+    """
+    return TextSpan(
+        text=marker_text,
+        font_name="",
+        font_size=0.0,
+        color=(0, 0, 0),
+        bold=False,
+        italic=False,
+    )
+
+
 def _build_text_spans(group: list[dict]) -> list[TextSpan]:
     """Build the span-level formatting list for one group of lines.
 
     One TextSpan per PyMuPDF span on non-blank lines. A blank/whitespace-only
     line - a real paragraph break, confirmed by
     tests/manual_diagnose_paragraph_gaps.py - becomes a single
-    PARAGRAPH_BREAK_MARKER TextSpan instead. Consecutive or leading/trailing
-    blank lines collapse to at most one marker and never a leading/trailing
-    one, mirroring PyMuPdfEngine.insert_text()'s paragraph regrouping.
+    PARAGRAPH_BREAK_MARKER TextSpan instead (and takes precedence: the line
+    break heuristic below never runs across a blank line). Consecutive or
+    leading/trailing blank lines collapse to at most one marker and never a
+    leading/trailing one, mirroring PyMuPdfEngine.insert_text()'s paragraph
+    regrouping.
+
+    Between two adjacent non-blank lines with no blank line between them,
+    _needs_line_break() decides whether to insert a LINE_BREAK_MARKER
+    TextSpan (e.g. a bold heading directly followed by body text) instead
+    of letting the lines merge freely on reflow.
     """
     text_spans: list[TextSpan] = []
-    for line in group:
+    for index, line in enumerate(group):
         raw_spans = line.get("spans", [])
-        line_text = "".join(span["text"] for span in raw_spans)
+        line_text = _line_text(raw_spans)
         if line_text.strip():
             for span in raw_spans:
                 flags = span.get("flags", 0)
@@ -129,28 +191,27 @@ def _build_text_spans(group: list[dict]) -> list[TextSpan]:
                         italic=bool(flags & _ITALIC_FLAG),
                     )
                 )
+            next_line = group[index + 1] if index + 1 < len(group) else None
+            if next_line is not None:
+                next_raw_spans = next_line.get("spans", [])
+                if _line_text(next_raw_spans).strip() and _needs_line_break(
+                    raw_spans, next_raw_spans
+                ):
+                    text_spans.append(_marker_span(LINE_BREAK_MARKER))
         elif text_spans and text_spans[-1].text != PARAGRAPH_BREAK_MARKER:
-            text_spans.append(
-                TextSpan(
-                    text=PARAGRAPH_BREAK_MARKER,
-                    font_name="",
-                    font_size=0.0,
-                    color=(0, 0, 0),
-                    bold=False,
-                    italic=False,
-                )
-            )
-    if text_spans and text_spans[-1].text == PARAGRAPH_BREAK_MARKER:
-        text_spans.pop()  # drop a trailing marker (blank line at group end)
+            text_spans.append(_marker_span(PARAGRAPH_BREAK_MARKER))
+    if text_spans and text_spans[-1].text in (PARAGRAPH_BREAK_MARKER, LINE_BREAK_MARKER):
+        text_spans.pop()  # drop a trailing marker (group/blank-line end)
     return text_spans
 
 
 def _spans_to_html(spans: list[TextSpan]) -> str:
     """Build <p>-separated HTML from a TextBlock's spans for insert_htmlbox().
 
-    A PARAGRAPH_BREAK_MARKER span starts a new <p>. Other spans have their
-    text HTML-escaped and wrapped in (nestable) <b>/<i> tags per their
-    bold/italic flags.
+    A PARAGRAPH_BREAK_MARKER span starts a new <p>. A LINE_BREAK_MARKER span
+    becomes a <br/> within the current <p> (a line break without the extra
+    paragraph spacing). Other spans have their text HTML-escaped and wrapped
+    in (nestable) <b>/<i> tags per their bold/italic flags.
     """
     paragraphs: list[str] = []
     current: list[str] = []
@@ -158,6 +219,9 @@ def _spans_to_html(spans: list[TextSpan]) -> str:
         if span.text == PARAGRAPH_BREAK_MARKER:
             paragraphs.append("".join(current))
             current = []
+            continue
+        if span.text == LINE_BREAK_MARKER:
+            current.append("<br/>")
             continue
         escaped = html.escape(span.text)
         if span.italic:
@@ -272,8 +336,11 @@ class PyMuPdfEngine:
         (on page_index == 0 only) the template's first_page_zones. Blocks
         with only whitespace text are skipped. Each block's spans list is
         also populated (see _build_text_spans): one TextSpan per PyMuPDF
-        span on real text lines, plus a PARAGRAPH_BREAK_MARKER TextSpan for
-        each blank/whitespace-only source line (a genuine paragraph break).
+        span on real text lines, a PARAGRAPH_BREAK_MARKER TextSpan for each
+        blank/whitespace-only source line (a genuine paragraph break), and a
+        LINE_BREAK_MARKER TextSpan for a heading-like line transition worth
+        keeping as a plain line break even without a blank line (see
+        _needs_line_break()).
         """
         assert self._doc is not None, "Document not opened. Call open() first."
         page = self._doc[page_index]
@@ -408,8 +475,11 @@ class PyMuPdfEngine:
         page.insert_htmlbox() (see _spans_to_html()/_insert_html_text()) so
         mixed formatting within one block (e.g. a bold sub-heading followed
         by normal body text) is preserved - each PARAGRAPH_BREAK_MARKER span
-        starts a new <p>, others become escaped text in nestable <b>/<i>
-        tags per their bold/italic flags. CSS uses block.font_size as the
+        starts a new <p>, each LINE_BREAK_MARKER span becomes a <br/> within
+        the current <p> (line break without extra paragraph spacing, e.g.
+        heading directly followed by body text with no blank line between
+        them), others become escaped text in nestable <b>/<i> tags per
+        their bold/italic flags. CSS uses block.font_size as the
         starting size and a generic "sans-serif" font-family: MuPDF's
         Story/CSS engine resolves generic families - and their bold/italic
         variants - internally, so unlike the plain-text path below no
