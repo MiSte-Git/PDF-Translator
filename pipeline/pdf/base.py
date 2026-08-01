@@ -62,6 +62,11 @@ class TextBlock:
     bbox as-is would place text too high, in space the blank lines used to
     occupy. insert_bbox tightens y0 to the first non-blank source line
     while leaving y1/x0/x1 unchanged."""
+    highlighted: bool = False
+    """Whether this block's lines sit inside a quote-highlight rectangle
+    (see PyMuPdfEngine._get_highlight_rects()/_split_by_highlight()) -
+    purely informational, for later styling of the translated output. It
+    does not affect translatable or how the block is translated."""
 
 @dataclass
 class PageInfo:
