@@ -5,6 +5,7 @@ import requests
 
 from pipeline.credentials import get_google_translate_api_key
 from pipeline.translation.base import TranslationError, TranslationResult
+from pipeline.translation.protected_terms import protect_terms, restore_terms
 
 _API_URL = "https://translation.googleapis.com/language/translate/v2"
 
@@ -41,6 +42,14 @@ class GoogleTranslateProvider:
     def __init__(self) -> None:
         """Defer API-key lookup until the first translate() call."""
         self._api_key: str | None = None
+
+    @property
+    def model_name(self) -> str:
+        """No selectable model exists for this provider (fixed REST
+        endpoint) - returns a fixed API identifier instead, for display in
+        tools/compare_providers.py.
+        """
+        return "Google Cloud Translation API v2"
 
     def _get_api_key(self) -> str:
         if self._api_key is None:
@@ -92,6 +101,7 @@ class GoogleTranslateProvider:
         html: str,
         target_lang: str,
         source_lang: str | None = None,
+        protected_terms: list[str] | None = None,
     ) -> TranslationResult:
         """Translate `html` into `target_lang` via the Cloud Translation API
         v2 REST endpoint with format="html", preserving markup: Google
@@ -101,17 +111,30 @@ class GoogleTranslateProvider:
         complex/nested markup). `source_lang` is omitted from the request
         body when None, letting Google auto-detect it.
 
+        If `protected_terms` is given, each term is replaced with a
+        placeholder (see pipeline.translation.protected_terms) before the
+        API call and restored in the result, so those terms pass through
+        translation unchanged.
+
         Not part of the TranslationProvider protocol (base.py): HTML-aware
         translation isn't available from every provider, so this is a
         Google-specific extra method rather than a protocol requirement.
         """
+        placeholder_mapping: dict[str, str] = {}
+        if protected_terms:
+            html, placeholder_mapping = protect_terms(html, protected_terms)
+
         body: dict[str, str] = {"q": html, "target": target_lang, "format": "html"}
         if source_lang is not None:
             body["source"] = source_lang
         translation = self._call_api(body)
 
+        translated_text = translation["translatedText"]
+        if placeholder_mapping:
+            translated_text = restore_terms(translated_text, placeholder_mapping)
+
         return TranslationResult(
-            text=translation["translatedText"],
+            text=translated_text,
             source_lang=source_lang or translation.get("detectedSourceLanguage") or "",
             target_lang=target_lang,
             provider="google",
