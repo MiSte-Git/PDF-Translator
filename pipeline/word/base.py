@@ -2,11 +2,28 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
+# Marks a <w:br/> line break found within a <w:r> as its own WordRun (see
+# DocxEngine._build_runs() in pipeline/word/docx_engine.py) - the Word
+# analog of PARAGRAPH_BREAK_MARKER/LINE_BREAK_MARKER in pipeline/pdf/base.py
+# for the same underlying problem (a single paragraph/run bundling several
+# visual line transitions, e.g. a title immediately followed by body text -
+# see WordParagraph). A dedicated §§...§§-style placeholder rather than a
+# literal "<br/>" or "\n": pipeline/word/html_bridge.py sends this through
+# translate_html() verbatim, and unlike an HTML tag, a translation model
+# instructed to "preserve HTML tags" can still reformat/drop "<br/>" - a
+# placeholder survives such a prompt far more reliably, exactly like
+# protect_terms()'s §§N§§ placeholders (pipeline/translation/protected_terms.py).
+BREAK_MARKER = "§§BR§§"
+
 
 @dataclass
 class WordRun:
-    """One run of text within a WordParagraph (maps to one <w:r>, or one
-    <w:r> nested inside a <w:hyperlink> - see WordEngine.get_paragraphs()).
+    """One run of text within a WordParagraph. Usually maps 1:1 to one
+    <w:r> (or one <w:r> nested inside a <w:hyperlink> - see
+    WordEngine.get_paragraphs()), except a <w:r> containing one or more
+    <w:br/> line breaks, which becomes several WordRuns: the text before/
+    after each break as its own WordRun, and each break itself as its own
+    WordRun with text == BREAK_MARKER (see DocxEngine._build_runs()).
     """
     text: str
     translatable: bool = True
@@ -22,6 +39,12 @@ class WordRun:
     """The hyperlink's resolved target (URL, mailto:, ...), looked up via
     the hyperlink's r:id in word/_rels/document.xml.rels. None unless
     is_hyperlink is True."""
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+    """Formatting read from the run's <w:rPr> (OOXML toggle-property
+    semantics - see DocxEngine._run_properties()). Meaningless/False on a
+    BREAK_MARKER or image run."""
 
 
 @dataclass
