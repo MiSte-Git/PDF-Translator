@@ -1,3 +1,4 @@
 PyMuPDF
 keyring
 requests
+python-docx

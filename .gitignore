@@ -21,6 +21,12 @@ Thumbs.db
 tests/fixtures/*.pdf
 
 tests/output/
+/output/
+
+# Generated translation/comparison outputs (manual scripts, tools/compare_providers.py)
+*_DE_*.pdf
+*_vergleich.md
+*_vergleich.docx
 
 # Local translation-cost usage log (per-machine, not shared state)
 pipeline/translation/.usage_log.json
