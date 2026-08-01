@@ -2,3 +2,4 @@ PyMuPDF
 keyring
 requests
 python-docx
+lxml
