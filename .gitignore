@@ -22,6 +22,7 @@ Thumbs.db
 tests/fixtures/*.pdf
 
 tests/output/
+tools/output/
 /output/
 
 # Generated translation/comparison outputs (manual scripts, tools/compare_providers.py)
