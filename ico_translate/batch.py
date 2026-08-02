@@ -23,6 +23,7 @@ from pipeline.translation.base import TranslationProvider
 from pipeline.translation.cost_control import TranslationBudgetGuard, get_month_usage
 from pipeline.translation.protected_terms import derive_protected_term
 from pipeline.word.docx_engine import DocxEngine
+from pipeline.word.duplicate_analysis import read_ico_name
 from pipeline.word.html_bridge import paragraph_to_html
 from pipeline.word.translate_document import TranslationStats, translate_document
 
@@ -34,6 +35,16 @@ from ico_translate.manifest import load_manifest
 # after a run, never something a failure to write should itself escalate.
 BATCH_ERROR_LOG_PATH = (
     Path(__file__).resolve().parent.parent / "tests" / "output" / "ico_batch_errors.jsonl"
+)
+
+# tests/output/ico_protected_term_fallbacks.jsonl - one JSON object per
+# document where read_ico_name() found no "QSI ICO:" header field, so
+# resolve_ico_name() fell back to guessing from the filename instead. Same
+# append-only JSONL convention as BATCH_ERROR_LOG_PATH - this isn't a
+# document failure (translation still proceeds), but a weaker-than-usual
+# protected term must never happen silently.
+PROTECTED_TERM_FALLBACK_LOG_PATH = (
+    Path(__file__).resolve().parent.parent / "tests" / "output" / "ico_protected_term_fallbacks.jsonl"
 )
 
 
@@ -78,6 +89,11 @@ class BatchResult:
     """(number, filename, "ExceptionType: message") for every document
     that failed to open/translate/save - see BATCH_ERROR_LOG_PATH for the
     full traceback."""
+    protected_term_fallbacks: int = 0
+    """How many successfully-translated documents had no "QSI ICO:"
+    header field, so resolve_ico_name() fell back to guessing a protected
+    term from the filename instead - see PROTECTED_TERM_FALLBACK_LOG_PATH
+    for which ones."""
 
 
 def select_documents(
@@ -140,14 +156,53 @@ def collect_translatable_texts(source_folder: Path, documents: list[BatchDocumen
 def _output_filename(number: str, ico_name: str, target_lang: str) -> str:
     """"<Nummer> <ICO-Name>_<Zielsprache-Code>.docx" (anforderungen_word_pfad.md
     requirement 8's naming convention), e.g. "2210 INERTIARA_DE.docx".
-    `ico_name` comes straight from derive_protected_term() on the SOURCE
-    filename (see run_batch()) - for the small minority of approved
-    filenames that carry a revision suffix (e.g. "1854 MNEMOSYNE (LS).docx",
-    "1746 NOOVIAN Updated Declas.docx"), that suffix rides along into both
-    the protected term and this output filename unchanged. Known,
-    accepted for now - see run_batch()'s docstring.
+    `ico_name` is whatever resolve_ico_name() resolved for this document -
+    normally the real name read from the document's own header, so a
+    source filename's revision annotation ("(LS)", "Updated Declas", ...)
+    no longer leaks into the output filename either.
     """
     return f"{number} {ico_name}_{target_lang.upper()}.docx"
+
+
+def resolve_ico_name(engine: DocxEngine, document: BatchDocument) -> tuple[str, bool]:
+    """The protected term / output-filename ICO name for `document`:
+    read_ico_name() on the ALREADY-OPEN `engine` - the real name from the
+    document's own "QSI ICO:" header field - used both as the term
+    protect_terms() must never translate and as the output filename's
+    ICO-name component (see _output_filename()).
+
+    Falls back to derive_protected_term() on the SOURCE FILENAME only if
+    read_ico_name() finds no header field at all (missing/differently
+    shaped header) - still better than no protection whatsoever, but
+    every fallback use is logged to PROTECTED_TERM_FALLBACK_LOG_PATH so a
+    document silently running with a weaker protected term is never
+    invisible. Returns (name, used_fallback) so run_batch() can tally how
+    often the fallback fired.
+    """
+    ico_name = read_ico_name(engine)
+    if ico_name:
+        return ico_name, False
+
+    fallback = derive_protected_term(document.filename)
+    _log_protected_term_fallback(document.number, document.filename, fallback)
+    return fallback, True
+
+
+def _log_protected_term_fallback(number: str, filename: str, fallback_term: str) -> None:
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "number": number,
+        "filename": filename,
+        "reason": "read_ico_name() fand kein 'QSI ICO:'-Headerfeld - Fallback auf "
+        "derive_protected_term(Dateiname), schwaecherer Schutz moeglich",
+        "fallback_protected_term": fallback_term,
+    }
+    try:
+        PROTECTED_TERM_FALLBACK_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(PROTECTED_TERM_FALLBACK_LOG_PATH, "a", encoding="utf-8") as log_file:
+            log_file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 
 def _log_batch_error(number: str, filename: str, exc: Exception) -> None:
@@ -205,18 +260,15 @@ def run_batch(
     translate_document()'s own per-PARAGRAPH resilience one level up, at
     the whole-document level.
 
-    `protected_terms` per document is derived via
-    derive_protected_term() on the SOURCE filename (not
-    pipeline/word/source_selection.py's document_ico_name(), which
-    additionally strips a "(LS)" suffix) - as directed for this task. For
-    the small minority of approved filenames that carry a revision suffix
-    (MNEMOSYNE's "(LS)", or "Updated Declas"/"updated"/"Follow Up" on a
-    few explicitly-picked files), this means the derived term won't
-    exactly match the plain ICO name as it actually appears in the
-    document body, so protect_terms() won't find/protect it there. A
-    known, accepted limitation of following this instruction literally -
-    flagged here rather than silently "fixed" by swapping in a different
-    name-derivation function.
+    The protected term per document comes from resolve_ico_name(): the
+    real ICO name read out of the document's OWN header ("QSI ICO: X"),
+    not guessed from the filename - so a source filename's revision
+    annotation (e.g. "1854 MNEMOSYNE (LS).docx", "1746 NOOVIAN Updated
+    Declas.docx") no longer leaks into the term protect_terms() searches
+    the body for, where only the plain "MNEMOSYNE"/"NOOVIAN" ever
+    actually appears. See resolve_ico_name()'s docstring for the
+    filename-based fallback used on the rarer document with no parseable
+    header at all.
     """
     result = BatchResult()
 
@@ -239,12 +291,12 @@ def run_batch(
 
     for document in documents:
         source_path = source_folder / document.filename
-        ico_name = derive_protected_term(document.filename)
-        output_path = output_dir / _output_filename(document.number, ico_name, target_lang)
 
         try:
             engine = DocxEngine()
             engine.open(str(source_path))
+            ico_name, used_fallback = resolve_ico_name(engine, document)
+            output_path = output_dir / _output_filename(document.number, ico_name, target_lang)
             stats: TranslationStats = translate_document(
                 engine, budget_guard, [ico_name], target_lang=target_lang, source_lang=source_lang
             )
@@ -261,6 +313,8 @@ def run_batch(
         result.paragraphs_skipped += stats.skipped
         result.paragraphs_failed += stats.failed
         result.output_paths.append(output_path)
+        if used_fallback:
+            result.protected_term_fallbacks += 1
 
     result.elapsed_seconds = time.monotonic() - start_time
     result.actual_cost = budget_guard.estimate_cost(result.total_chars_sent, month_usage_before)

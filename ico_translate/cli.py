@@ -32,6 +32,7 @@ from pipeline.translation.openai_provider import OpenAIProvider
 
 from ico_translate.batch import (
     BATCH_ERROR_LOG_PATH,
+    PROTECTED_TERM_FALLBACK_LOG_PATH,
     BatchResult,
     collect_translatable_texts,
     run_batch,
@@ -186,6 +187,11 @@ def _print_translate_report(result: BatchResult) -> None:
     print(f"Gesendete Zeichen: {result.total_chars_sent:,}")
     print(f"Gesamtlaufzeit: {result.elapsed_seconds:.1f}s")
     print(f"Gesamtkosten laut BudgetGuard-Logging: ${result.actual_cost:.4f}")
+    if result.protected_term_fallbacks:
+        print(
+            f"Schutzbegriff-Fallback (kein 'QSI ICO:'-Header gefunden): "
+            f"{result.protected_term_fallbacks}, siehe auch {PROTECTED_TERM_FALLBACK_LOG_PATH}"
+        )
     if result.errors:
         print(f"\nFehlgeschlagene Dokumente ({len(result.errors)}), siehe auch {BATCH_ERROR_LOG_PATH}:")
         for number, filename, message in result.errors:

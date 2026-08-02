@@ -108,6 +108,31 @@ def _find_developer_and_ico(header_texts: list[str]) -> tuple[str | None, str | 
     return None, None
 
 
+def read_ico_name(engine: DocxEngine) -> str | None:
+    """The ICO name genuinely read out of `engine`'s ALREADY-OPEN document
+    header (the "QSI ICO: X" field - see _find_developer_and_ico()) - NOT
+    to be confused with pipeline.word.source_selection.document_ico_name(),
+    a similarly-named but purely filename-string function that never opens
+    the document at all (it just strips the extension/leading number/
+    trailing "(LS)" off a FILENAME). This is the reliable source for
+    anything that must survive translation unchanged (see
+    ico_translate/batch.py's protected-term derivation): a document's
+    approved filename can carry an unrelated revision annotation ("(LS)",
+    "Updated Declas", "Follow Up", ...) that never appears in the body
+    text itself and would make protect_terms() silently fail to match,
+    while the header's "QSI ICO:" value is exactly the string that
+    actually needs protecting.
+
+    Returns None if the header has no "Developer:"/"QSI ICO:" paragraph
+    at all (see _find_developer_and_ico()) - callers must pick their own
+    fallback and should never treat None as "no term to protect".
+    """
+    header_footer = engine.get_header_footer_paragraphs()
+    header_paragraphs = header_footer[: len(engine._header_paragraph_elements)]
+    _, ico_name = _find_developer_and_ico(_paragraph_texts(header_paragraphs))
+    return ico_name
+
+
 def _analyze_one(path: Path) -> tuple[CandidateInfo, str]:
     """Open `path` once (DocxEngine - no separate parsing) and extract
     both the CandidateInfo metadata and its full translatable body text
