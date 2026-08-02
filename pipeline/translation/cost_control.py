@@ -47,6 +47,19 @@ DEEPL_PRICING = PricingModel(
     provider_name="deepl", cost_per_million_chars=20.0, free_tier_chars_per_month=500_000
 )
 
+# OpenAI/Grok are billed per-token through a Chat Completions API, not
+# per-character like Google/DeepL's dedicated translate endpoints - there
+# is no exact per-character price to quote. These two are a deliberately
+# rough per-character approximation (no free tier), good enough for the
+# same upfront budget-warning purpose as the other two, not for precise
+# billing reconciliation.
+OPENAI_PRICING = PricingModel(
+    provider_name="openai", cost_per_million_chars=15.0, free_tier_chars_per_month=0
+)
+GROK_PRICING = PricingModel(
+    provider_name="grok", cost_per_million_chars=15.0, free_tier_chars_per_month=0
+)
+
 # Hard ceiling on characters translated by one TranslationBudgetGuard
 # instance (i.e. one pipeline run), overridable per instance.
 DEFAULT_MAX_CHARS_PER_RUN = 200_000
@@ -144,6 +157,17 @@ class TranslationBudgetGuard:
         self._max_chars_per_run = max_chars_per_run
         self._confirm = confirm_callback or _default_confirm
         self._chars_used_this_run = 0
+
+    @property
+    def provider_name(self) -> str:
+        """This guard's pricing.provider_name - the same key its usage log
+        entries are stored/read under (see log_usage()/get_month_usage()).
+        Exposed so a caller that only holds the guard (e.g.
+        ico_translate/batch.py, computing a whole batch's actual cost from
+        its real accumulated chars_sent) doesn't need its own reference to
+        the PricingModel just to look up this string.
+        """
+        return self._pricing.provider_name
 
     def estimate_cost(self, char_count: int, already_used_this_month: int) -> float:
         """Estimate the USD cost of translating `char_count` new characters
