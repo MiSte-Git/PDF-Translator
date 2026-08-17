@@ -339,21 +339,54 @@ def _estimate_line_height(block: TextBlock) -> float:
     return max(block.font_size * _LINE_HEIGHT_FALLBACK_RATIO, 1.0)
 
 
-def _next_block_y0(block: TextBlock, page_blocks: list[TextBlock]) -> float | None:
+def _next_block_y0(
+    block: TextBlock, page_blocks: list[TextBlock], x_range: tuple[float, float] | None = None
+) -> float | None:
     """y0 of the nearest OTHER block in `page_blocks` that sits below
-    `block` (bbox y0 greater) AND shares roughly the same horizontal
-    column (its bbox x-range overlaps `block`'s) - the boundary ANY
-    block's height growth (see
+    `block` (bbox y0 at or past `block`'s own bbox y1 - see below) AND
+    shares roughly the same horizontal column (its bbox x-range overlaps
+    `x_range`, or `block`'s own bbox x-range if `x_range` is None) - the
+    boundary ANY block's height growth (see
     PyMuPdfEngine._collision_aware_max_y1()) must not cross, so it never
     grows into a different block's row. Returns None if there is no such
     block (e.g. `block` is the last one in its column on the page).
+
+    `x_range` lets a caller widen the column beyond `block`'s own narrow
+    bbox - needed for a highlighted block (see
+    PyMuPdfEngine._collision_aware_max_y1()), whose actual redaction/
+    redraw width (see redact_block()/_grow_highlight_if_needed()) is the
+    WIDE associated-highlight-rectangle extent, not just its own text's
+    bbox: a neighboring block sitting outside the highlighted block's
+    narrow bbox but inside that wide highlight column was otherwise
+    invisible to this collision check even though the highlighted block's
+    own redraw could - and, confirmed by direct reproduction, did -
+    paint over it.
+
+    Compares candidates against `block`'s own bbox y1 (bottom), not y0
+    (top): two DIFFERENT extracted blocks can legitimately share the same
+    visual text line - e.g. a run of plain text immediately followed by a
+    differently-styled run on the same line, which PyMuPDF already
+    reports as separate raw blocks (confirmed via direct reproduction
+    against "1526 VIRELICON.pdf": a line ending "...in" was immediately
+    followed on the same row by a separately-styled "2 ways:" run). Such a
+    sibling's own y0 sits INSIDE the current block's y-span, not below it.
+    The old y0-vs-y0 comparison picked up that sibling as if it were the
+    next row down, capping max_y1 below the current block's own original
+    bottom edge - shrinking its usable area rather than growing it, which
+    then also left its quote-highlight background never redrawn (see
+    PyMuPdfEngine._grow_highlight_if_needed()) because the actually-needed
+    height never even reached the point that would have triggered a
+    redraw. Comparing against y1 instead correctly treats a same-row
+    sibling as not "below" at all.
     """
     bx0, by0, bx1, by1 = block.bbox
+    if x_range is not None:
+        bx0, bx1 = x_range
     below = [
         other
         for other in page_blocks
         if other is not block
-        and other.bbox[1] > by0
+        and other.bbox[1] >= by1
         and other.bbox[0] < bx1
         and other.bbox[2] > bx0
     ]
@@ -419,6 +452,97 @@ def _split_by_highlight(
 
     raw_statuses = [
         _line_is_highlighted(fitz.Rect(*line["bbox"]), highlight_rects) for line in group
+    ]
+    is_blank = [not _line_text(line.get("spans", [])).strip() for line in group]
+
+    merged_statuses = list(raw_statuses)
+    for i in range(len(group)):
+        if not is_blank[i]:
+            continue
+        prev_blank = i > 0 and is_blank[i - 1]
+        next_blank = i + 1 < len(group) and is_blank[i + 1]
+        if prev_blank or next_blank or i == 0 or i == len(group) - 1:
+            continue  # part of a multi-blank run, or has no both-side neighbor to compare
+        if raw_statuses[i - 1] == raw_statuses[i + 1]:
+            merged_statuses[i] = raw_statuses[i - 1]
+
+    runs: list[tuple[list[dict], bool]] = []
+    current_lines: list[dict] = []
+    current_status: bool | None = None
+    for line, status in zip(group, merged_statuses):
+        if current_status is not None and status != current_status:
+            runs.append((current_lines, current_status))
+            current_lines = []
+        current_lines.append(line)
+        current_status = status
+    if current_lines:
+        runs.append((current_lines, bool(current_status)))
+    return runs
+
+
+# Minimum overlap (pt), required on BOTH axes, between a line's bbox and
+# a link annotation's rect for that line to count as "IS the link" - see
+# _line_overlaps_link(). Without this, a coincidental sub-pixel/rounding-
+# level sliver between an unrelated line and a neighboring link rectangle
+# would wrongly count as a real overlap - confirmed in
+# "1526 VIRELICON.pdf": a line starting at y0=194.90 sat a mere 0.02pt
+# below an unrelated link rectangle ending at y1=194.92, which used to be
+# enough (block_overlaps() has no tolerance) to mark that entire line's
+# block non-translatable. Same category of false positive
+# _HIGHLIGHT_LINE_TOLERANCE already guards against for quote-highlight
+# rectangles.
+_LINK_OVERLAP_TOLERANCE = 1.0
+
+
+def _line_overlaps_link(
+    line_bbox: fitz.Rect, link_bboxes: list[tuple[float, float, float, float]]
+) -> bool:
+    """Whether `line_bbox` meaningfully overlaps at least one of
+    `link_bboxes` (from page.get_links(), collected once per page in
+    extract_blocks()) by more than _LINK_OVERLAP_TOLERANCE on BOTH axes -
+    the per-LINE counterpart of the whole-BLOCK check extract_blocks()
+    used to run directly against a block's union bbox (see
+    _split_by_link()'s docstring for why that was wrong). A 2D check
+    (unlike _line_is_highlighted()'s vertical-only one) since a link's
+    rect, unlike a highlight rectangle, does not necessarily span a
+    line's full width.
+    """
+    for x0, y0, x1, y1 in link_bboxes:
+        dx = min(line_bbox.x1, x1) - max(line_bbox.x0, x0)
+        dy = min(line_bbox.y1, y1) - max(line_bbox.y0, y0)
+        if dx > _LINK_OVERLAP_TOLERANCE and dy > _LINK_OVERLAP_TOLERANCE:
+            return True
+    return False
+
+
+def _split_by_link(
+    group: list[dict], link_bboxes: list[tuple[float, float, float, float]]
+) -> list[tuple[list[dict], bool]]:
+    """Split `group`'s lines into consecutive runs of consistent
+    link/not-link overlap status (see _line_overlaps_link()), returned as
+    (lines, is_link) pairs in order. Mirrors _split_by_highlight() exactly
+    (same blank-line-merging rule and reasoning) but for link annotations
+    instead of quote-highlight rectangles.
+
+    Added because extract_blocks() used to mark an entire block
+    non-translatable as soon as ANY of its lines overlapped a link
+    annotation, even when the link only actually covered a single line
+    inside an otherwise ordinary, much longer prose paragraph - confirmed
+    by direct reproduction against "1526 VIRELICON.pdf": a live user run
+    had a whole 6-line paragraph on page 2 skipped entirely because just
+    one line inside it cited a Telegram post via an inline link, and only
+    "a small part was carried over correctly" (a neighboring line
+    coincidentally NOT overlapping any link, per _line_overlaps_link()'s
+    tolerance note). See Backlog.md.
+
+    Returns the whole group as a single, non-link run if there are no
+    link_bboxes at all (the common case for most pages).
+    """
+    if not link_bboxes:
+        return [(group, False)]
+
+    raw_statuses = [
+        _line_overlaps_link(fitz.Rect(*line["bbox"]), link_bboxes) for line in group
     ]
     is_blank = [not _line_text(line.get("spans", [])).strip() for line in group]
 
@@ -598,6 +722,58 @@ def spans_to_html(spans: list[TextSpan]) -> str:
     return "".join(f"<p>{paragraph}</p>" for paragraph in paragraphs if paragraph.strip())
 
 
+def _regroup_paragraphs(text: str) -> list[str]:
+    """Join each paragraph's wrapped lines into one reflowable line, but
+    keep paragraphs separate wherever the source had a blank line - shared
+    by PyMuPdfEngine._insert_plain_text() (rejoins with "\\n\\n" for
+    insert_textbox()) and _plain_text_to_html() (wraps each in <p>, for
+    the non-Latin-script fallback - see insert_text()'s docstring).
+    """
+    paragraphs: list[str] = []
+    current_lines: list[str] = []
+    for line in text.split("\n"):
+        if line.strip():
+            current_lines.append(line.strip())
+        elif current_lines:
+            paragraphs.append(" ".join(current_lines))
+            current_lines = []
+    if current_lines:
+        paragraphs.append(" ".join(current_lines))
+    return [re.sub(r" {2,}", " ", paragraph) for paragraph in paragraphs]
+
+
+def _plain_text_needs_unicode_fallback(text: str) -> bool:
+    """Whether `text` contains a character the Base-14 Helvetica variants
+    in _FONT_VARIANTS (used by PyMuPdfEngine._insert_plain_text() via
+    page.insert_textbox()) cannot represent.
+
+    Base-14 fonts are fixed to WinAnsiEncoding, which covers ASCII plus
+    Western-European accented Latin characters (e.g. "café", "Übung") but
+    nothing outside the Latin-1 range - confirmed by direct reproduction:
+    Cyrillic/Greek/CJK text inserted via insert_textbox(fontname="helv")
+    silently comes out as literal "?" characters (mojibake), with
+    insert_text() still reporting success (no exception, returns True) -
+    see tests/test_pdf_glyph_preservation.py. `ord(ch) > 255` is a
+    conservative (not 100% precise - WinAnsiEncoding has a few gaps even
+    within 0-255) but safe heuristic: it only ever routes MORE text
+    through the known-good HTML/Story fallback (see
+    _plain_text_to_html()/insert_text()), never less.
+    """
+    return any(ord(ch) > 255 for ch in text)
+
+
+def _plain_text_to_html(text: str) -> str:
+    """Build the same shape of <p>-wrapped, HTML-escaped output as
+    spans_to_html() would for equivalent plain text, for insert_text()'s
+    non-Latin-script fallback (see _plain_text_needs_unicode_fallback()).
+    Reuses _regroup_paragraphs() so paragraph/line-wrap handling matches
+    _insert_plain_text() exactly - only the destination (HTML vs plain
+    insert_textbox()) differs.
+    """
+    paragraphs = _regroup_paragraphs(text)
+    return "".join(f"<p>{html.escape(paragraph)}</p>" for paragraph in paragraphs if paragraph.strip())
+
+
 def _max_rect_y1(page: fitz.Page, template: DocumentTemplate | None) -> float:
     """Height-fallback ceiling for rect.y1.
 
@@ -736,6 +912,7 @@ class PyMuPdfEngine:
         self._doc: fitz.Document | None = None
         self._highlight_rects_cache: dict[int, list[fitz.Rect]] = {}
         self._page_blocks_cache: dict[int, list[TextBlock]] = {}
+        self._original_links: dict[int, list[dict]] = {}
 
     def _get_page_highlight_rects(self, page: fitz.Page, page_index: int) -> list[fitz.Rect]:
         """Cached per-page _get_highlight_rects() lookup, shared between
@@ -759,17 +936,31 @@ class PyMuPdfEngine:
         ORIGINAL (pre-mutation) full-page block list cached by
         extract_blocks() in self._page_blocks_cache - so ANY block's
         height growth (see try_grow() in _insert_html_text()/
-        _insert_plain_text()) never draws (or, for a highlighted block,
-        its redrawn background - see _grow_highlight_if_needed() - never
-        draws) into a neighboring block's row. Applies to every block,
-        not just highlighted ones (see _insert_html_text()'s docstring for
-        why the growth-before-shrink order this feeds into used to be
-        highlighted-only and no longer is). Relies on
-        extract_blocks(page_index) having already been called once for
-        this page (always true in practice: callers must call it to
-        obtain the TextBlock passed to insert_text()/redact_block() in the
-        first place) - falls back to just the footer/page-edge cap if the
-        cache is somehow empty.
+        _insert_plain_text()) never draws into a neighboring block's row.
+        Applies to every block, not just highlighted ones (see
+        _insert_html_text()'s docstring for why the growth-before-shrink
+        order this feeds into used to be highlighted-only and no longer
+        is). Relies on extract_blocks(page_index) having already been
+        called once for this page (always true in practice: callers must
+        call it to obtain the TextBlock passed to insert_text()/
+        redact_block() in the first place) - falls back to just the
+        footer/page-edge cap if the cache is somehow empty.
+
+        For a highlighted block, the collision column uses the WIDE
+        associated-highlight-rectangle extent (see
+        _associated_highlight_extent()), not just the block's own narrow
+        text bbox - matching the width redact_block()/
+        _grow_highlight_if_needed() actually redact/redraw (see
+        redact_block()'s docstring). Using only the narrow bbox here used
+        to let a highlighted block's regrowth redraw its enlarged
+        highlight background - which IS full highlight-column width -
+        straight over a neighboring block sitting outside that narrow
+        bbox but inside the wide column, with nothing capping the growth
+        that made it happen; confirmed by direct reproduction (a short
+        highlighted quote growing tall enough to paint its widened
+        highlight-color background over an unrelated block's text several
+        lines below it - see tests/test_pdf_overlay_collision.py) before
+        this widened check was added.
 
         Returns (max_y1, next_y0): `next_y0` is the nearest block's own
         (un-margined) y0 - None if there's no block below in this column -
@@ -779,7 +970,13 @@ class PyMuPdfEngine:
         """
         max_y1 = _max_rect_y1(page, self._template)
         page_blocks = self._page_blocks_cache.get(block.page_index, [])
-        next_y0 = _next_block_y0(block, page_blocks)
+        x_range: tuple[float, float] | None = None
+        if block.highlighted:
+            highlight_rects = self._get_page_highlight_rects(page, block.page_index)
+            extent = _associated_highlight_extent(block.bbox, highlight_rects)
+            if extent is not None:
+                x_range = (min(block.bbox[0], extent.x0), max(block.bbox[2], extent.x1))
+        next_y0 = _next_block_y0(block, page_blocks, x_range=x_range)
         if next_y0 is not None:
             max_y1 = min(max_y1, next_y0 - _HIGHLIGHT_COLLISION_MARGIN)
         return max_y1, next_y0
@@ -860,8 +1057,25 @@ class PyMuPdfEngine:
             )
 
     def open(self, path: str) -> None:
-        """Load a PDF document for processing."""
+        """Load a PDF document for processing.
+
+        Snapshots every page's link annotations into self._original_links
+        right after loading, before any redaction happens. redact_block()/
+        _grow_highlight_if_needed() call page.apply_redactions(), which
+        silently drops ANY annotation whose rect overlaps the redacted
+        area - including link annotations belonging to a completely
+        unrelated, non-translatable block that merely happens to sit near
+        the redacted one. save() reconciles against this snapshot exactly
+        once, after all redactions for the document are done, and restores
+        anything that went missing (see save()'s docstring for why this
+        has to happen there and not per-redaction: a link restored via
+        page.insert_link() is invisible to page.get_links() for the rest
+        of the live session, so a per-call restore can't detect a SECOND
+        redaction later destroying the same link again).
+        """
         self._doc = fitz.open(path)
+        for page in self._doc:
+            self._original_links[page.number] = page.get_links()
 
     def get_pages(self) -> list[PageInfo]:
         """Return metadata for all pages."""
@@ -889,28 +1103,39 @@ class PyMuPdfEngine:
         block with a following title/subtitle line, becomes its own
         non-translatable TextBlock, separate from the (normally
         translatable) rest. A block/group is marked non-translatable if it
-        overlaps a link annotation, the template's header/footer zones, (on
-        page_index == 0 only) the template's first_page_zones, or is the
-        metadata half of a FIRST_PAGE_ANCHOR_TERMS split. Blocks with only
-        whitespace text are skipped. Each block's spans list is
-        also populated (see _build_text_spans): one TextSpan per PyMuPDF
-        span on real text lines, a PARAGRAPH_BREAK_MARKER TextSpan for each
-        blank/whitespace-only source line (a genuine paragraph break), and a
-        LINE_BREAK_MARKER TextSpan for a heading-like line transition worth
-        keeping as a plain line break even without a blank line (see
-        _needs_line_break()). Each such column-split group (after the
-        page-0 metadata split, if any) is further split on highlighted/
-        not-highlighted line runs (see _get_highlight_rects()/
-        _split_by_highlight()): a run of lines sitting inside a
-        quote-highlight rectangle becomes its own TextBlock with
-        highlighted=True, separate from the surrounding non-highlighted
-        text, even though both stay translatable=True - highlighted is
-        purely informational (for later styling), not a translation
-        decision. The returned list is also cached in
-        self._page_blocks_cache - used by _collision_aware_max_y1() so a
-        highlighted block's height growth knows where the next block on
-        the page starts, without re-scanning the (by then possibly
-        already redacted/re-translated) page.
+        overlaps the template's header/footer zones, (on page_index == 0
+        only) the template's first_page_zones, is the metadata half of a
+        FIRST_PAGE_ANCHOR_TERMS split, or is a LINE-level run that overlaps
+        a link annotation (see the next paragraph - NOT "the whole
+        block/group contains a link anywhere", which is what this used to
+        do). Blocks with only whitespace text are skipped. Each block's
+        spans list is also populated (see _build_text_spans): one TextSpan
+        per PyMuPDF span on real text lines, a PARAGRAPH_BREAK_MARKER
+        TextSpan for each blank/whitespace-only source line (a genuine
+        paragraph break), and a LINE_BREAK_MARKER TextSpan for a
+        heading-like line transition worth keeping as a plain line break
+        even without a blank line (see _needs_line_break()).
+
+        Each such column-split group (after the page-0 metadata split, if
+        any) is further split on highlighted/not-highlighted line runs (see
+        _get_highlight_rects()/_split_by_highlight()): a run of lines
+        sitting inside a quote-highlight rectangle becomes its own
+        TextBlock with highlighted=True, separate from the surrounding
+        non-highlighted text, even though both stay translatable=True (by
+        default - see below) - highlighted is purely informational (for
+        later styling), not itself a translation decision. Each such
+        highlight run is THEN further split on link/not-link line runs
+        (see _line_overlaps_link()/_split_by_link()): a run of lines
+        overlapping a link annotation becomes its own, separate
+        translatable=False TextBlock, rather than dragging the rest of a
+        much longer surrounding paragraph down with it into
+        non-translatable status - confirmed as a real bug via a live run
+        against "1526 VIRELICON.pdf" (see _split_by_link()'s docstring).
+
+        The returned list is also cached in self._page_blocks_cache - used
+        by _collision_aware_max_y1() so a highlighted block's height growth
+        knows where the next block on the page starts, without re-scanning
+        the (by then possibly already redacted/re-translated) page.
         """
         assert self._doc is not None, "Document not opened. Call open() first."
         page = self._doc[page_index]
@@ -944,68 +1169,67 @@ class PyMuPdfEngine:
                     for run_lines, highlighted in _split_by_highlight(
                         subgroup, highlight_rects
                     ):
-                        spans = [
-                            span for line in run_lines for span in line.get("spans", [])
-                        ]
-                        if not spans:
-                            continue
+                        for link_lines, is_link in _split_by_link(run_lines, link_bboxes):
+                            spans = [
+                                span for line in link_lines for span in line.get("spans", [])
+                            ]
+                            if not spans:
+                                continue
 
-                        text = "\n".join(
-                            "".join(span["text"] for span in line.get("spans", []))
-                            for line in run_lines
-                        ).strip()
-                        if not text:
-                            continue
+                            text = "\n".join(
+                                "".join(span["text"] for span in line.get("spans", []))
+                                for line in link_lines
+                            ).strip()
+                            if not text:
+                                continue
 
-                        first_span = spans[0]
-                        color = _parse_color(first_span.get("color", 0))
-                        flags = first_span.get("flags", 0)
-                        bbox = _union_bbox([tuple(line["bbox"]) for line in run_lines])
-                        insert_bbox = _insert_bbox_for(run_lines, bbox)
-                        text_spans = _build_text_spans(run_lines)
+                            first_span = spans[0]
+                            color = _parse_color(first_span.get("color", 0))
+                            flags = first_span.get("flags", 0)
+                            bbox = _union_bbox([tuple(line["bbox"]) for line in link_lines])
+                            insert_bbox = _insert_bbox_for(link_lines, bbox)
+                            text_spans = _build_text_spans(link_lines)
 
-                        translatable = not any(
-                            block_overlaps(bbox, link_bbox) for link_bbox in link_bboxes
-                        )
-                        if translatable and self._template is not None:
-                            header_bbox = self._template.header_bbox
-                            footer_bbox = self._template.footer_bbox
-                            if header_bbox is not None and block_overlaps(bbox, header_bbox):
+                            translatable = not is_link
+                            if translatable and self._template is not None:
+                                header_bbox = self._template.header_bbox
+                                footer_bbox = self._template.footer_bbox
+                                if header_bbox is not None and block_overlaps(bbox, header_bbox):
+                                    translatable = False
+                                elif footer_bbox is not None and block_overlaps(bbox, footer_bbox):
+                                    translatable = False
+
+                            if (
+                                translatable
+                                and self._template is not None
+                                and page_index == 0
+                                and self._template.first_page_zones is not None
+                                and any(
+                                    block_overlaps(bbox, zone)
+                                    for zone in self._template.first_page_zones
+                                )
+                            ):
                                 translatable = False
-                            elif footer_bbox is not None and block_overlaps(bbox, footer_bbox):
-                                translatable = False
 
-                        if (
-                            translatable
-                            and self._template is not None
-                            and page_index == 0
-                            and self._template.first_page_zones is not None
-                            and any(
-                                block_overlaps(bbox, zone)
-                                for zone in self._template.first_page_zones
+                            if is_metadata_split and subgroup_index == 0:
+                                translatable = False  # the anchor-term metadata chunk
+
+                            blocks.append(
+                                TextBlock(
+                                    page_index=page_index,
+                                    bbox=bbox,
+                                    text=text,
+                                    font_name=first_span.get("font", ""),
+                                    font_size=first_span.get("size", 0.0),
+                                    color=color,
+                                    bold=bool(flags & _BOLD_FLAG),
+                                    italic=bool(flags & _ITALIC_FLAG),
+                                    translatable=translatable,
+                                    spans=text_spans,
+                                    insert_bbox=insert_bbox,
+                                    highlighted=highlighted,
+                                )
                             )
-                        ):
-                            translatable = False
-
-                        if is_metadata_split and subgroup_index == 0:
-                            translatable = False  # the anchor-term metadata chunk
-
-                        blocks.append(
-                            TextBlock(
-                                page_index=page_index,
-                                bbox=bbox,
-                                text=text,
-                                font_name=first_span.get("font", ""),
-                                font_size=first_span.get("size", 0.0),
-                                color=color,
-                                bold=bool(flags & _BOLD_FLAG),
-                                italic=bool(flags & _ITALIC_FLAG),
-                                translatable=translatable,
-                                spans=text_spans,
-                                insert_bbox=insert_bbox,
-                                highlighted=highlighted,
-                            )
-                        )
 
         self._page_blocks_cache[page_index] = blocks
         return blocks
@@ -1118,9 +1342,10 @@ class PyMuPdfEngine:
         variants - internally, so unlike the plain-text path below no
         per-style Base-14 fontname lookup is needed.
 
-        If block.spans is empty (backward compatibility), falls back to the
-        original path below: text is first normalized, before any fit
-        attempt, by splitting it on \\n and regrouping into paragraphs:
+        If block.spans is empty (backward compatibility) AND `text` is
+        representable in WinAnsiEncoding, falls back to the original path
+        below: text is first normalized, before any fit attempt, by
+        splitting it on \\n and regrouping into paragraphs:
         consecutive non-blank lines (wrap artifacts from the source PDF's
         original, narrower per-line extraction) are joined with a single
         space so insert_textbox() can freely reflow them, while a
@@ -1129,6 +1354,21 @@ class PyMuPdfEngine:
         break in the source - is preserved as a blank line ("\\n\\n")
         between paragraphs so the gap survives reinsertion. Every fit
         attempt reasons about this same normalized text.
+
+        If block.spans is empty but `text` contains a character outside
+        WinAnsiEncoding - i.e. any non-Latin script (see
+        _plain_text_needs_unicode_fallback()) - the plain-text path above
+        is skipped even though spans is empty, and the HTML/Story engine
+        is used instead (via _plain_text_to_html()): the Base-14
+        Helvetica variants the plain path uses cannot represent non-Latin
+        scripts at all and silently substitute "?" for every such
+        character (confirmed by direct reproduction - real data loss, not
+        just a font mismatch - since insert_textbox() has no way to
+        signal this back to the caller). This only matters if this
+        backward-compatibility path is ever exercised with non-Latin
+        target text; translate_pdf()'s real callers always populate
+        block.spans, so this only guards a currently-unused-in-production
+        path against silent corruption if that ever changes.
 
         Both paths share the same fit fallback for a NON-highlighted block:
         starts at font_size (or, HTML path, block.font_size) and tries
@@ -1185,6 +1425,18 @@ class PyMuPdfEngine:
 
         if block.spans:
             fit, final_rect, final_font_size = _insert_html_text(page, rect, block, max_y1, translated_html)
+        elif translated_html is None and _plain_text_needs_unicode_fallback(text):
+            # The Base-14 Helvetica variants _insert_plain_text() uses
+            # (_FONT_VARIANTS) are fixed to WinAnsiEncoding and silently
+            # corrupt non-Latin-script text into "?" characters (confirmed
+            # by direct reproduction - see
+            # _plain_text_needs_unicode_fallback()'s docstring and
+            # tests/test_pdf_glyph_preservation.py). The HTML/Story engine
+            # does automatic Unicode font fallback and handles this
+            # correctly, so route through it instead of the plain path.
+            fit, final_rect, final_font_size = _insert_html_text(
+                page, rect, block, max_y1, _plain_text_to_html(text)
+            )
         else:
             fit, final_rect, final_font_size = self._insert_plain_text(
                 page, rect, block, text, font_size, max_y1
@@ -1239,20 +1491,7 @@ class PyMuPdfEngine:
         # Regroup into paragraphs: join each paragraph's wrapped lines into
         # one reflowable line, but keep a blank line between paragraphs so
         # insert_textbox() still shows the original paragraph spacing.
-        paragraphs: list[str] = []
-        current_lines: list[str] = []
-        for line in text.split("\n"):
-            if line.strip():
-                current_lines.append(line.strip())
-            elif current_lines:
-                paragraphs.append(" ".join(current_lines))
-                current_lines = []
-        if current_lines:
-            paragraphs.append(" ".join(current_lines))
-
-        text = "\n\n".join(
-            re.sub(r" {2,}", " ", paragraph) for paragraph in paragraphs
-        ).strip()
+        text = "\n\n".join(_regroup_paragraphs(text)).strip()
 
         def insert_at(size: float) -> float:
             return page.insert_textbox(rect, text, fontsize=size, fontname=fontname, color=color)
@@ -1381,6 +1620,51 @@ class PyMuPdfEngine:
         else:
             self._insert_plain_text(page, fitz.Rect(final_rect), block, text, font_size, max_y1)
 
+    @staticmethod
+    def _link_identity(link: dict) -> tuple:
+        """Comparable key for a get_links() dict, ignoring the 'xref' key
+        (which page.insert_link() assigns fresh and which therefore never
+        matches between the open()-time snapshot and a later live read).
+        Rect coordinates are rounded to absorb float noise introduced by
+        PyMuPDF round-tripping the rect through the page's content stream.
+        """
+        rect = link.get("from")
+        rect_key = (
+            round(rect.x0, 2), round(rect.y0, 2), round(rect.x1, 2), round(rect.y1, 2)
+        ) if rect is not None else None
+        return (
+            rect_key,
+            link.get("kind"),
+            link.get("uri"),
+            link.get("page"),
+            link.get("to"),
+        )
+
+    def _restore_missing_links(self) -> None:
+        """Reconciles every page's live links against the open()-time
+        snapshot (self._original_links) and re-inserts anything that a
+        page.apply_redactions() call destroyed as a side effect of
+        redacting an unrelated, overlapping block. Must run exactly once,
+        right before the final self._doc.save() - see open()'s docstring
+        for why restoring per-redaction instead is unsafe.
+        """
+        assert self._doc is not None
+        for page in self._doc:
+            original = self._original_links.get(page.number, [])
+            if not original:
+                continue
+            current_identities = {self._link_identity(link) for link in page.get_links()}
+            for link in original:
+                if self._link_identity(link) not in current_identities:
+                    # 'xref' and 'id' identify the ORIGINAL annotation object,
+                    # which apply_redactions() already deleted; insert_link()
+                    # must create a fresh one, and (for 'id') a stale value
+                    # instead raises KeyError deep inside PyMuPDF's own
+                    # id-collision check (it looks up lnk["xref"] whenever
+                    # lnk.get("id") is truthy).
+                    restored = {k: v for k, v in link.items() if k not in ("xref", "id")}
+                    page.insert_link(restored)
+
     def save(self, path: str) -> None:
         """Write the resulting PDF to disk.
 
@@ -1391,6 +1675,10 @@ class PyMuPdfEngine:
         supported: PyMuPDF only allows that via an incremental save, which
         is incompatible with garbage collection, so this raises ValueError
         instead of silently skipping cleanup or writing a bloated file.
+
+        Before writing, reconciles link annotations via
+        _restore_missing_links() - see open()'s docstring for why this
+        happens once here rather than after each redaction.
         """
         assert self._doc is not None, "Document not opened. Call open() first."
         if path == self._doc.name:
@@ -1400,4 +1688,5 @@ class PyMuPdfEngine:
                 "overwrite the source file, which is incompatible with "
                 "garbage collection after redactions."
             )
+        self._restore_missing_links()
         self._doc.save(path, garbage=4, deflate=True)

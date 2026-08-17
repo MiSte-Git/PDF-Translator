@@ -25,7 +25,50 @@ class PresentationTranslationStats:
     paragraphs_skipped: int = 0
     paragraphs_failed: int = 0
     chars_sent: int = 0
+    cancelled: bool = False
     errors: list[str] = field(default_factory=list)
+
+    @property
+    def paragraphs_processed(self) -> int:
+        """Paragraphs the run has already reached a final outcome for
+        (translated, skipped or failed) - used by callers to drive a
+        progress display without needing their own counter.
+        """
+        return self.paragraphs_translated + self.paragraphs_skipped + self.paragraphs_failed
+
+    # Format-agnostic aliases (translated/skipped/failed/processed) so
+    # ui/app.py's job-status code (_job_stats()/_update_job_status()/
+    # _show_job_result()) can read either this class or
+    # pipeline.word.translate_document.TranslationStats through the same
+    # attribute names, without an isinstance branch at every call site.
+    # The paragraphs_*-prefixed names above stay the primary ones (existing
+    # callers keep using them); these are purely additive.
+    @property
+    def translated(self) -> int:
+        return self.paragraphs_translated
+
+    @property
+    def skipped(self) -> int:
+        return self.paragraphs_skipped
+
+    @property
+    def failed(self) -> int:
+        return self.paragraphs_failed
+
+    @property
+    def processed(self) -> int:
+        return self.paragraphs_processed
+
+
+def total_paragraph_count(engine: PptxEngine) -> int:
+    """Total number of paragraphs translate_presentation() will eventually
+    report a final outcome for (translated, skipped or failed), across every
+    container - translatable or not. Lets a caller show a determinate "X of
+    N paragraphs" progress bar instead of an indeterminate one, without
+    duplicating translate_presentation()'s own traversal logic; cheap (no
+    API calls), so it's safe to call once right before starting a run.
+    """
+    return sum(len(container.paragraphs) for container in engine.get_text_containers())
 
 
 def collect_translatable_html(
@@ -53,17 +96,43 @@ def translate_presentation(
     source_lang: str | None = None,
     progress_callback: Callable[[str], None] | None = None,
     slide_paths: set[str] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+    stats_callback: Callable[[PresentationTranslationStats], None] | None = None,
 ) -> PresentationTranslationStats:
+    """Translate every translatable paragraph in-place via ``provider``.
+
+    ``should_cancel`` is polled before each paragraph (i.e. between API
+    calls, never mid-call) so a caller - typically a UI cancel button - can
+    stop the run promptly without corrupting an in-flight request. Once it
+    returns True, ``stats.cancelled`` is set and the run stops; every
+    paragraph already translated stays translated (a clearly labelled
+    partial result), remaining paragraphs are left untouched in the engine.
+
+    ``stats_callback``, if given, is called after every paragraph reaches a
+    final outcome (translated/skipped/failed) with the current cumulative
+    ``stats``, letting a caller drive a live progress display (paragraphs
+    processed, characters sent so far) without polling.
+    """
     stats = PresentationTranslationStats()
     for container_index, container in enumerate(engine.get_text_containers()):
+        if should_cancel is not None and should_cancel():
+            stats.cancelled = True
+            break
         if not container.translatable:
             stats.paragraphs_skipped += len(container.paragraphs)
+            if stats_callback:
+                stats_callback(stats)
             continue
         if slide_paths is not None and container.slide_path not in slide_paths:
             continue
         for paragraph_index, paragraph in enumerate(container.paragraphs):
+            if should_cancel is not None and should_cancel():
+                stats.cancelled = True
+                break
             if not any(run_has_translatable_text(run.text) for run in paragraph.runs):
                 stats.paragraphs_skipped += 1
+                if stats_callback:
+                    stats_callback(stats)
                 continue
             original = paragraph_to_html(paragraph)
             protected_html, mapping = protect_terms(original.html, protected_terms)
@@ -104,9 +173,15 @@ def translate_presentation(
                     f"{container.slide_path} shape={container.shape_id} "
                     f"paragraph={paragraph_index}: {type(exc).__name__}: {exc}"
                 )
+                if stats_callback:
+                    stats_callback(stats)
                 continue
 
             for run_index, text in texts_by_run.items():
                 engine.set_run_text(paragraph.runs[run_index], text)
             stats.paragraphs_translated += 1
+            if stats_callback:
+                stats_callback(stats)
+        if stats.cancelled:
+            break
     return stats

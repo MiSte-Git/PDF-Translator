@@ -6,10 +6,52 @@
 > Priorisierung ist die Roadmap maßgeblich.
 
 ## Geplant
-- [ ] **Aktueller Hauptfokus:** produktiven PPTX-DeepL-Lauf an das UI anbinden
-  (sicheres Ausgabeziel, Kostenbestätigung, Fortschritt, Abbruch und QA-Bericht),
-  danach DOCX und den freigegebenen PDF-Pfad über dasselbe Auftragsmodell
-  anbinden. Details und Reihenfolge: [RoadMap.md](RoadMap.md).
+- [x] Realen Live-Lauf des PPTX-UI-Auftragsablaufs über das UI durchführen -
+  vom Nutzer am 17.08.2026 selbst ausgeführt und als unauffällig bestätigt
+  (mit Google statt DeepL, siehe RoadMap.md Phase 1). PPTX-Teil des
+  ursprünglichen Hauptfokus damit abgeschlossen.
+- [x] DOCX über denselben Auftragsablauf (ui/pptx_job.py als Vorlage)
+  angebunden - siehe "Erledigt" unten für Details. Noch offen: ein echter
+  Live-Lauf gegen ein reales Dokument über das UI (bisher nur automatisiert
+  mit Fake-Provider gegen die neue Fixture getestet).
+- [x] Explizite "ICO-Dokument"-Option im UI ergänzt (17.08.2026, nur
+  Word-Modus) - siehe "Erledigt" unten für Details. PDF-Gegenstück bewusst
+  noch offen, da der direkte PDF-Pfad insgesamt noch nicht ans UI
+  angebunden ist (RoadMap.md Phase 2/PDF).
+- [x] Duplikat-Text-Bug im Redact/Insert-Pfad reproduziert und Fix
+  verifiziert (17.08.2026) - siehe "Erledigt" unten für Details.
+- [x] Direkten PDF-Pfad über dasselbe Auftragsmodell wie PPTX/Word
+  angebunden (17.08.2026, ui/pdf_job.py als Vorlage: ui/word_job.py) -
+  siehe "Erledigt" unten für Details. Noch offen: ein echter Live-Lauf
+  gegen ein reales PDF über das UI (bisher nur automatisiert mit
+  Fake-Provider gegen die neue Fixture getestet), sowie die produktive
+  Entscheidung/Dokumentation, WANN der direkte PDF-Pfad statt eines
+  vorhandenen Word-Originals eingesetzt wird (RoadMap.md Phase 2/PDF) -
+  das ist eine Priorisierungs-/Prozessfrage für den Batch-Betrieb
+  (ico_translate/), nicht für die interaktive Desktop-UI, wo der Nutzer
+  den Modus ohnehin manuell pro Datei wählt.
+- [x] Die im PDF-Abschnitt von RoadMap.md Phase 2/PDF offenen Detailfragen
+  (Link-Annotationen nach Redaction, Durchsuchbarkeit/Copy-Paste-Qualität,
+  Leerzeilen/Underline/Inline-Formatierung, Glyphen-Verlust + Font-Erhalt,
+  fi-Ligatur, Redaction über Hintergrundbildern/überlagerten Blöcken) der
+  Reihe nach untersucht (17.08.2026) - siehe "Erledigt" unten für Details.
+  Vier reale Bugs behoben, zwei Punkte als in Ordnung verifiziert, ein
+  Punkt (fi-Ligatur) als aktuell nicht sinnvoll behebbar dokumentiert, ein
+  Punkt (Font-Erhalt) als offene Architekturentscheidung bestätigt. **Der
+  Strukturteil des neuen Hauptfokus ist erledigt** (17.08.2026, siehe
+  "Erledigt" unten: voller Lauf gegen die echte "1526 VIRELICON.pdf" mit
+  Platzhaltertext, 0 Fehler) - **offen bleibt nur noch der eigentliche
+  Übersetzungsschritt mit einem echten Provider** (DeepL/Google/OpenAI/
+  Grok), da in dieser Cloud-Sitzung keine API-Zugangsdaten hinterlegt
+  sind. Entscheidung (17.08.2026): dieser Schritt läuft, wie zuvor beim
+  PPTX-Live-Lauf, vom Nutzer selbst über die lokale Desktop-UI (dort
+  bereits mit Zugangsdaten eingerichtet), nicht mit einem in die
+  Cloud-Sitzung eingegebenen API-Key. Ursprünglicher Hauptfokus-Rahmen
+  weiterhin gültig: ein echter
+  Live-Lauf gegen ein reales PDF-Dokument über einen echten Provider
+  (analog zum PPTX-Live-Lauf) - keine der obigen
+  Detailfragen blockiert das mehr. Details und Reihenfolge:
+  [RoadMap.md](RoadMap.md).
 - [x] **Word-Grundpfad:** Umstieg auf Word-basierte Übersetzung wurde umgesetzt,
   da der direkte PDF-Redact/Insert-Pfad weiterhin einen offenen
   Duplikat-Text-Bug hat und für 2191/2196 PDFs Word-Originale existieren. Die
@@ -58,15 +100,15 @@
 
 ## Zu verifizieren
 - [ ] Word-Pfad: PAGE-Feld in footer1.xml sollte sich bei Neuberechnung automatisch aktualisieren, auch wenn das übersetzte Dokument länger wird als das Original - noch nicht an einem tatsächlich länger werdenden Dokument verifiziert (Word aktualisiert Felder nicht immer automatisch beim programmatischen Schreiben, ggf. muss ein Feld-Update erzwungen werden)
-- [ ] Prüfen, ob Link-Annotationen (page.get_links()) nach redact_block()/apply_redactions() auf anderen Blöcken derselben Seite technisch erhalten und weiterhin klickbar bleiben (nicht nur der Link-Text unübersetzt, sondern auch die zugrunde liegende Annotation intakt) – noch nicht getestet.
-- [ ] Prüfen, ob das durch save() erzeugte PDF weiterhin durchsuchbarer Text ist (kein gerastertes/Bild-Ergebnis) – sollte durch insert_textbox() gegeben sein, aber noch nicht explizit verifiziert.
+- [x] Prüfen, ob Link-Annotationen (page.get_links()) nach redact_block()/apply_redactions() auf anderen Blöcken derselben Seite technisch erhalten und weiterhin klickbar bleiben (nicht nur der Link-Text unübersetzt, sondern auch die zugrunde liegende Annotation intakt) – war tatsächlich ein realer Bug, jetzt behoben, siehe "Erledigt" unten (17.08.2026, Punkt 1).
+- [x] Prüfen, ob das durch save() erzeugte PDF weiterhin durchsuchbarer Text ist (kein gerastertes/Bild-Ergebnis) – bestätigt in Ordnung, mit einer Ausnahme (fi-Ligatur), siehe "Erledigt" unten (17.08.2026, Punkte 2 und 5).
 - [ ] insert_bbox-Fix (führende Leerzeilen wurden bei block.bbox.y0 mit eingerechnet und verschoben den eingefügten Text nach oben) wurde nur an EINEM konkreten Fall verifiziert (Virelicon-Titelzeile, Seite 0). Noch nicht geprüft: ob andere Blöcke mit führenden Leerzeilen an anderen Stellen im Dokument (nicht nur Seite 0) korrekt behandelt werden, und ob der volle 3-Provider-Test (Google/DeepL/Grok × beide PDFs, 6 Dateien) mit dem finalen Stand (Anker-Split + insert_bbox-Fix zusammen) noch aussteht.
 - [ ] Beide Fixes (insert_bbox für Redaction, Underline-Erhalt) bisher nur an 1526 Virelicon.pdf verifiziert, noch nicht an 2182 INDELEGATA.pdf oder anderen PDFs gegengeprüft. Vollständiger 3-Provider-Test (Google/DeepL/Grok × beide PDFs) mit allen aktuellen Fixes steht noch aus.
 - [x] Gemeldeter Bug "Highlight-Fläche im Output-PDF vom Text losgelöst/falsch positioniert" (ursprünglich mit echter DeepL-Übersetzung auf 3 von 34 highlighted Sub-Blöcken bestätigt, Seite 1/5/6) ist behoben, in zwei Teilen (pipeline/pdf/pymupdf_engine.py):
   1. _line_is_highlighted()/_associated_highlight_extent() nutzen jetzt _HIGHLIGHT_LINE_TOLERANCE=1.5pt (Mindest-Overlap-Höhe statt reiner `>0`-Überlappung), behebt die Fehlklassifizierung von Attributionszeilen, die nur hauchdünn (<0.01pt) an ein Highlight-Rechteck grenzen. Erneuter Lauf von tests/manual_diagnose_highlight_pages_real.py: alle 3 bekannten Versatz-Fälle verschwunden (0 Versatz auf allen 7 Seiten), Blockzahl steigt wie erwartet (mehr, feiner geschnittene Sub-Blöcke, z. B. Seite 2: 11→22).
   2. Neu: _grow_highlight_if_needed() (aufgerufen aus insert_text()) erkennt, wenn der tatsächlich eingefügte Text eines highlighted Blocks höher (oder breiter, falls auch Width-Widen griff) wird als das Original-Highlight-Rechteck, und zeichnet per page.draw_rect() eine neue, größere Fläche in _HIGHLIGHT_FILL_COLOR VOR dem erneuten Text-Insert (Ablauf: Text einmal einfügen zum Messen → falls zu groß: weiß redigieren → größere Fläche zeichnen → Text erneut einfügen). Mit echten DeepL-Übersetzungen (Seiten 0-6) kam dieser Pfad nicht zum Tragen (keine Seite brauchte echtes Wachstum), aber gezielt mit einem 7x überlangen Platzhalter erzwungen und per Screenshot (tests/output/highlight_growth_test.png) visuell verifiziert: Fläche wächst korrekt in Höhe UND Breite, Text bleibt vollständig lesbar über der Fläche, keine weißen Lücken, ursprüngliche Rechtecke anderer Blöcke bleiben unangetastet (29/29 erhalten).
-- [ ] Neu entdeckt (tests/manual_diagnose_highlight_pages.py, Seite 5): Ein Bullet-Symbol im Original (Private-Use-Area-Codepoint U+F086, ähnlich Wingdings) hat im Sans-Serif-Fallback-Font von insert_htmlbox()/insert_textbox() kein Glyph und wird im Output als fehlendes Zeichen (NUL/Tofu) statt des Original-Symbols dargestellt. Unabhängig vom Highlight-Bug, noch nicht behoben.
-- [ ] Neu entdeckt (tests/manual_diagnose_highlight_pages.py): insert_htmlbox() ersetzt "fi" durch die Ligatur "ﬁ" (U+FB01) im gerenderten Output-Text - rein kosmetisch/Font-Rendering, aber macht exakte Substring-Suche (Textsuche, Copy-Paste-Vergleich) nach Wörtern mit "fi" im fertigen PDF unzuverlässig. Noch nicht geprüft, ob das kontrollierbar ist (z. B. über CSS font-feature-settings).
+- [ ] Neu entdeckt (tests/manual_diagnose_highlight_pages.py, Seite 5): Ein Bullet-Symbol im Original (Private-Use-Area-Codepoint U+F086, ähnlich Wingdings) hat im Sans-Serif-Fallback-Font von insert_htmlbox()/insert_textbox() kein Glyph und wird im Output als fehlendes Zeichen (NUL/Tofu) statt des Original-Symbols dargestellt. Unabhängig vom Highlight-Bug, noch nicht behoben. Ein andersartiger, aber verwandter Glyphen-Verlust (reine Unicode-Zeichen aus nicht-lateinischen Schriften im reinen Textpfad) wurde am 17.08.2026 gefunden und behoben, siehe "Erledigt" unten (Punkt 4) - dieser Symbol-/PUA-Font-Fall bleibt davon unberührt offen.
+- [x] Neu entdeckt (tests/manual_diagnose_highlight_pages.py): insert_htmlbox() ersetzt "fi" durch die Ligatur "ﬁ" (U+FB01) im gerenderten Output-Text - rein kosmetisch/Font-Rendering, aber macht exakte Substring-Suche (Textsuche, Copy-Paste-Vergleich) nach Wörtern mit "fi" im fertigen PDF unzuverlässig. Kontrollierbarkeit geprüft (17.08.2026) - vier Gegenmaßnahmen versucht, keine hat funktioniert, siehe "Erledigt" unten (Punkt 5) für Details und Bewertung als aktuell nicht sinnvoll behebbar.
 - [x] Behoben: Kollisionsschutz (vorher nur block.highlighted==True) gilt jetzt für ALLE Blöcke, plus automatisches Anomalie-Logging (pipeline/pdf/pymupdf_engine.py):
   1. _insert_html_text()/_insert_plain_text() nutzen jetzt einheitlich EINE Wachstumslogik (try_grow(): Höhe in Ein-Zeilen-Schritten via _estimate_line_height(), dann Breite, beides kollisionssicher) für jeden Block, nicht mehr nur für highlighted - die alte Breite-zuerst-Verdopplungslogik für nicht-highlighted Blöcke wurde komplett entfernt (Code dadurch auch kürzer: nur noch eine try_grow()-Closure statt zwei Varianten je Funktion). _collision_aware_max_y1() wird jetzt unconditional in insert_text() aufgerufen. Grund für die ursprüngliche Beschränkung auf highlighted (die farbige Fläche wächst ohnehin mit, kein Spaltenbreiten-Konflikt) im Docstring festgehalten, aber das eigentliche Kollisionsrisiko (Hineinwachsen in den nächsten Block) ist unabhängig davon real - siehe tests/manual_diagnose_text_duplication.py.
   2. Neu: log_growth_anomaly()/PyMuPdfEngine._log_growth_anomalies() schreiben strukturierte JSONL-Einträge nach tests/output/growth_anomalies.jsonl (Seite, bbox, Blocktext gekürzt, Ereignistyp, relevante Zahlen) bei drei Ereignissen: Kollisionskappung (nur wenn tatsächlich gewachsen wurde - erster Versuch hatte hier einen False-Positive-Bug, der Blöcke meldete, die nie wuchsen, aber zufällig schon nah an der Kollisionsgrenze lagen; behoben durch Vergleich gegen einen vor dem Insert-Versuch genommenen original_rect-Snapshot statt block.bbox), finale Schriftgröße ≤8pt UND kleiner als die Original-Schriftgröße (verhindert Fehlalarm bei Dokumenten mit von Haus aus kleiner Schrift), finale Höhe >2x Original-bbox-Höhe. Läuft als Teil der normalen Pipeline (insert_text()), nicht nur in Testskripten.
@@ -83,9 +125,9 @@
 - [ ] Word-Pfad: DeepL verschiebt an vereinzelten `<br/>`-Grenzen Textinhalt oder verschmilzt zwei durch `<br/><br/>` getrennte Fragmente zu einem durchgehenden Satz (Gesamt-Break-Anzahl bleibt dabei gleich, nur die Position/Zuordnung ändert sich) - führt zu einzelnen fehlenden Leerzeichen an Satzgrenzen (z. B. "...hatInertiara – das lässt..."). Der proaktive §§SP§§-Marker behebt den Fall "Leerzeichen an stabiler Break-Grenze verloren" zuverlässig, aber nicht diesen Verschmelzungsfall - eine zuverlässige Erkennung bräuchte einen Adjazenz-Abgleich (welche Wortpaare vorher durch einen Break getrennt waren), was als unscharfe Heuristik mit hohem Fehlerpotenzial bewusst nicht umgesetzt wurde. `html_to_paragraph()` loggt abweichende Break-Gesamtzahlen (echte Verschmelzungen mit Zahlenreduktion) nach tests/output/word_break_anomalies.jsonl, erfasst aber reine Verschiebungen ohne Zahlenänderung nicht. Rein kosmetisch, keine Struktur-/Marker-Beschädigung.
 - [ ] Word-Pfad: footer1.xml wickelt seinen Inhalt in ein `<w:sdt>` (Content Control) statt direkter `<w:p>`-Kinder - get_header_footer_paragraphs() liefert für den Footer daher aktuell einen leeren Absatz (Text nicht sichtbar). Für die bisherige Aufgabe folgenlos, da der Footer ohnehin unangetastet bleibt, aber relevant, falls Footer-Inhalt (z. B. für die PAGE-Feld-Verifikation) später gelesen/verändert werden muss.
 - [ ] Google Cloud Translation API v2 (GoogleTranslateProvider) hat keinen Formality-Parameter - anders als DeepL (formality="less") kann bei Google die informelle Du-Form nicht technisch erzwungen werden. Für Google-Übersetzungen bleibt das Registerergebnis (Du/Sie) dem Modell/der API überlassen und ist nicht kontrollierbar.
-- [ ] insert_text nutzt aktuell Helvetica-Varianten (helv/hebo/heit/hebi) statt des eingebetteten Original-Fonts (block.font_name) – sinnvoller Kompromiss für den ersten Durchstich, aber bei layoutgetreuer Übersetzung kann eine abweichende Schriftart aus dem Original auffallen. Später prüfen: Font-Registrierung aus dem Original-PDF für insert_textbox.
-- [ ] Zweites, seitenbreites Bild (xref=5) überlappt mit mehreren Textblöcken auf Seite 0 – vermutlich beabsichtigtes Hintergrundbild hinter Text, kein Spalten-Layout-Problem, bisher nicht untersucht. Später prüfen, ob redact_block das Hintergrundbild ungewollt betrifft.
-- [ ] Inline-Formatierung (einzelnes fettes/kursives Wort mitten im Satz, nicht ganze Zeile) noch nicht an einem realen Beispiel verifiziert, da 2182 INDELEGATA.pdf keine solche Stelle enthält. Mechanismus (span-genaues HTML) unterstützt es strukturell, aber ungetestet. Bei Gelegenheit mit einem PDF verifizieren, das echte Inline-Hervorhebungen enthält.
+- [ ] insert_text nutzt aktuell Helvetica-Varianten (helv/hebo/heit/hebi) statt des eingebetteten Original-Fonts (block.font_name) – sinnvoller Kompromiss für den ersten Durchstich, aber bei layoutgetreuer Übersetzung kann eine abweichende Schriftart aus dem Original auffallen. Später prüfen: Font-Registrierung aus dem Original-PDF für insert_textbox. Erneut bestätigt (17.08.2026, siehe "Erledigt" unten Punkt 4) - weiterhin offene Architekturentscheidung, kein neuer Befund. Der davon unabhängige, ECHTE Datenverlust bei nicht-lateinischen Schriften im reinen Textpfad wurde im Zuge dieser Prüfung gefunden und behoben.
+- [x] Zweites, seitenbreites Bild (xref=5) überlappt mit mehreren Textblöcken auf Seite 0 – vermutlich beabsichtigtes Hintergrundbild hinter Text, kein Spalten-Layout-Problem, bisher nicht untersucht. Später prüfen, ob redact_block das Hintergrundbild ungewollt betrifft. Geprüft (17.08.2026, siehe "Erledigt" unten Punkt 6) - unbedenklich: apply_redactions() blankt nur den redigierten Ausschnitt, Bild und Rest bleiben erhalten.
+- [ ] Inline-Formatierung (einzelnes fettes/kursives Wort mitten im Satz, nicht ganze Zeile) noch nicht an einem realen Beispiel verifiziert, da 2182 INDELEGATA.pdf keine solche Stelle enthält. Mechanismus (span-genaues HTML) unterstützt es strukturell, aber ungetestet. Bei Gelegenheit mit einem PDF verifizieren, das echte Inline-Hervorhebungen enthält. Synthetisch verifiziert (17.08.2026, siehe "Erledigt" unten Punkt 3, tests/test_pdf_formatting_roundtrip.py) - der Vorbehalt "an einem realen Beispiel" bleibt bestehen.
 - [ ] Google übersetzt HTML-Tag-Positionen nur "to the extent possible" (eigene Doku-Formulierung) - bei starker Wortumstellung zwischen Sprachen kann die Tag-Position leicht verrutschen. Bisher nur bei einfachen Fällen (ganze Zeile fett) getestet, nicht bei komplexeren Sätzen mit mehreren Inline-Formatierungen.
 - [ ] Attributionszeile ohne eigenes Highlight-Rechteck (z. B. wenn ihr Rechteck knapp davor endet) landet beim nicht-highlighted Sub-Block statt beim zugehörigen Zitat - akzeptierte Einschränkung von _split_by_highlight() (pipeline/pdf/pymupdf_engine.py), nicht gelöst.
 
@@ -135,3 +177,1184 @@
 - [x] README.md
 - [x] CONTRIBUTING.md
 - [x] .gitignore
+- [x] Produktiver PPTX-DeepL-Lauf an den Startknopf im UI angebunden (RoadMap.md
+  Phase 1, alle Checkbox-Punkte außer dem realen Live-Lauf umgesetzt):
+  - pipeline/presentation/translate_presentation.py: translate_presentation()
+    um `should_cancel` (Callable[[], bool], vor jedem Absatz UND vor jedem
+    Container geprüft - also immer zwischen zwei API-Aufrufen, nie mittendrin)
+    und `stats_callback` (nach jedem Absatzergebnis mit dem aktuellen
+    PresentationTranslationStats aufgerufen) erweitert. PresentationTranslationStats
+    hat ein neues `cancelled`-Feld und eine `paragraphs_processed`-Property
+    (Summe aus translated/skipped/failed) als Fortschrittszähler für Aufrufer.
+    Bei Abbruch bricht die äußere UND die innere Schleife sauber ab (vorheriger
+    Entwurf hätte nur die innere Schleife verlassen und mit dem nächsten
+    Container weitergemacht - im Test abgefangen).
+  - Neu: ui/pptx_job.py - Qt-unabhängige Auftragsorchestrierung, direkt
+    unit-testbar. `safe_destination()` hängt immer den Zielsprachcode an den
+    Dateinamen an und erhöht bei Kollision einen Zähler ("Deck_DE.pptx",
+    "Deck_DE (2).pptx", ...), verglichen wird zusätzlich gegen den aufgelösten
+    Quellpfad. `run_presentation_job()` prüft Ziel==Quelle bzw. Ziel existiert
+    bereits VOR dem Öffnen der Engines/vor jedem API-Aufruf (DestinationConflictError,
+    getestet: 0 API-Aufrufe beim Fehlerfall). Öffnet die Quelle zweimal (baseline
+    für den Überlaufvergleich, ein zweites Mal als tatsächlich übersetzte
+    Arbeitskopie), da PptxEngine.compare_overflow() ein unverändertes zweites
+    Engine-Objekt erwartet. Baut den Provider über PROVIDER_FACTORIES (alle
+    vier bereits implementierten Provider: deepl/google/openai/grok - Phase 1
+    nennt nur DeepL, die anderen drei kosten aber keinen Zusatzaufwand, da sie
+    translate_html() bereits implementieren; DeepL bleibt der einzige mit Live-
+    Test verifizierte Pfad, siehe unten), wrapped ihn in TranslationBudgetGuard
+    (harte Zeichenobergrenze, siehe pipeline/translation/cost_control.py -
+    bestehender Mechanismus, unverändert). `_build_qa_report()` erzeugt eine
+    Textdatei "<Ausgabedatei>_qa_report.txt" mit Quelle/Ziel/Anbieter/Sprache,
+    übersetzt/übersprungen/fehlgeschlagen/gesendete Zeichen, bei Abbruch einem
+    expliziten Teilergebnis-Hinweis, der technischen Fehlerliste (ohne
+    Zugangsdaten - Provider-Fehlermeldungen enthalten laut Code-Review nie den
+    API-Key), allen Überlaufrisiken gegenüber dem Original (Folie, Shape,
+    geschätzte/verfügbare Zeilen - rein informativ zur manuellen Prüfung,
+    keine automatische Umformatierung) und der Liste bewusst nicht
+    unterstützter Inhaltstypen aus PptxEngine.capability_catalog().
+  - Neu: ui/workers.py::PresentationTranslationWorker (QRunnable) - Abbruch
+    ist kooperativ über ein threading.Event (`request_cancel()` setzt es nur,
+    der laufende API-Aufruf wird nie unterbrochen). Snapshot-Kopie der Stats
+    (`_copy_stats()`) vor jedem Signal-Emit, damit die Qt-Queued-Connection
+    über den Thread hinweg nie einen später mutierten Zustand zeigt.
+  - ui/app.py: `_start()` fragt vor dem ersten API-Aufruf einen Zielordner
+    (QFileDialog) und zeigt danach eine explizite Kostenbestätigung
+    (QMessageBox mit Zeichenzahl/Kostenschätzung/Zieldatei aus der bereits
+    vorliegenden Analyse) - erst danach wird der Worker gestartet. Startknopf
+    ist bewusst nur für TranslationMode.PRESENTATION aktivierbar
+    (_EXECUTABLE_MODES); PDF/Word/Bilder bleiben mit Tooltip-Hinweis auf
+    RoadMap.md deaktiviert, um nicht fälschlich fertig zu wirken. Neues
+    Lauf-/Ergebnis-Panel zeigt während des Laufs die aktuelle Position
+    (Folie/Shape/Absatz aus progress_callback) und einen Fortschrittsbalken
+    aus stats_callback; nach Abschluss Kurzstatistik, Ausgabedatei, QA-Bericht-
+    Pfad, Anzahl Überlaufhinweise sowie Buttons zum Öffnen des Zielordners und
+    des QA-Berichts (QDesktopServices). Laufende Jobs sperren Modus-/Quell-/
+    Anbieterauswahl und die Einstellungen, damit während eines Laufs nichts
+    verändert wird, das der Job noch liest.
+  - pipeline/translation/base.py-Fehlerpfad geprüft: TranslationError-Texte
+    aller vier Provider (DeepL/Google/OpenAI/Grok) enthalten nur HTTP-Status/
+    Message bzw. str(exc), nie den API-Key - Fehleranzeige im UI (QMessageBox
+    + `logging.error()`) und im QA-Bericht sind damit ohne Zusatzaufwand
+    zugangsdatenfrei.
+  - Neue i18n-Schlüssel in DE/EN ergänzt (job.*, dialog.choose_output_dir,
+    dialog.confirm_run, start.confirm_summary, start.ready) - Gleichheit der
+    beiden Kataloge bleibt über tests/test_ui_i18n.py abgesichert.
+  - Getestet (tests/test_pptx_job.py, Fake-HTML-Provider wie schon in
+    tests/test_pptx_translation_bridge.py, 7 neue Tests, alle grün):
+    safe_destination()-Kollisionsvermeidung, erfolgreicher Lauf inkl. QA-
+    Bericht-Inhalt, Ziel-existiert-bereits UND Ziel==Quelle lösen
+    DestinationConflictError VOR jedem API-Aufruf aus (Call-Zähler geprüft),
+    Abbruch nach dem ersten API-Aufruf liefert ein klar als abgebrochen
+    markiertes Teilergebnis mit bereits übersetztem Absatz, stats_callback
+    liefert für jeden der 6 Testabsätze eine monoton steigende Momentaufnahme,
+    zu kleines Zeichenlimit lässt alle Absätze kontrolliert über
+    BudgetExceededError fehlschlagen statt den Lauf abzubrechen. Zusätzlich
+    manuell (ohne pytest) MainWindow mit `QT_QPA_PLATFORM=offscreen`
+    konstruiert und Analyse- und Job-Abschluss-Pfad durchgespielt (DE und EN) -
+    keine Attributfehler, Startknopf korrekt nur nach Analyse+Bestätigung im
+    PRESENTATION-Modus aktiv.
+  - Neu: tests/manual_e2e_pptx_ui_translation.py - ruft exakt denselben Pfad
+    wie der Startknopf auf (run_presentation_job()) gegen ein reales
+    Dokument über die echte DeepL-API; überspringt sich selbst kontrolliert,
+    wenn kein DeepL-Schlüssel verfügbar ist oder die Datei fehlt (wie die
+    bestehenden manual_*.py-Skripte). **Noch nicht ausgeführt:** Das in der
+    RoadMap referenzierte reale 19-Folien-Testdokument
+    ("OPRES ES Hub Quorum Activation Call Presentation.pptx") lag zu Beginn
+    dieser Änderung im Projektwurzelverzeichnis, war beim Zurückschreiben der
+    Änderungen aber nicht mehr vorhanden - der Live-Lauf inkl. Sichtprüfung
+    des bekannten Sonderfalls auf Folie 11 steht daher noch aus, sobald die
+    Datei wieder verfügbar ist und ein DeepL-Schlüssel konfiguriert ist.
+  - Bewusst nicht Teil dieser Änderung (folgt mit Phase 2 laut RoadMap.md):
+    DOCX- und PDF-Pfad über denselben Auftragsablauf, Warteschlange/
+    Stapelverarbeitung mehrerer Aufträge, dediziertes Logfile (aktuell
+    Standard-`logging`, kein eigenes Dateihandler-Setup).
+- [x] Erster echter UI-Test durch den Nutzer (reales 19-Folien-Dokument, Skript
+  aus dem vorigen Punkt) deckte zwei echte Anschlussprobleme auf, beide behoben:
+  - **Startknopf blieb ohne erkennbaren Grund ausgegraut:** Ursache war NICHT
+    ein Logikfehler in `_update_start_state()` (an einem durchgespielten
+    Analyse->Bestätigen-Ablauf mit `QT_QPA_PLATFORM=offscreen` bestätigt
+    korrekt), sondern dass der einzige Hinweis auf den fehlenden Zustand ein
+    Tooltip war, der beim bloßen Hinsehen nicht auffällt. ui/app.py bekommt
+    ein neues `start_hint`-QLabel unter den Start-/Analysieren-Buttons, das
+    IMMER sichtbar den exakten blockierenden Grund zeigt (`_start_blocked_reason()`:
+    kein unterstützter Modus / keine Analyse / nicht bestätigt / Lauf bereits
+    aktiv), nicht nur beim Hover. `_invalidate_analysis()` ruft jetzt
+    `_update_start_state()` statt Felder doppelt manuell zu setzen, damit
+    Knopf-Zustand und Hinweistext nie auseinanderlaufen können. Vier neue
+    i18n-Schlüssel (start.blocked_running/mode/no_analysis/not_confirmed) in
+    DE/EN. Falls sich das konkrete Szenario des Nutzers dennoch wiederholt,
+    zeigt der jetzt sichtbare Text direkt, welche der vier Bedingungen fehlt.
+  - **Nutzerfrage:** ob sich der tatsächliche Kontingentstand bei den Anbietern
+    auslesen lässt (wie auf der DeepL-Website nach Login sichtbar), statt nur
+    lokal zu schätzen - Recherche (17.08.2026) bestätigt: DeepL bietet dafür
+    `GET /v2/usage` mit demselben API-Key an (kein separates Login nötig,
+    liefert `character_count`/`character_limit` der aktuellen Abrechnungsperiode,
+    laut developers.deepl.com für Free- und Pro-Keys gleichermaßen). Dieselbe
+    Recherche bestätigt außerdem die Beobachtung des Nutzers zum DeepL-Kontingent:
+    das alte "DeepL API Free" (500.000 Zeichen/Monat, erneuert sich) wird laut
+    support.deepl.com nicht mehr neu verkauft - neue kostenlose Konten erhalten
+    stattdessen ein einmaliges, sich NICHT erneuerndes 1.000.000-Zeichen-Kontingent
+    (Developer-Plan). Das erklärt vermutlich den "Quota exceeded"-Fehler (HTTP 456)
+    im QA-Bericht des Nutzers nach nur 2.055 gesendeten Zeichen: die lokale
+    Schätzung in `pipeline/translation/cost_control.py` nahm bisher fälschlich
+    für jeden DeepL-Key eine monatliche Erneuerung an.
+    - Neu: `DeepLProvider.get_usage()` (pipeline/translation/deepl_provider.py)
+      - GET auf `<api_url ohne /translate>/usage`, liefert
+      `{"character_count": int, "character_limit": int | None}`
+      (`character_limit=None`, wenn der Account laut DeepL kein Limit hat).
+      Getestet mit gemocktem `requests.get` (tests/test_deepl_usage.py, 3 Tests:
+      Free-Endpunkt, Pro-Endpunkt/kein Limit, TranslationError ohne Zugangsdaten).
+    - `ui/analysis.py::_cost()` ruft `get_usage()` jetzt für Provider "deepl" auf
+      und nutzt bei Erfolg den ECHTEN verbleibenden Freibetrag statt der lokalen
+      `get_month_usage()`-Schätzung für die Kostenschätzung; scheitert der
+      Live-Check (kein Schlüssel, offline, API-Fehler), fällt es transparent
+      auf die alte lokale Schätzung zurück und hängt eine neue Warnung
+      ("warning.live_quota_unavailable") an, statt die Analyse abzubrechen.
+      Für alle anderen Provider wird `get_usage()` gar nicht erst aufgerufen.
+      `CostSummary` (ui/models.py) um `live_usage_available`/
+      `live_characters_used`/`live_character_limit` erweitert. Im UI erscheint
+      bei Erfolg eine zusätzliche, deutlich als "Live" markierte Zeile mit
+      Ist-Verbrauch/Limit/Rest (ui/i18n.py: analysis.live_quota[_unlimited],
+      warning.live_quota_unavailable, DE/EN). Getestet
+      (tests/test_analysis_live_quota.py, 4 Tests, DeepLProvider gemockt):
+      Live-Wert wird übernommen, unbegrenzter Account rechnet nichts als
+      "über dem Freikontingent" an, Fallback bei fehlgeschlagenem Live-Check,
+      und dass für einen Nicht-DeepL-Provider gar kein Live-Aufruf versucht wird.
+    - Recherchiert, aber NICHT umgesetzt: Google Cloud Translation und OpenAI
+      haben keinen einfachen, nur mit dem bereits gespeicherten API-Key
+      abfragbaren Kontingent-Endpunkt - Google verlangt dafür IAM-/OAuth-Zugriff
+      auf ein GCP-Projekt (Cloud Monitoring/Service Usage API), OpenAI eine
+      separate Admin-/Organisations-Berechtigung statt eines normalen Projekt-
+      Schlüssels (die OpenAI-Community fordert einen einfacheren Endpunkt
+      selbst noch als Feature, siehe Quellen). Grok/xAI nicht recherchiert.
+      Eine Umsetzung würde das bisherige "ein API-Key pro Provider"-Modell in
+      Einstellungen erweitern - als eigener Punkt für Phase 7 vorzumerken,
+      falls gewünscht.
+    - Quellen: developers.deepl.com/api-reference/usage-and-quota,
+      support.deepl.com/hc/en-us/articles/360021200939-DeepL-API-plans,
+      community.openai.com/t/add-api-endpoint-to-check-remaining-credits-or-balance-on-openai-account/1365221
+- [x] Drei vom Nutzer nach dem ersten UI-Sichttest gemeldete Bugs behoben
+  (Dunkelmodus-Kontrast, veraltete Kostenschätzung, Startknopf reagiert
+  nicht):
+    - **Dunkelmodus-Kontrast:** Checkbox und Textfelder (QLineEdit/QTextEdit)
+      waren unter einem aktiven Linux-Dunkelmodus-Theme praktisch unlesbar,
+      weil die App bisher komplett der eigenen Qt-Style-/Palette-Integration
+      des Desktops vertraute statt eigene Farben zu setzen - mindestens eine
+      reale Kombination liefert dabei zu wenig Kontrast für diese Widgets.
+      Neu: `ui/theme.py` (kein Qt-Import, daher ohne Display testbar) mit
+      WCAG-2.x-Kontrastformel (`contrast_ratio()`, `_relative_luminance()`)
+      und zwei kontrastgeprüften Palettensätzen (`DARK_COLORS`/
+      `LIGHT_COLORS`), `ui/app.py::apply_explicit_palette()` erkennt anhand
+      der vom Desktop *geerbten* Palette-Helligkeit Hell/Dunkel und setzt
+      dann eine explizite `QPalette` (inkl. `QPalette.Disabled`-Farbgruppe,
+      damit ein deaktivierter Startknopf eindeutig als deaktiviert erkennbar
+      bleibt statt nur schlecht sichtbar zu sein) - ein helles Desktop-Theme
+      wird dabei unangetastet gelassen. Getestet (tests/test_ui_theme.py, 4
+      Tests): alle Text/Hintergrund-Paare (Eingabefelder, Fenster, Buttons,
+      Auswahl-Highlight) erreichen WCAG-AA (>= 4.5:1) in beiden Paletten;
+      deaktivierter Text bleibt lesbar (>= 2.0:1), aber immer klar schwächer
+      als aktivierter Text. Ursprüngliche Highlight-Farbe (61,132,224) schaffte
+      nur 3.77:1 gegen Weiß und wurde durch (37,99,189) ersetzt (5.84:1).
+    - **Veraltete Kostenschätzung / falsche Analyse je nach Modus:** Ursache
+      war ein subtiler PySide6-Fallstrick, unabhängig vom Dunkelmodus-Fund,
+      aber vom selben Sichttest aufgedeckt. `TranslationMode`/
+      `EmbeddedImageMode` sind `str, Enum`-Mixins; wird ein Member per
+      `QComboBox.addItem(text, member)` als userData gespeichert und über
+      `currentData()` wieder ausgelesen, liefert PySide6 (Rundreise durch
+      QVariant) einen reinen `str` zurück - NICHT die ursprüngliche
+      Enum-Instanz. `==`/`!=` und Hash-/Set-Vergleiche bleiben davon
+      unberührt, aber jeder `is`/`is not`-Vergleich gegen die Enum-Konstante
+      schlägt seitdem still und dauerhaft fehl. Reproduziert:
+      ```
+      combo.addItem("", TranslationMode.PRESENTATION); combo.setCurrentIndex(0)
+      combo.currentData() is TranslationMode.PRESENTATION   # False
+      combo.currentData() == TranslationMode.PRESENTATION   # True
+      ```
+      Das erklärte die vom Nutzer gemeldete falsche Analyse ("1 Bilder / 0
+      Textzeichen" für eine echte .pptx-Datei im Präsentations-Modus): die
+      `is`-Verzweigungskette in `analyze_request()` (ui/analysis.py) fiel
+      dadurch immer in den Bilder-/else-Zweig, unabhängig vom tatsächlich
+      gewählten Modus - die angezeigte Kostenschätzung passte deshalb nicht
+      zur echten Datei. Alle betroffenen Vergleiche in `ui/app.py` (Zeilen
+      ~260, ~272, ~371), `ui/analysis.py` (Zeilen ~102, ~105, ~121, ~129,
+      ~142, ~143) und `ui/models.py` (Zeile ~45) von `is`/`is not` auf
+      `==`/`!=` umgestellt; zusätzlich baut `ui/app.py::MainWindow._request()`
+      den `TranslationRequest` jetzt mit expliziter Rückkonvertierung
+      (`TranslationMode(self.mode.currentData())`,
+      `EmbeddedImageMode(self.image_mode.currentData())`), damit ab der
+      UI-Grenze wieder echte Enum-Singletons im restlichen Code ankommen.
+    - **Startknopf reagiert auf Klick nicht:** derselbe Fallstrick, konkreter
+      Fall: `MainWindow._start()` prüfte bisher
+      `if self.mode.currentData() is not TranslationMode.PRESENTATION: return`
+      - diese Bedingung war wegen des Enum-Fallstricks immer wahr, der
+      Startknopf brach also bei jedem Klick sofort und ohne jede Meldung ab,
+      egal welcher Modus gewählt war. Jetzt `!=` statt `is not` - der Klick
+      erreicht damit wieder den Ordnerauswahl-Dialog.
+    - Neuer Regressionstest tests/test_ui_enum_identity.py (3 Tests, echte
+      QComboBox statt Mock): dokumentiert das PySide6-Verhalten selbst (damit
+      ein künftiges PySide6-Update hier auffällt statt als mysteriöser
+      UI-Bug), prüft dass ein aus einer QComboBox-Auswahl gebauter
+      TranslationRequest im Präsentations-Modus tatsächlich die
+      Folien-/Zeichen-Zweige von analyze_request() nimmt (nicht den
+      Bilder-Fallback), und reproduziert die konkrete Bedingung aus
+      `_start()` als eigenständige Prüfung. Zusätzlich in derselben Runde
+      behoben: `ui/app.py::_invalidate_analysis()` zeigte bei Moduswechsel
+      bisher noch die Zahlen der vorherigen Analyse an, obwohl `last_result`
+      bereits intern zurückgesetzt war - setzt jetzt sofort
+      "Analyse erforderlich" beim Invalidieren.
+    - Gesamter Testlauf nach der Änderung: 43 passed, 1 skipped
+      (`QT_QPA_PLATFORM=offscreen python3 -m pytest -q`).
+    - Noch offen (externe Rahmenbedingung, kein Bug): der DeepL-Live-
+      Kontingent-Check des Nutzers zeigte zum Zeitpunkt des Sichttests
+      500.000 von 500.000 Zeichen verbraucht (0 verbleibend) - passend zum
+      vom Nutzer selbst auf der DeepL-Website abgelesenen Stand
+      ("Genutzte Zeichen" 498.765). Ein echter Testlauf gegen den 19-Folien-
+      Datensatz schlägt deshalb aktuell mit "Quota exceeded" fehl, bis das
+      Konto entweder ein neues Kontingent bekommt oder ein anderer
+      Account/Provider verwendet wird - unabhängig vom oben beschriebenen
+      Startknopf-Fix.
+- [x] Fortschrittsanzeige während des Laufs behoben ("Das UI zeigt keinen
+  klaren Status während des Laufs an. Man weiss nicht ob etwas im
+  Hintergrund passiert."). Ursache: `ui/app.py::_job_stats()` setzte den
+  Fortschrittsbalken bisher mit
+  `setRange(0, max(stats.paragraphs_processed, 1)); setValue(stats.paragraphs_processed)`
+  - das Maximum wurde also bei jedem Update auf den AKTUELLEN
+  verarbeiteten Stand gesetzt, wodurch der Balken unabhängig vom
+  tatsächlichen Fortschritt permanent bei 100% stand (genau das im
+  Screenshot des Nutzers zu sehende Bild, mitten im Lauf). Zusätzlich zeigte
+  der Statustext während des Laufs nur die aktuell verarbeitete Position
+  ("Verarbeite: ppt/slides/slide8.xml..."), aber keine laufenden
+  Zähler - ob sich etwas tut, war daher nicht erkennbar.
+    - Neu: `pipeline/presentation/translate_presentation.py::total_paragraph_count(engine)`
+      ermittelt die Gesamtzahl aller Absätze (übersetzbar oder nicht) vorab,
+      ohne API-Aufruf, durch dieselbe Container-Traversierung, die
+      `translate_presentation()` intern nutzt.
+      `ui/pptx_job.py::run_presentation_job()` bekommt einen neuen optionalen
+      `total_callback`-Parameter, der genau einmal - vor dem ersten
+      API-Aufruf - mit dieser Gesamtzahl aufgerufen wird.
+      `ui/workers.py::TranslationSignals` bekommt ein neues `total`-Signal,
+      das `PresentationTranslationWorker` an `total_callback` durchreicht.
+    - `ui/app.py`: neuer Handler `_job_total(total)` schaltet den
+      Fortschrittsbalken von unbestimmt (kurzes Intervall, solange die
+      Gesamtzahl noch nicht bekannt ist) auf einen echten, determinierten
+      Balken (`setRange(0, total)`) um; `_job_stats()` setzt danach nur noch
+      `setValue(...)`, ohne das Maximum zu verändern. Neuer kombinierter
+      Statustext über `_update_job_status()`: zeigt weiterhin die aktuelle
+      Position (`job.progress_prefix`), zusätzlich jetzt "{X} von {Y}
+      Absätzen verarbeitet" (neuer Schlüssel `job.progress_count`, DE/EN)
+      sowie laufende Zähler übersetzt/übersprungen/fehlgeschlagen/Zeichen
+      (`job.stats_summary` - dieser Schlüssel existierte bereits in
+      `ui/i18n.py`, war aber nie tatsächlich an eine Stelle im UI
+      angeschlossen; jetzt live während des Laufs sichtbar statt erst im
+      Endergebnis).
+    - Getestet: neuer Test
+      `tests/test_pptx_job.py::test_total_callback_reports_paragraph_count_before_first_api_call`
+      bestätigt, dass `total_callback` genau einmal mit der korrekten
+      Absatzzahl (6, Fixture) aufgerufen wird, und zwar BEVOR
+      `provider.translate_html()` auch nur ein einziges Mal aufgerufen
+      wurde (Regressionsschutz gegen die alte "Balken zeigt immer 100%
+      an"-Situation). Gesamter Testlauf: 44 passed, 1 skipped.
+- [x] Warnung bei fehlendem API-Schlüssel für den gewählten Provider ("Wenn
+  ich einen neuen Provider auswähle und es keine API Keys gibt, kommt keine
+  Warnung ausser im QA-Bericht"). Bisher gab es dafür überhaupt keine
+  UI-Rückmeldung - ein fehlender Schlüssel fiel erst nach einem kompletten,
+  bereits durchgelaufenen Übersetzungslauf auf (jeder Absatz einzeln als
+  fehlgeschlagen im QA-Bericht), analog zum vorher behobenen
+  Live-Kontingent-Fall.
+    - Neu: `ui/app.py::MainWindow.provider_hint` - ein Label direkt unter dem
+      Anbieter-Auswahlfeld im Formular, das sofort bei jeder Auswahländerung
+      (`provider.currentTextChanged`) über `credential_status()`
+      (ui/settings.py, bereits vorhanden, bisher nur im Einstellungsdialog
+      genutzt) prüft, ob ein Schlüssel hinterlegt ist. Fehlt einer, erscheint
+      ein fett hervorgehobener Hinweistext mit eingebettetem Link ("Jetzt
+      einrichten"), der den Einstellungsdialog direkt mit dem betroffenen
+      Anbieter vorausgewählt öffnet (`SettingsDialog` bekommt dafür einen
+      neuen optionalen `initial_provider`-Parameter). Ist ein Schlüssel
+      vorhanden, bleibt das Label leer/unsichtbar.
+    - Zusätzliche Absicherung beim Startknopf: `MainWindow._start()` prüft
+      `credential_status()` jetzt selbst noch einmal, BEVOR der
+      Ausgabeordner-Dialog überhaupt geöffnet wird - fehlt der Schlüssel,
+      erscheint eine Warnmeldung (mit Direktlink in die Einstellungen)
+      und der Lauf wird gar nicht erst gestartet, statt erst nach einem
+      kompletten, zum Scheitern verurteilten Durchlauf über alle Absätze zu
+      scheitern.
+    - Bug nebenbei vermieden, nicht nur behoben: `QPushButton.clicked` sendet
+      ein bool-Argument ("checked"); da `_open_settings()` jetzt einen
+      optionalen `preselect_provider`-Parameter hat, hätte eine direkte
+      `clicked.connect(self._open_settings)`-Verbindung dieses bool
+      versehentlich als `preselect_provider` durchgereicht (klassischer
+      PySide/PyQt-Fallstrick, verwandt mit dem bereits dokumentierten
+      QComboBox/QVariant-Fallstrick weiter oben) - die Verbindung nutzt jetzt
+      ein Lambda ohne Argumente.
+    - Getestet (tests/test_ui_provider_credentials.py, 2 Tests, echtes
+      MainWindow + echte QComboBox/QMessageBox/QFileDialog, keine Mocks auf
+      Modulebene): Hinweistext erscheint/verschwindet korrekt beim
+      Providerwechsel; ein Startversuch mit fehlendem Schlüssel zeigt die
+      Warnung und erreicht nachweislich NICHT den Ausgabeordner-Dialog
+      (`QFileDialog.getExistingDirectory` schlägt den Test fehl, falls
+      aufgerufen), kein Worker wird gestartet. Gesamter Testlauf: 46 passed,
+      1 skipped.
+- [x] Nutzerfrage geklärt: "Es wird auch bei Google ein Freikontigent von
+  500.000 angezeigt - gilt das nicht nur für DeepL?" Geprüft (kein Bug):
+  `ui/analysis.py::PRICING` bildet Anbieter bereits korrekt getrennt ab
+  (`GOOGLE_PRICING`/`DEEPL_PRICING`/`OPENAI_PRICING`/`GROK_PRICING`, je
+  eigene `free_tier_chars_per_month`), keine gemeinsame/verwechselte
+  Konstante. Die 500.000 für Google sind kein Kopierfehler von DeepL,
+  sondern laut offizieller Google-Cloud-Preisseite (cloud.google.com/
+  translate/pricing, abgerufen 2026) tatsächlich Googles eigenes
+  Freikontingent für Cloud Translation - Basic (v2): ein monatlich
+  wiederkehrendes 10-USD-Guthaben, das bei 20 USD/Million Zeichen genau
+  500.000 Zeichen/Monat entspricht - unabhängig von DeepL, nur zufällig
+  derselbe Zahlenwert. Unterschied zu beachten: Googles Kontingent erneuert
+  sich nachweislich jeden Monat, während neu registrierte DeepL-Konten
+  laut vorherigem Fund stattdessen ein einmaliges, nicht erneuerndes
+  1.000.000-Zeichen-Kontingent bekommen (bestehende ":fx"-Altkonten wie das
+  des Nutzers behalten das monatliche 500.000-Modell, siehe DeepL-Eintrag
+  weiter oben) - für Google gibt es (siehe dortiger Backlog-Eintrag) keinen
+  vergleichbaren Live-Abrufweg über den reinen API-Key, die Zahl bleibt
+  dort also immer die lokale, unverifizierte Schätzung.
+    - Kleine Klarstellung im UI ergänzt, damit dieselbe Frage nicht wieder
+      aufkommt: die Zeile heißt jetzt "Lokale Schätzung ({provider}): ..."
+      statt nur "Lokale Schätzung: ..." (ui/i18n.py: `analysis.summary`,
+      DE/EN; `ui/app.py::_show_analysis()` übergibt `provider=result.cost.provider`)
+      - macht auf einen Blick sichtbar, dass die Zahl je nach gewähltem
+      Anbieter unterschiedlich sein kann/ist, statt wie ein pauschaler,
+      immer gleicher Wert zu wirken. Gesamter Testlauf: 46 passed, 1 skipped.
+    - Quelle: cloud.google.com/translate/pricing (Cloud Translation - Basic
+      (v2): erste 500.000 Zeichen/Monat frei als 10-USD-Guthaben, danach
+      20 USD pro Million Zeichen bis 1 Mrd. Zeichen/Monat).
+- [x] Nutzerfrage geklärt + Bug behoben: "Sollte ein Providerwechsel die
+  Analyse/Kostenschätzung und das Ergebnisfeld leeren, oder erst ein neuer
+  Lauf?" Antwort: Analyse/Kostenschätzung ja, sofort - der Anbieter bestimmt
+  Preis, Freikontingent und ob die Live-Kontingent-Zeile überhaupt gilt
+  (nur DeepL); eine stehen gebliebene Schätzung eines anderen Anbieters wäre
+  falsch UND über die Checkbox trotzdem bestätigbar gewesen. Das "Lauf und
+  Ergebnis"-Feld (letzter abgeschlossener Lauf) dagegen bewusst NICHT - das
+  dokumentiert ein bereits abgeschlossenes, weiterhin wahres Ergebnis
+  (Ausgabedatei, QA-Bericht) und wird schon bisher erst beim nächsten
+  tatsächlichen Start überschrieben (`MainWindow._start()`, unverändert) -
+  entspricht dem bereits etablierten Verhalten bei Moduswechsel/neuer
+  Quelldatei (`_mode_changed()`/`_choose_sources()`), die ebenfalls nur die
+  Analyse zurücksetzen, nicht das Ergebnisfeld.
+    - Bug dabei gefunden: Der Provider-ComboBox fehlte diese Verknüpfung
+      komplett - eine bereits geprüfte und bestätigte (Checkbox aktiv)
+      Analyse blieb nach einem Providerwechsel unverändert sichtbar,
+      inklusive einer ggf. nicht mehr zutreffenden DeepL-Live-Kontingent-
+      Zeile für einen inzwischen gewählten anderen Anbieter. Vermutlich beim
+      Anlegen des Warnhinweis-Labels in der vorherigen Runde übersehen (der
+      Provider-Wechsel-Handler wurde damals neu angelegt, aber nur an den
+      Warnhinweis angebunden, nicht an `_invalidate_analysis()`).
+    - Fix: `ui/app.py` - neuer Handler `_provider_changed()` bündelt beide
+      Reaktionen auf `provider.currentTextChanged` (Warnhinweis
+      aktualisieren + `_invalidate_analysis()` aufrufen) anstelle der
+      bisherigen Direktverbindung nur auf den Warnhinweis.
+    - Getestet: neuer Test
+      `tests/test_ui_provider_credentials.py::test_switching_provider_invalidates_current_analysis`
+      bestätigt, dass nach einem Providerwechsel `last_result` zurückgesetzt,
+      die Bestätigen-Checkbox deaktiviert/entmarkiert und das Ergebnisfeld
+      wieder auf "Analyse erforderlich" steht. Gesamter Testlauf: 47 passed,
+      1 skipped.
+- [x] **DOCX über denselben UI-Auftragsablauf wie PPTX angebunden**
+  (RoadMap.md Phase 2/Word) - nach Nutzerentscheidung, den PPTX-Hauptfokus
+  als abgeschlossen zu betrachten (eigener Live-Test mit Google bestätigt),
+  war dies der nächste Punkt der empfohlenen Reihenfolge.
+    - **Gemeinsame, formatunabhängige Bausteine ausgelagert:** neu
+      `ui/document_job_common.py` (`PROVIDER_FACTORIES`, `build_provider()`,
+      `DestinationConflictError`, `safe_destination()`) - vorher nur in
+      `ui/pptx_job.py` definiert. `ui/pptx_job.py` importiert diese jetzt
+      von dort und reicht sie unverändert weiter (`from ui.document_job_common
+      import ...`), damit jeder bestehende `from ui.pptx_job import
+      DestinationConflictError, safe_destination, ...`-Aufrufer (ui/app.py,
+      ui/workers.py, tests/test_pptx_job.py, tests/manual_e2e_pptx_ui_translation.py)
+      unverändert weiterfunktioniert. Bewusst NICHT eine gemeinsame
+      "Dokument-Job"-Abstraktion für den gesamten Ablauf: PPTX' Überlauf-
+      risiko-Vergleich (feste Textbox-Größe) hat keine sinnvolle Entsprechung
+      bei DOCX (fließt automatisch um), Word hat dafür stattdessen die
+      Break-Marker-Anomalie-Prüfung - beide Job-Module bleiben eigenständig
+      und spiegeln sich nur in Struktur/Namensgebung, siehe Modul-Docstrings.
+    - **pipeline/word/translate_document.py erweitert** (bisher ohne
+      Abbruch-/Live-Fortschritts-Unterstützung, im Gegensatz zum
+      PPTX-Pendant `translate_presentation()`):
+      - Neu: `should_cancel`-Parameter, vor jedem Absatz geprüft (Hauptteil-
+        Schleife, dann Kopf-/Fußzeilen-Schleife) - genau dasselbe
+        kooperative Abbruch-Verhalten wie bei `translate_presentation()`
+        (zwischen, nie während eines API-Aufrufs). Neues
+        `TranslationStats.cancelled`-Feld.
+      - Neu: `stats_callback`-Parameter, nach jedem Absatz mit
+        abgeschlossenem Ergebnis aufgerufen (übersetzt/übersprungen/
+        fehlgeschlagen) - treibt die Live-Fortschrittsanzeige im UI, ohne
+        dass der Aufrufer selbst mitzählen muss.
+      - Neu: `TranslationStats.errors: list[str]` - Absatz-/Kopf-/
+        Fußzeilen-Fehler wurden bisher nur über `progress_callback`
+        durchgereicht und dann verworfen (nicht in `stats` gespeichert);
+        jetzt wie bei `PresentationTranslationStats.errors` gesammelt
+        (`"body:{index}: {ExceptionType}: {message}"` bzw.
+        `"header:{index}: ..."`/`"footer:{index}: ..."`), damit der
+        QA-Bericht (siehe unten) sie auflisten kann, ohne Zugangsdaten
+        preiszugeben (TranslationError-Meldungen enthalten ohnehin nie
+        welche - dieselbe bereits für PPTX geltende Garantie).
+      - Neu: `TranslationStats.processed`-Property (Summe aus
+        `translated`/`skipped`/`failed`) sowie an
+        `PresentationTranslationStats` neu ergänzte, rein additive
+        Alias-Properties `translated`/`skipped`/`failed`/`processed`
+        (delegieren an die bestehenden `paragraphs_*`-Felder) - lässt
+        `ui/app.py`s Job-Status-Code (`_job_stats()`/`_update_job_status()`/
+        `_show_job_result()`) beide Stats-Typen über dieselben
+        Attributnamen lesen, ohne an jeder Stelle `isinstance()` zu
+        verzweigen. Die ursprünglichen, format-eigenen Feldnamen
+        (`paragraphs_translated` bzw. `body_translated`/...) bleiben
+        unverändert die primären, von bestehenden Aufrufern (u. a.
+        ico_translate/batch.py) weiterhin genutzten Namen.
+      - Neu: `total_paragraph_count(engine)` (Hauptteil- + Kopf-/Fußzeilen-
+        Absätze, ohne API-Aufruf) - Wort-Pendant zu
+        `translate_presentation.total_paragraph_count()`, treibt denselben
+        determinierten Fortschrittsbalken wie beim PPTX-Job.
+    - **Neu: `ui/word_job.py`** (`run_word_job()`, `WordJobResult`) - spiegelt
+      `ui/pptx_job.py::run_presentation_job()` strukturell (Zielkonflikt-
+      Prüfung vor jedem API-Aufruf, Kosten-Guard, `total_callback` einmalig
+      vor dem ersten Aufruf, QA-Bericht neben der Ausgabedatei). QA-Bericht
+      enthält statt eines Überlaufvergleichs (den es für DOCX nicht gibt):
+      Hauptteil-/Kopf-/Fußzeilen-Aufschlüsselung, `new_break_anomalies`
+      (bereits vorhandene, bisher ungenutzte `<br/>`-Zähl-Abweichungs-
+      Erkennung aus `html_bridge.py` - jetzt sichtbar statt nur in einer
+      Log-Datei verborgen), Fehlerliste, und einen expliziten Hinweis auf
+      die offene, noch nicht automatisiert geprüfte PAGE-Feld-Frage
+      (RoadMap.md Phase 2/Word) statt diese Einschränkung stillschweigend
+      zu verschweigen.
+    - **ui/workers.py:** neue `WordTranslationWorker`-Klasse, spiegelt
+      `PresentationTranslationWorker` 1:1 (identische Konstruktor-Signatur,
+      dieselbe `TranslationSignals`-Klasse) - ruft nur `run_word_job()`
+      statt `run_presentation_job()` auf. Neuer `_copy_word_stats()`-Helfer
+      (Pendant zu `_copy_stats()`) snapshotet `TranslationStats` vor dem
+      Überqueren der Qt-Signal-/Thread-Grenze.
+    - **ui/app.py:** `_EXECUTABLE_MODES` um `TranslationMode.WORD` erweitert
+      (vorher nur `PRESENTATION`) - der direkte PDF-Modus bleibt bewusst
+      weiterhin blockiert (`start.blocked_mode`), bis seine offenen
+      Qualitätsbefunde geklärt sind. `_start()` wählt jetzt
+      `WordTranslationWorker` oder `PresentationTranslationWorker` je nach
+      `request.mode` - der gesamte restliche Ablauf (Zugangsdaten-Prüfung,
+      Zielordner-Dialog, Kostenbestätigung, Fortschritt, Abbruch, Ergebnis-
+      anzeige, Ordner-/Bericht-öffnen-Buttons) ist identisch für beide
+      Modi und war es schon vorher (baut auf den bereits vorhandenen,
+      formatunabhängig beschrifteten "Lauf und Ergebnis"-Widgets auf).
+      `_job_stats()`/`_update_job_status()`/`_show_job_result()` nutzen
+      jetzt die neuen formatunabhängigen `.processed`/`.translated`/
+      `.skipped`/`.failed`-Aliase statt der PPTX-spezifischen
+      `paragraphs_*`-Namen; die Überlauf-Zeile im Ergebnistext erscheint
+      weiterhin nur für `PresentationJobResult` (`isinstance`-Prüfung) -
+      für DOCX würde "Keine neuen Überlaufrisiken gefunden" fälschlich
+      einen durchgeführten Check suggerieren, den es für DOCX nicht gibt.
+    - **Neue Test-Fixture `tests/fixtures/representative.docx`:** es gab
+      bisher keine automatisierte DOCX-Fixture (der Word-Pfad wurde bislang
+      ausschließlich manuell gegen echte, nicht im Repo enthaltene
+      ICO-Dokumente verifiziert, siehe ältere Einträge oben). Erzeugt mit
+      python-docx (Kopf-/Fußzeile + 3 Hauptteil-Absätze, davon einer leer)
+      und anschließend gezielt nachbearbeitet: `DocxEngine` erwartet
+      hartkodiert `word/header2.xml`/`word/footer1.xml`
+      (siehe `pipeline/word/docx_engine.py::_HEADER_PATH`/`_FOOTER_PATH` -
+      dokumentierte Vereinfachung, keine allgemeine Mehrabschnitts-Auflösung
+      über die Section-Relationship), python-docx erzeugt bei einem
+      Ein-Abschnitt-Dokument aber `header1.xml` (Footer trifft mit
+      `footer1.xml` zufällig bereits den erwarteten Namen) - die Kopfzeilen-
+      Datei sowie ihr Verweis in `[Content_Types].xml` und
+      `word/_rels/document.xml.rels` wurden deshalb nach der Erzeugung
+      innerhalb des Zip-Archivs umbenannt/angepasst. Verifiziert: `DocxEngine`
+      liest die Fixture korrekt (3 Hauptteil-Absätze, 2 Kopf-/Fußzeilen-
+      Absätze, alle korrekt als übersetzbar/nicht übersetzbar markiert).
+    - Getestet: `tests/test_word_job.py` (7 Tests, spiegelt
+      `tests/test_pptx_job.py`) - Grundlauf inkl. QA-Bericht-Inhalt,
+      Zielkonflikt-Ablehnung (Ziel existiert bereits / Ziel == Quelle) ohne
+      jeden API-Aufruf, Abbruch zwischen API-Aufrufen mit korrektem
+      Teilergebnis, `stats_callback`-Inkremente, `total_callback` bereits
+      vor dem ersten API-Aufruf gemeldet (Regressionsschutz gegen dieselbe
+      "Balken zeigt immer 100%"-Klasse von Bug wie beim PPTX-Fund weiter
+      oben), Budget-Limit-Durchsetzung. `tests/test_ui_word_mode.py`
+      (3 Tests, echtes `MainWindow`, `QThreadPool.start()` abgefangen statt
+      wirklich auf einem Hintergrund-Thread zu laufen): bestätigt, dass
+      `_start()` für Word-Modus tatsächlich einen `WordTranslationWorker`
+      und für Präsentations-Modus weiterhin einen `PresentationTranslationWorker`
+      erzeugt (parametrisierter Test gegen beide Fälle), sowie dass
+      Word-Modus nicht mehr als `start.blocked_mode` blockiert gilt.
+      Gesamter Testlauf: 57 passed, 1 skipped.
+    - Noch offen (siehe RoadMap.md Phase 2/Word): ein echter Live-Lauf des
+      DOCX-UI-Pfads gegen ein reales Dokument über einen echten Provider
+      steht noch aus (bisher nur mit Fake-Provider gegen die neue Fixture
+      automatisiert getestet, analog zum PPTX-Pfad vor dessen jetzt
+      erfolgtem Live-Test).
+
+- [x] Explizite "ICO-Dokument"-Option im UI ergänzt (17.08.2026), als Antwort
+  auf einen bislang unangetasteten Schwachpunkt: `DocxEngine._has_separator_shape()`
+  lief bis dahin bei JEDEM `.open()`-Aufruf unbedingt mit - jedes DOCX, das
+  zufällig eine ähnliche Trennform enthielt, hätte ohne jede Warnung einen
+  Teil von Seite 1 unübersetzt gelassen. Der Nutzer bestätigte, dass dieser
+  Sonderfall (Metadatenbereich auf Seite 1 nicht übersetzen) nur für einen
+  bestimmten internen Dokumententyp gilt, den er "ICO" nennt - genau die
+  Dokumente, die dieses Projekt ohnehin schon bearbeitet (siehe die
+  ico_translate/-Einträge weiter oben).
+    - `pipeline/word/docx_engine.py`: `DocxEngine.open()` bekommt einen neuen
+      Parameter `ico_mode: bool = False`. Der Scan nach der Trennform läuft
+      jetzt nur noch, wenn `ico_mode=True` explizit übergeben wird; sonst
+      bleiben alle Hauptteil-Absätze `translatable=True`, unabhängig davon,
+      ob eine Trennform zufällig vorhanden ist. `self.separator_found`
+      bleibt wie zuvor verfügbar (jetzt: "wurde bei aktivem ico_mode
+      gefunden?").
+    - Zwei bestehende, von diesem Default-Wechsel betroffene Aufrufer
+      korrigiert, damit ihr bisheriges (für ihren jeweiligen Zweck
+      korrektes) Verhalten erhalten bleibt: `ui/analysis.py` (Kostenschätzung
+      im Word-Modus) übergibt jetzt `ico_mode=request.ico_mode` - sonst
+      hätte die Kostenschätzung vor dem Lauf nicht mehr zum tatsächlichen
+      Lauf gepasst. `pipeline/word/duplicate_analysis.py::_analyze_one()`
+      (Duplikat-Kandidaten-Heuristik, die per Definition ausschließlich
+      ICO-Dokumente vergleicht) übergibt jetzt explizit `ico_mode=True`, um
+      seine bisherige Metadaten-/Textkörper-Trennung für die
+      Ähnlichkeitsanalyse unverändert beizubehalten.
+    - `ui/word_job.py`: `run_word_job()` bekommt denselben `ico_mode`-Parameter
+      (Default `False`) und reicht ihn an `DocxEngine.open()` durch. Der
+      QA-Bericht bekommt einen neuen Kopfabschnitt, der den tatsächlichen
+      Ausgang klar benennt: "ICO-Modus: aktiv" (+ Bestätigung, dass der
+      Metadatenbereich ausgeschlossen wurde) bei Treffer, eine deutliche
+      Warnung bei `ico_mode=True` aber `separator_found=False` ("bitte
+      prüfen, ob dieses Dokument wirklich vom internen Typ ICO ist"), oder
+      "ICO-Modus: nicht aktiv" im Normalfall.
+    - `ui/models.py`: `TranslationRequest` um `ico_mode: bool = False`
+      erweitert. `ui/app.py`: neue Checkbox (Zeile "ICO-Dokument" im
+      Formular, per `QFormLayout.setRowVisible()` nur im Word-Modus
+      sichtbar/aktiv - kein PPTX-Äquivalent, da PPTX keinen entsprechenden
+      Sonderfall hat) mit Tooltip, der den Override-Charakter erklärt
+      (erzwingt den Ausschluss unabhängig vom Ergebnis der automatischen
+      Erkennung). Beim Verlassen des Word-Modus wird die Checkbox
+      automatisch zurückgesetzt, damit ein versehentlich aktivierter Zustand
+      nicht stillschweigend in einen Auftrag für einen anderen Modus
+      übernommen wird (`MainWindow._mode_changed()`). Während eines
+      laufenden Auftrags gesperrt wie die übrigen Eingabefelder
+      (`_set_running()`).
+    - `ui/workers.py`: `WordTranslationWorker` bekommt denselben
+      `ico_mode`-Parameter (Default `False`) und reicht ihn an
+      `run_word_job()` durch - bewusst NICHT auf
+      `PresentationTranslationWorker` übertragen (siehe deren Docstrings):
+      `ui/app.py::_start()` übergibt `ico_mode` deshalb nur als zusätzliches
+      Schlüsselwortargument, wenn der gewählte Modus tatsächlich Word ist,
+      statt beide Worker-Konstruktoren künstlich symmetrisch zu halten.
+    - Neue Test-Fixture `tests/fixtures/representative_ico.docx`: wie
+      `representative.docx`, plus ein vorangestellter Metadaten-Absatz
+      ("ICO Metadata: Issuer XYZ") gefolgt von einem Absatz mit der
+      straightConnector1-Trennform (`<a:prstGeom prst="straightConnector1">`
+      in einem minimalen DrawingML-Fragment) - erstmals automatisierte
+      Testabdeckung für `_has_separator_shape()`/die Trennform-Erkennung
+      selbst, vorher nur manuell gegen echte ICO-Dokumente verifiziert.
+    - Getestet: `tests/test_word_job.py` (3 neue Tests) - `ico_mode=True`
+      mit gefundener Trennform lässt den Metadaten-Absatz unverändert
+      (geprüft direkt am geschriebenen `word/document.xml` der
+      Ausgabedatei, nicht nur über Zähler, da der Trennform-Absatz selbst
+      wegen seines `<w:drawing>` unabhängig von `ico_mode` als "übersetzt"
+      gezählt wird - ein bereits vor dieser Änderung bestehendes,
+      unverändertes Detailverhalten); `ico_mode=False` übersetzt denselben
+      Metadaten-Absatz trotz vorhandener Trennform ganz normal;
+      `ico_mode=True` ohne gefundene Trennform (gegen die alte Fixture ohne
+      Trennform) übersetzt das gesamte Dokument wie zuvor und meldet die
+      Warnung im QA-Bericht. `tests/test_ui_word_mode.py` (3 neue Tests) -
+      Checkbox nur im Word-Modus sichtbar/aktiv und wird beim Moduswechsel
+      zurückgesetzt, `_request()` übernimmt den Checkbox-Zustand korrekt,
+      `_start()` reicht `ico_mode` tatsächlich an den erzeugten
+      `WordTranslationWorker` durch. Gesamter Testlauf: 63 passed, 1 skipped.
+    - Bewusst NICHT umgesetzt: das PDF-Gegenstück. Die zugrundeliegende
+      Erkennung existiert dort bereits (`FIRST_PAGE_ANCHOR_TERMS`/
+      `_split_first_page_metadata()` bzw. `DocumentTemplate.first_page_zones`/
+      `templates/virelicon.json`), läuft aber ebenfalls automatisch statt
+      user-gesteuert - wird erst sinnvoll nachrüstbar, sobald der direkte
+      PDF-Pfad überhaupt ans UI angebunden ist (RoadMap.md Phase 2/PDF). Der
+      Duplikat-Text-Bug, der das bisher blockiert hatte, ist jetzt behoben
+      (17.08.2026, siehe unten) - die PDF-UI-Anbindung selbst steht aber
+      weiterhin aus.
+
+- [x] Duplikat-Text-Bug im Redact/Insert-Pfad reproduziert und Fix verifiziert
+  (17.08.2026, RoadMap.md Phase 2/PDF). Ausgangslage: `tests/manual_diagnose_text_duplication.py`
+  (nur mit der echten, vertraulichen "1526 Virelicon.pdf" plus einem echten
+  DeepL-Aufruf lauffähig, deshalb weder hier noch in CI ausführbar) hatte
+  ursprünglich drei Symptome gemeldet: (1) Textduplikation - nach einem
+  Textabschnitt erscheint ein abgeschnittener Rest DESSELBEN Texts erneut,
+  (2) unerklärte Suffixe an Zuschreibungszeilen, (3) verlorene
+  Bold/Underline-Formatierung + verschmolzene Überschrift/Bullet-Zeile +
+  wachsende Lücken zwischen Bullet-Blöcken. Diese Session hat sich
+  ausschließlich auf (1) konzentriert (das vom Nutzer benannte "Duplikat
+  Text"-Problem) - (2) und (3) bleiben offen/unverifiziert, siehe
+  RoadMap.md.
+    - Analyse: laut Code-Kommentaren in `pipeline/pdf/pymupdf_engine.py`
+      (`_insert_html_text()`, `PyMuPdfEngine._collision_aware_max_y1()`)
+      wurde der naheliegendste Mechanismus für (1) - ein Block wächst beim
+      Einfügen der Übersetzung ungeprüft in die Zeile des NÄCHSTEN Blocks
+      hinein, dessen später eigener Redact/Insert-Durchlauf das Überwachsene
+      dann nicht mit erfasst - bereits VOR dieser Session behoben: der
+      Kollisionsschutz (`_next_block_y0()`/`_collision_aware_max_y1()`, mit
+      spaltenbewusstem x-Overlap-Check) gilt inzwischen für ALLE Blöcke, nicht
+      mehr nur für `block.highlighted` (siehe die frühere "Kollisionsschutz"-
+      Eintragsgruppe weiter oben in dieser Datei). Diese Session hat den Fix
+      NICHT erneut verändert, sondern gezielt geprüft, ob er das gemeldete
+      Symptom tatsächlich beseitigt - das war bisher nur über Verdacht/
+      Analogieschluss ("almost certainly the actual cause", Code-Kommentar)
+      dokumentiert, nie an einer konkreten Duplikations-Reproduktion bestätigt.
+    - Eigene Reproduktion (ohne die reale Datei, da nicht verfügbar): drei
+      synthetische PDFs direkt mit PyMuPDF gebaut (echter gezeichneter Text,
+      also von `extract_blocks()` genuin erkannte `TextBlock`s, keine
+      handgebauten Objekte), durch den echten Produktionscode
+      (`PyMuPdfEngine.redact_block()`/`insert_text()`) mit absichtlich stark
+      überlangen HTML-"Übersetzungen" (Platzhalter, analog zum bestehenden
+      Projekt-Muster aus `tests/manual_test_highlight_growth.py`s
+      "7x überlanger Platzhalter") geschickt, dann die finale Seite per
+      `page.get_text()` auf das exakte gemeldete Fehlerbild geprüft
+      (Original-Englisch übersteht die Redaction nicht; jede Übersetzung
+      erscheint exakt so oft wie im Input vorgegeben, nie öfter):
+      1. Moderater Overflow bei zwei eng benachbarten (16.5pt Abstand),
+         nicht-highlighted Blöcken - wächst korrekt bis zur Kollisionsgrenze
+         (bestätigt über den `growth_capped_by_collision`-Log-Eintrag), keine
+         Duplikation, kein Englisch-Rest.
+      2. Extremer Overflow (40x wiederholter Platzhaltersatz), der selbst bei
+         Schriftverkleinerung bis `_MIN_FONT_SIZE` nicht passt und den
+         `scale_low=0`-Fallback erzwingt - ebenfalls sauber (PyMuPDFs
+         Auto-Skalierung darf dabei legitim einen Teil des Textes weglassen,
+         das ist kein Duplikations-Bug, aber die Anzahl darf nie GRÖSSER als
+         die Eingabe sein - genau das wird geprüft).
+      3. Highlighted-Zitat-Block, dessen Übersetzung länger als die
+         ursprüngliche Highlight-Fläche ist und `_grow_highlight_if_needed()`s
+         Redact-dann-Neuzeichnen-dann-Neueinfügen-Pfad auslöst (der einzige
+         Fall im Code, der für denselben Block absichtlich einen ZWEITEN
+         `insert_text()`-Aufruf macht) - ebenfalls sauber.
+      Alle drei Fälle: kein Rest des englischen Originaltexts nach der
+      Redaction, jede Übersetzung erscheint exakt so oft wie vorgegeben.
+    - Neu: `tests/test_pdf_redact_insert_collision.py` (3 Tests, erste
+      automatisierte Testabdeckung für `PyMuPdfEngine` überhaupt - vorher
+      ausschließlich über manuelle Skripte gegen echte/vertrauliche
+      Dokumente verifiziert) - baut sich jede synthetische PDF selbst
+      (`fitz.open()` + `insert_textbox()`/`draw_rect()`), isoliert
+      `_GROWTH_ANOMALY_LOG_PATH` per `monkeypatch` auf einen `tmp_path`
+      (sonst gemeinsamer, testlaufübergreifender Log-Pfad → Flakiness),
+      und prüft direkt am gespeicherten Ausgabe-PDF. Gesamter Testlauf:
+      66 passed, 1 skipped.
+    - Bewusst NICHT geprüft: die real gemeldeten Symptome (2) und (3) oben
+      (Zuschreibungs-Suffixe, Bold/Underline-Verlust + Bullet-Lücken) - diese
+      wurden in der ursprünglichen Diagnose als von (1) unabhängige,
+      separate Befunde behandelt und sind hier nicht adressiert. Ebenso
+      NICHT geprüft: eine finale Bestätigung gegen die tatsächliche
+      "1526 VIRELICON.pdf" mit einem echten Provider-Aufruf, wie es
+      `tests/manual_diagnose_text_duplication.py` ursprünglich vorsah -
+      diese Datei ist in dieser Umgebung nicht verfügbar; sobald sie
+      wieder zugänglich ist, wäre ein realer Lauf dieses Skripts der letzte
+      Bestätigungsschritt, ist aber angesichts der synthetischen
+      Reproduktion oben nicht mehr als Blocker für die weitere PDF-Arbeit
+      zu werten.
+
+- [x] Direkte PDF-Pipeline an den gemeinsamen UI-Auftragsablauf angebunden
+  (17.08.2026, RoadMap.md Phase 2/PDF) - der letzte der drei ursprünglichen
+  Dokumenttypen (nach PPTX und DOCX). Gebaut nach dem exakt gleichen
+  Muster, jetzt zum dritten Mal angewendet.
+    - Neu: `pipeline/pdf/translate_pdf.py` - bisher gab es KEINE
+      wiederverwendbare Übersetzungsschleife für PDF überhaupt, nur
+      Inline-Code in `tools/compare_providers.py` und diversen
+      `tests/manual_translate_*.py`-Skripten, alle nach demselben Muster:
+      ERST alle Blöcke übersetzen (alles-oder-nichts pro Anbieter, keine
+      Fortschritts-/Abbruchunterstützung), DANN erst redigieren/einfügen.
+      Für den UI-Auftragsablauf (Fortschrittsbalken, Abbrechen-Knopf,
+      Teilergebnis bei Abbruch) war das nicht brauchbar - `translate_pdf()`
+      verschachtelt stattdessen pro Block: übersetzen → redigieren →
+      einfügen → Stats melden, exakt nach demselben Muster wie
+      `translate_presentation()`/`translate_document()` (kooperative
+      Abbruchprüfung NUR zwischen API-Aufrufen, ein fehlgeschlagener Block
+      wird übersprungen statt den ganzen Lauf abzubrechen - dieselbe
+      "skip, don't abort"-Politik). `total_block_count()` (Pendant zu
+      `total_paragraph_count()`) sammelt vorab über `engine.get_pages()`/
+      `extract_blocks()` die Gesamtzahl, bevor irgendein API-Aufruf
+      stattfindet - wichtig für denselben "Balken zeigt sonst immer
+      100%"-Bug, der bei PPTX/Word schon einmal gefunden wurde.
+    - `PdfTranslationStats` (translated/skipped/failed/chars_sent/
+      cancelled/errors wie bei den anderen beiden Formaten) plus ein
+      PDF-eigenes Feld: `overflow_blocks` - Anzahl der Blöcke, bei denen
+      `insert_text()` `False` zurückgab (siehe `pipeline/pdf/
+      pymupdf_engine.py`: der Text wurde zwar garantiert eingefügt, aber
+      nicht "sauber" bei der Originalgröße, sondern über Wachstum/
+      Schrumpfung/Force-Fit). Kein Fehler, aber ein eigenes drittes
+      Risikoprofil neben PPTX' Überlaufrisiko (feste Textbox-Größe) und
+      Words PAGE-Feld-Risiko (automatischer Reflow) - im QA-Bericht und im
+      UI-Statustext separat ausgewiesen (`job.pdf_overflow_none`/
+      `job.pdf_overflow_count` in `ui/i18n.py`).
+    - Neu: `ui/pdf_job.py` (`PdfJobResult`, `run_pdf_job()`) - spiegelt
+      `ui/word_job.py` exakt (Zielkonflikt-Prüfung vor jedem API-Aufruf,
+      `TranslationBudgetGuard`-Kapselung, `total_callback` vor dem ersten
+      API-Aufruf, deutschsprachiger QA-Bericht). Kein `DocumentTemplate`
+      wird übergeben (header_bbox/footer_bbox/first_page_zones bleiben
+      unbesetzt) - nur der automatische, templatefreie
+      `FIRST_PAGE_ANCHOR_TERMS`-Split gilt; ein `ico_mode`-Äquivalent wie
+      bei Word gibt es bewusst noch nicht (RoadMap.md Phase 2/PDF, "Nach
+      Anbindung" vorgemerkt). Der QA-Bericht katalogisiert ausdrücklich die
+      weiterhin offenen PDF-Detailfragen (Link-Annotationen, Durchsuchbar-
+      keit, Glyphen/Ligaturen, Font-Erhalt) statt sie zu verschweigen.
+    - `ui/workers.py`: `PdfTranslationWorker` (+ `_copy_pdf_stats()`)
+      spiegelt `WordTranslationWorker`/`PresentationTranslationWorker`
+      exakt, ohne `ico_mode`-Parameter (kein PDF-Äquivalent bisher).
+    - `ui/app.py`: `_EXECUTABLE_MODES` um `TranslationMode.PDF` erweitert.
+      Die Worker-Auswahl in `_start()` war bisher ein zweiseitiges
+      `if/else` (PPTX vs. "sonst Word") - das hätte PDF beim Hinzufügen
+      unbemerkt auf `WordTranslationWorker` geroutet. Umgestellt auf ein
+      Dict-Lookup (`{TranslationMode.X: WorkerCls, ...}[request.mode]`),
+      das bei einem künftigen vierten Modus mit einem klaren `KeyError`
+      statt einem stillen Fehlrouting ausfällt. Neuer `elif
+      isinstance(result, PdfJobResult)`-Zweig in `_show_job_result()` für
+      die `overflow_blocks`-Anzeige (Pendant zum PPTX-Überlaufrisiko-
+      Zweig). Nebenbei behoben: `_job_failed()`s Log-Meldung war seit der
+      DOCX-Anbindung fälschlich fest auf "PPTX-Übersetzungslauf
+      fehlgeschlagen" verdrahtet, unabhängig vom tatsächlichen Modus -
+      jetzt formatneutral.
+    - Neue Test-Fixture `tests/fixtures/representative.pdf`: ein
+      übersetzbarer Absatz plus ein linkannotierter Absatz
+      (`translatable=False`, da `PyMuPdfEngine.extract_blocks()` jeden
+      Block ausschließt, der eine Link-Annotation überlappt) - erste
+      automatisierte Testabdeckung für den kompletten `ui/pdf_job.py`-
+      Auftragsablauf.
+    - Getestet: `tests/test_pdf_job.py` (7 Tests, spiegelt
+      `tests/test_word_job.py`) - Grundlauf inkl. QA-Bericht-Inhalt,
+      Zielkonflikt-Ablehnung (Ziel existiert bereits / Ziel == Quelle) ohne
+      jeden API-Aufruf, Abbruch mit korrektem Teilergebnis,
+      `stats_callback`-Inkremente, `total_callback` bereits vor dem ersten
+      API-Aufruf gemeldet, Budget-Limit-Durchsetzung.
+      `tests/test_ui_word_mode.py` (2 neue Tests, Datei deckt inzwischen
+      alle drei ausführbaren Modi ab, nicht mehr nur Word) - bestätigt,
+      dass `_start()` für PDF-Modus tatsächlich einen
+      `PdfTranslationWorker` erzeugt (dritter Fall im bereits
+      parametrisierten Dispatch-Test) und dass PDF-Modus nicht mehr als
+      `start.blocked_mode` blockiert gilt. Gesamter Testlauf: 75 passed,
+      1 skipped.
+    - Noch offen (siehe RoadMap.md Phase 2/PDF): ein echter Live-Lauf des
+      PDF-UI-Pfads gegen ein reales Dokument über einen echten Provider
+      steht noch aus (analog zum bereits erledigten PPTX-Live-Lauf und dem
+      weiterhin ausstehenden Word-Live-Lauf); außerdem bleiben die
+      zahlreichen, im PDF-Abschnitt der Roadmap aufgelisteten
+      Detailqualitätsfragen unverändert offen - diese Session hat sie NICHT
+      angefasst, nur dafür gesorgt, dass sie im QA-Bericht sichtbar
+      bleiben statt die UI-Anbindung auf ihre vollständige Klärung warten
+      zu lassen.
+
+- [x] Alle sechs im PDF-Abschnitt von RoadMap.md Phase 2/PDF verbliebenen
+  Detailfragen der Reihe nach untersucht, wo machbar mit Fix und
+  permanenter, dateiunabhängiger Regressionsabdeckung (17.08.2026, wie vom
+  Nutzer angefragt: "alle nacheinander prüfen", Glyphen-Verlust und
+  Font-Erhalt kombiniert als eine Architekturfrage). Vier reale Bugs
+  gefunden und behoben, zwei Punkte als grundsätzlich in Ordnung
+  verifiziert, ein Punkt als real und aktuell NICHT sinnvoll behebbar
+  bestätigt, ein Punkt als offene Architekturentscheidung bestätigt.
+  Gesamter Testlauf am Ende: 93 passed, 1 skipped (vorher 75 passed, 1
+  skipped - 18 neue Tests in 5 neuen Dateien). Im Einzelnen:
+
+  1. **Link-Annotationen nach Redaction (behoben).** Löst die offene
+     Prüffrage aus Zeile 89 im Abschnitt "Zu verifizieren" oben ab.
+     Direkt reproduziert: `page.apply_redactions()` löscht kommentarlos
+     JEDE Annotation, deren Rechteck die redigierte Fläche berührt -
+     auch Link-Annotationen, die zu einem völlig anderen, nicht
+     redigierten Block gehören und nur zufällig räumlich in der Nähe
+     liegen (z. B. wenn ein Block wächst oder das Layout eng ist). Da
+     ein Link-Block per `extract_blocks()` immer `translatable=False`
+     ist, wird der Link selbst NIE direkt redigiert - der Verlust
+     passiert ausschließlich als Nebenwirkung der Redaction eines
+     ANDEREN Blocks.
+       - Erster Lösungsansatz verworfen, BEVOR er verdrahtet wurde: pro
+         `redact_block()`-Aufruf sofort per `get_links()`-Vorher/Nachher-
+         Vergleich wiederherstellen. Direkt widerlegt: ein per
+         `page.insert_link()` wiederhergestellter Link ist für
+         `get_links()` im REST derselben laufenden Session unsichtbar
+         (nur nach `save()`+Neuöffnen wieder sichtbar) - eine SPÄTERE,
+         zweite Redaction, die denselben Link erneut trifft, zerstört
+         ihn erneut, ohne dass ein Vorher/Nachher-Vergleich das erkennen
+         könnte (beide Messungen zeigen `[]`). Direkt reproduziert und
+         verifiziert, bevor der fehlerhafte Ansatz verworfen wurde.
+       - Tatsächlicher Fix: `PyMuPdfEngine.open()` liest jetzt einmalig,
+         vor jeder Redaction, alle Links jeder Seite in
+         `self._original_links`. `save()` gleicht unmittelbar vor dem
+         eigentlichen Schreiben einmalig ab und stellt per
+         `page.insert_link()` alles wieder her, was im Snapshot war,
+         aber jetzt fehlt (`PyMuPdfEngine._restore_missing_links()`,
+         `_link_identity()` für den Abgleich ohne `xref`/`id`, die die
+         ursprüngliche, bereits gelöschte Annotation identifizieren und
+         beim Wiedereinfügen zu einem `KeyError` tief in PyMuPDFs
+         eigener ID-Kollisionsprüfung führen würden). Läuft nur EINMAL
+         pro Dokument, nicht pro Redaction - immun gegen das
+         Sichtbarkeitsproblem oben.
+       - Neu: `tests/test_pdf_link_preservation.py` (4 Tests) - dokumentiert
+         das Sichtbarkeitsproblem direkt, belegt den unbehandelten Bug als
+         Baseline, und verifiziert sowohl den Wiederherstellungsfall als
+         auch den Fall, dass ein nie betroffener Link nicht versehentlich
+         doppelt eingefügt wird.
+
+  2. **Durchsuchbarkeit/Copy-Paste-Qualität (verifiziert, ein bestätigter
+     Sonderfall).** Löst die offene Prüffrage aus Zeile 90 oben ab.
+     Grundsätzlich in Ordnung: Umlaute, Akzente und normale Sonderzeichen
+     (getestet u. a. "Ärger über großße Straßen") werden korrekt
+     eingefügt UND sind per `page.search_for()` wiederauffindbar. Die
+     eine bestätigte Ausnahme ist die `fi`-Ligatur-Problematik, siehe
+     Punkt 5 unten (beide Punkte teilen dieselbe Ursache und wurden
+     gemeinsam untersucht).
+
+  3. **Leerzeilen/Underline/Inline-Formatierung (verifiziert, keine
+     Regression gefunden).** `spans_to_html()` (Absatz-/Zeilenumbruch-
+     Marker, `<u>`/`<b>`/`<i>`-Verschachtelung, HTML-Escaping) hatte
+     bisher KEINE direkte Testabdeckung. Per Direkttest bestätigt:
+     Unterstreichung/Fett/Kursiv überstehen den vollen
+     `redact_block()`/`insert_text()`/`save()`-Rundlauf UND sind über
+     eine erneute `extract_blocks()`-Extraktion des Ergebnis-PDFs korrekt
+     wiedererkennbar (wichtiger methodischer Fallstrick dabei: ein
+     Ad-hoc-Test gegen `page.get_text("dict")` OHNE die projekteigenen
+     `_EXTRACT_FLAGS` - siehe Kommentar oben in
+     `pipeline/pdf/pymupdf_engine.py` - lieferte zunächst fälschlich
+     `char_flags` ohne Underline-Bit; erst mit `flags=_EXTRACT_FLAGS`
+     stimmt der Befund). Neu: `tests/test_pdf_formatting_roundtrip.py`
+     (6 Tests: `spans_to_html()` isoliert plus ein voller
+     Engine-Rundlauf). Vorbehalt aus der Roadmap-Formulierung ("an
+     mehreren realen Dokumenten und Providern") bleibt bestehen - diese
+     Abdeckung ist synthetisch, kein Mehrfach-Dokument/Mehrfach-Provider-
+     Test.
+
+  4. **Glyphen-Verlust + Font-Erhalt, kombiniert wie vom Nutzer gewünscht
+     (Glyphen-Verlust-Teil behoben, Font-Erhalt-Teil als offene
+     Architekturfrage bestätigt).** Font-Erhalt: bestätigt (Codesuche),
+     dass `TextBlock.font_name` nirgends in `pymupdf_engine.py` zur
+     Einfügung gelesen wird - Einfügung nutzt immer entweder die
+     Base-14-Helvetica-Varianten (`_FONT_VARIANTS`, reiner Textpfad) oder
+     CSS `font-family: sans-serif` (HTML/Story-Pfad), unabhängig von der
+     tatsächlichen Schrift des Originaldokuments. Bestätigt bereits
+     dokumentierte Einschränkung (Zeile 114 oben) erneut, kein neuer
+     Fix - Font-Extraktion/-Einbettung ist eine Projektentscheidung, kein
+     chirurgischer Patch.
+       - Glyphen-Verlust: beim Untersuchen des Font-Erhalt-Punkts direkt
+         reproduziert, dass der reine Textpfad (`_insert_plain_text()`,
+         erreichbar wenn `block.spans` leer ist - laut Docstring nur
+         "backward compatibility", in der Praxis über `translate_pdf()`
+         aktuell NICHT erreichbar, da echte Blöcke immer Spans haben,
+         aber ungeschützt, falls sich das je ändert) nicht-lateinische
+         Schriften kommentarlos durch "?" ersetzt: Kyrillisch/
+         Griechisch/CJK wurden vollständig zu Fragezeichen, während
+         `insert_text()` trotzdem `True` zurückgab (kein Fehler, kein
+         Signal). Ursache: die Base-14-Helvetica-Varianten sind auf
+         WinAnsiEncoding fixiert. Der HTML/Story-Pfad (verwendet, wann
+         immer `block.spans` nicht leer ist - also der reale
+         Produktionspfad) wurde im direkten Vergleich getestet und
+         übersteht denselben Text fehlerfrei (MuPDFs automatischer
+         Unicode-Font-Fallback). Fix: `insert_text()` leitet reinen Text
+         mit einem Zeichen außerhalb von WinAnsiEncoding jetzt über den
+         HTML/Story-Pfad um, statt ihn über `insert_textbox()` still zu
+         beschädigen (`_plain_text_needs_unicode_fallback()`,
+         `_plain_text_to_html()`, beide in `pipeline/pdf/pymupdf_engine.py`
+         - Letztere teilt sich die Absatz-Regruppierungslogik mit
+         `_insert_plain_text()` über die neue, aus beiden extrahierte
+         `_regroup_paragraphs()`). Neu: `tests/test_pdf_glyph_preservation.py`
+         (4 Tests). Wichtiger Vorbehalt: dieser Fix betrifft NICHT die in
+         Zeile 96 unten dokumentierte, andersartige Symbol-/Private-Use-
+         Area-Glyphen-Lücke (z. B. Wingdings-artige Bullet-Zeichen wie
+         U+F086) - das ist ein Font-Glyph-Problem, kein
+         Unicode-Encoding-Problem, und bleibt unverändert offen.
+
+  5. **`fi`-Ligatur bei Textsuche/Copy-Paste (bestätigt, aktuell NICHT
+     sinnvoll behebbar).** Löst die offene Frage aus Zeile 97 unten ab
+     ("noch nicht geprüft, ob das kontrollierbar ist"). Direkt
+     reproduziert: der HTML/Story-Pfad (`insert_htmlbox()`) ersetzt
+     `office`/`fine`/`film`/`fluffy`/`first` kommentarlos durch
+     `oﬃce`/`ﬁne`/`ﬁlm`/`ﬂuﬀy`/`ﬁrst` (OpenType-"liga"-Feature) - Suche
+     UND Kopieren liefern danach die falschen Codepoints. Vier
+     Gegenmaßnahmen geprüft, KEINE hat funktioniert: CSS
+     `font-variant-ligatures: none`, CSS `font-feature-settings: "liga"
+     0, ...` (beide von MuPDFs CSS-Engine ignoriert), explizite
+     Font-Familien wie "Helvetica"/"Arial"/"Times" statt "sans-serif"
+     (ligiert weiterhin - nur "monospace" nicht, für echten Fließtext
+     unbrauchbar), sowie Zero-Width-Non-Joiner (U+200C) zwischen den
+     betroffenen Buchstaben (verhindert die Ligatur zwar, aber die
+     Base-14-Schrift im Story-Rendering hat dafür kein Nullbreite-Glyph
+     und zeigt stattdessen eine sichtbare Lücke - visuell inakzeptabel).
+     Ein sauberer Fix bräuchte entweder nachträgliche
+     ToUnicode-CMap-Chirurgie an den Ligatur-Glyphen (invasiv,
+     MuPDF-Versions-fragil, nicht versucht) oder einen kompletten
+     Ersatz des HTML/Story-Einfügepfads durch manuelles
+     Span-für-Span-`insert_textbox()` (eigene Projektentscheidung, siehe
+     Punkt 4 oben zu Font-Erhalt - hängt strukturell zusammen). Neu:
+     `tests/test_pdf_ligature_limitation.py` (2 Tests) - schreibt den
+     AKTUELLEN (fehlerhaften) Zustand exekutierbar fest, damit ein
+     künftiges MuPDF-Upgrade, das das behebt, hier auffällt statt
+     stillschweigend unbemerkt zu bleiben.
+
+  6. **Redaction über Hintergrundbildern/überlagerten Textblöcken
+     (Hintergrundbild-Teil verifiziert als unbedenklich, überlagerte-
+     Blöcke-Teil als realer Bug gefunden und behoben).** Löst die offene
+     Vermutung aus Zeile 115 unten ab ("Später prüfen, ob redact_block
+     das Hintergrundbild ungewollt betrifft").
+       - Hintergrundbilder: `page.apply_redactions()`s Default
+         `images=2` ("blank out overlapping image parts") wurde direkt
+         geprüft - nur der tatsächlich redigierte Rechteck-Ausschnitt
+         eines Bildes wird weiß, der Rest des Bildes UND das Bildobjekt
+         selbst bleiben vollständig erhalten. Genau das gewünschte
+         Verhalten, kein Bug.
+       - Überlagerte Blöcke: real und direkt reproduziert. Der
+         Kollisionsschutz (`_next_block_y0()`/
+         `PyMuPdfEngine._collision_aware_max_y1()`, siehe die frühere
+         "Kollisionsschutz"-Eintragsgruppe weiter oben) prüfte bei einem
+         `block.highlighted`-Block bisher NUR gegen dessen eigene,
+         schmale Text-bbox - obwohl `_grow_highlight_if_needed()`s
+         tatsächliche Neuzeichnung der vergrößerten Highlight-Fläche
+         (anders als deren eigentlicher Redact-Schritt, der schmal
+         bleibt) die VOLLE Breite des zugehörigen Highlight-Rechtecks
+         nutzt (siehe `redact_block()`s Docstring). Ein Block, der
+         außerhalb der schmalen bbox, aber innerhalb der breiten
+         Highlight-Spalte liegt, war für die Kollisionsprüfung
+         unsichtbar - nichts deckelte das Höhenwachstum, bevor die
+         vergrößerte Highlight-Fläche direkt über diesen Nachbarblock
+         gemalt wurde. Konkret reproduziert: ein kurzes, highlightetes
+         Zitat mit einer absichtlich sehr langen Übersetzung malte eine
+         hellblaue Fläche über einen unbeteiligten Block seitlich davon
+         (Pixel-Stichprobe an dessen Position matchte exakt
+         `_HIGHLIGHT_FILL_COLOR`, obwohl der Text laut `get_text()`
+         technisch noch "vorhanden" war - nur optisch begraben). Fix:
+         `_next_block_y0()` bekommt einen optionalen `x_range`-Parameter;
+         `_collision_aware_max_y1()` übergibt für highlightete Blöcke die
+         breite `_associated_highlight_extent()`-Spanne statt der
+         schmalen `block.bbox`. Nach dem Fix wird das Wachstum korrekt
+         vor dem Nachbarblock gekappt (verifiziert: Pixel an dessen
+         Position bleibt weiß, nicht mehr Highlight-Farbe) - der
+         highlightete Block fällt stattdessen auf den bestehenden
+         Schriftverkleinerungs-/Forced-Fallback-Pfad zurück, statt einen
+         fremden Block zu überdecken. Neu:
+         `tests/test_pdf_overlay_collision.py` (2 Tests: Kollisionsfall
+         plus Hintergrundbild-Kontrolltest).
+
+- [x] Erster voller Strukturlauf gegen die echte, vertrauliche
+  "1526 VIRELICON.pdf" seit sie in dieser Umgebung verfügbar ist
+  (17.08.2026) - bisher stand diese Datei in dieser Sitzung nie zur
+  Verfügung (siehe mehrere ältere "nicht verfügbar"-Vermerke oben, u. a.
+  beim Duplikat-Text-Bug), der Nutzer hat sie jetzt bereitgestellt.
+  **Kein echter Übersetzungslauf** - in dieser Cloud-Sitzung sind keine
+  Provider-API-Zugangsdaten hinterlegt (`keyring`-Backend meldet
+  `fail`, keine Umgebungsvariablen gesetzt), daher mit einem
+  Platzhalter-Provider statt DeepL/Google/OpenAI/Grok gelaufen -
+  übersetzt absichtlich deutlich länger als das Original (Präfix
+  `[DE-PLATZHALTER-N]` + zwei zusätzliche Füllsätze pro Block), um
+  Wachstum/Schrumpfung mindestens so stark wie eine reale Übersetzung
+  zu erzwingen. Dokument: 14 Seiten, 142 Blöcke (133 übersetzbar, 9
+  übersprungen), 54 highlightete Blöcke, 11 echte Link-Annotationen auf
+  7 Seiten.
+    - Vollständiger `translate_pdf()`-Lauf über alle 14 Seiten: 133
+      übersetzt, 9 übersprungen, 0 fehlgeschlagen, keine Exceptions.
+      129/133 Blöcke mit Overflow (erwartet bei diesem absichtlich
+      überlangen Platzhalter).
+    - Link-Erhalt (der in dieser Session neu gebaute Fix, siehe oben):
+      alle 11 Links auf allen 7 betroffenen Seiten nach dem vollen Lauf
+      exakt erhalten (Vorher-/Nachher-Zählung pro Seite identisch) - die
+      erste Verifikation dieses Fixes an einem echten Dokument statt nur
+      synthetischen Fixtures.
+    - Kollisionsschutz für überlagerte Blöcke (ebenfalls neu in dieser
+      Session): 280 Wachstums-Anomalie-Log-Einträge (88
+      `growth_capped_by_collision`, 115 `small_final_font`, 77
+      `excessive_height_growth` - plausibel angesichts des absichtlich
+      überlangen Platzhalters), keine sichtbar über einen Nachbarblock
+      gemalte Highlight-Fläche in den geprüften Stichproben.
+    - Visuelle Stichprobe (Seiten 0, 3, 6 als PNG gerendert und
+      angesehen): Formatierung (fett/kursiv/unterstrichen/Bullet-Punkte),
+      beide echten Hyperlinks (blau/unterstrichen, unverändert) und die
+      highlighteten Zitat-Flächen sehen alle korrekt aus, keine
+      sichtbaren Überlappungen oder verlorenen Inhalte. Eine kosmetische
+      Beobachtung (kein neuer Bug): ein sehr schmaler Attributions-Block
+      ("- Ivan", ca. 33pt eigene Spaltenbreite, direkt neben einem
+      großen eingebetteten Chat-Screenshot) wickelt den stark
+      überlangen Platzhaltertext sichtbar eng um sich selbst - Inhalt
+      per `get_text()` auf vollständig geprüft (kein Abschneiden), rein
+      optisch eng. Deckt sich mit der bereits dokumentierten,
+      akzeptierten Einschränkung für kurze Ein-Zeiler/Attributionszeilen
+      unter starkem künstlichem Overflow (siehe die "Kollisionsschutz"-
+      Einträge weiter oben) - unter einer realen, typischerweise nur
+      moderat längeren Übersetzung dürfte das deutlich schwächer
+      ausfallen. Emoji im Originaltext (🔴, 💯) werden vom
+      Sans-Serif-Fallback-Font durch ein generisches Ersatzsymbol
+      dargestellt statt zu verschwinden - vorbestehendes Verhalten,
+      nicht Teil dieser Session.
+    - Verarbeitete Datei und Zwischenstände (Platzhalter-Ausgabe-PDF,
+      gerenderte PNGs, Anomalie-Log) wurden NICHT dauerhaft abgelegt
+      oder an den Nutzer verschickt (vertrauliches Dokument, siehe
+      Projekt-Konvention) - nur lokal in dieser Sitzung geprüft und
+      danach aufgeräumt.
+    - Offen: der eigentliche Übersetzungsschritt mit einem echten
+      Provider gegen dieses Dokument steht noch aus - dafür werden in
+      dieser Cloud-Sitzung Provider-Zugangsdaten benötigt, die hier
+      nicht hinterlegt sind (siehe RoadMap.md).
+
+- [x] Echter Live-Lauf des PDF-UI-Pfads gegen "1526 VIRELICON.pdf" über
+  einen echten Provider (Google, lokal beim Nutzer über die Desktop-App
+  ausgeführt) durchgeführt und drei vom Nutzer per Screenshot gemeldete
+  Bugs root-caused und behoben (17.08.2026). Löst den oben als offen
+  markierten "echter Live-Lauf"-Punkt ab. Ablauf dieser Session: zunächst
+  ein lokaler `ModuleNotFoundError: No module named 'fitz'` (PyMuPDF war
+  in der aktiven pyenv-Umgebung trotz `requirements.txt`-Eintrag nicht
+  installiert - kein Code-Bug, behoben mit `pip install -r
+  requirements.txt`), danach eine Verwechslung bei der
+  API-Key-Speicherung (Nutzer hatte "Umgebungsvariable (Sitzung)" statt
+  "OS-Keyring"/"Beides" gewählt - `ui/settings.py::save_credential()`
+  speichert für `target="environment"` bewusst nur in `os.environ`,
+  sitzungsgebunden; kein Bug, vom Nutzer selbst bestätigt nach kurzer
+  Rückfrage). Danach der eigentliche Live-Lauf, drei Bugs gemeldet:
+
+  1. **Header wurde mitübersetzt.** Root Cause: `ui/pdf_job.py::
+     run_pdf_job()` hat bis dahin NIE ein `DocumentTemplate` an
+     `PyMuPdfEngine` übergeben - weder das seit längerem vorhandene,
+     dokumentspezifische `templates/virelicon.json` (das kein UI-Pfad
+     je geladen hat) noch irgendeine automatische Erkennung. Der
+     Ausschlussmechanismus selbst (`header_bbox`/`footer_bbox` in
+     `PyMuPdfEngine.extract_blocks()`) existierte und funktionierte
+     bereits - er wurde vom direkten PDF-UI-Pfad schlicht nie benutzt.
+     Rückfrage an den Nutzer (AskUserQuestion): vorhandene Vorlage
+     einfach laden, oder generische Erkennung samt UI-Checkbox bauen?
+     Antwort: **"Checkbox Ja/Nein im UI"** - generisch, nicht an dieses
+     eine Dokument gebunden. Umgesetzt:
+       - Neu `pipeline/pdf/template.py::detect_header_footer_zones()`:
+         erkennt wiederkehrende Kopf-/Fußzeilen rein generisch über eine
+         Kombination aus Text-Wiederholung (Ziffern werden vor dem
+         Vergleich maskiert, damit z. B. "Page 3 of 14" über Seiten
+         hinweg noch als identisch erkannt wird - `_normalize_for_
+         repetition()`) UND Positions-Wiederholung across Seiten, mit
+         konfigurierbarem `zone_fraction` (wie weit oben/unten auf der
+         Seite gesucht wird) und `min_page_fraction` (wie viel Anteil der
+         Seiten die Wiederholung zeigen muss). Kein dokumentspezifischer
+         Code, keine Abhängigkeit von `templates/virelicon.json`. Neue
+         Tests: `tests/test_pdf_header_footer_detection.py` (6 Tests:
+         Erkennung inkl. Seitenzahl-Handling, Fließtext wird nicht
+         fälschlich erkannt, keine Wiederholung → `None`, Wiederholung
+         unter der Schwelle → `None`, End-to-End-Ausschluss über
+         `PyMuPdfEngine(template=...)`, Randfall leeres Dokument).
+       - Durchgereicht als zwei unabhängige, PDF-only-Checkboxen
+         ("Header ausschließen"/"Footer ausschließen") durch den
+         kompletten Stack, jeweils spiegelnd wie `ico_mode` bereits für
+         Word verdrahtet ist:
+         `ui/pdf_job.py::run_pdf_job()` bekommt `exclude_header`/
+         `exclude_footer` (Default `False`) - bei Bedarf wird VOR dem
+         eigentlichen Lauf ein zweites, wegwerfbares `PyMuPdfEngine()`
+         ohne Template geöffnet, nur um `detect_header_footer_zones()`
+         aufzurufen (`extract_blocks()` ist rein lesend, stört den
+         echten Lauf nicht), das Ergebnis fließt in ein neu gebautes
+         `DocumentTemplate`, mit dem dann die ECHTE Engine konstruiert
+         wird (Template kann nicht nachträglich auf eine schon
+         benutzte Engine-Instanz gesetzt werden, da `extract_blocks()`
+         pro Seite cached). Der QA-Bericht nennt jetzt explizit, ob
+         Header/Footer-Ausschluss aktiv war UND ob dabei wirklich etwas
+         erkannt wurde (kein stilles "nichts passiert").
+         `ui/workers.py::PdfTranslationWorker` reicht beide Flags durch.
+         `ui/models.py::TranslationRequest` bekommt `exclude_header`/
+         `exclude_footer` (Default `False`, dokumentiert analog zu
+         `ico_mode`). `ui/app.py`: zwei neue `QCheckBox` (`self.
+         exclude_header`, `self.exclude_footer`), PDF-only sichtbar
+         (`_mode_changed()`, spiegelt `ico_mode`s Word-only-Logik exakt
+         inkl. Zurücksetzen beim Moduswechsel), in `_request()`/
+         `_start()` verdrahtet. `ui/i18n.py`: neue DE/EN-Texte
+         (`field.exclude_header`/`exclude_header.checkbox`/`exclude_
+         header.tooltip` und Footer-Pendants).
+       - Neue UI-Regressionstests in `tests/test_ui_word_mode.py` (3
+         Tests, spiegeln die vorhandenen `ico_mode`-Tests exakt):
+         Sichtbarkeit nur im PDF-Modus inkl. Reset beim Moduswechsel,
+         `_request()` trägt beide Flags korrekt, `PdfTranslationWorker`
+         erhält beide Flags aus dem Request.
+
+  2. **Markierter (blau hinterlegter) Block am Seitenende (Seite 1):
+     übersetzter Text schwebte über einer leeren Markierungs-Box statt
+     darin.** Anhand der echten Ausgabedatei (vom Nutzer bereitgestellter
+     Pfad `tests/output/1526 VIRELICON_DE.pdf`, zusammen mit der echten
+     Quelldatei `1526 VIRELICON.pdf`) rendergenau nachvollzogen (Vorher/
+     Nachher-PNG-Ausschnitte des Seitenendes verglichen). Root Cause in
+     `PyMuPdfEngine._next_block_y0()`: die Funktion sucht den "nächsten
+     Block darunter" durch Vergleich `other.bbox[1] > by0` (Oberkante des
+     Kandidaten größer als die EIGENE Oberkante des wachsenden Blocks).
+     In diesem Dokument enden zwei UNTERSCHIEDLICHE, separat extrahierte
+     PDF-Blöcke ("So Creator yearned for purity..." und, direkt
+     anschließend auf DERSELBEN Zeile, separat formatiert, "2 ways:") auf
+     derselben visuellen Zeile - der kurze Block "2 ways:" hat also eine
+     eigene Oberkante (`bbox[1]`), die INNERHALB der Y-Spanne des langen
+     Blocks liegt, nicht darunter. Der alte Vergleich hielt "2 ways:"
+     trotzdem für "den nächsten Block darunter" und kappte `max_y1` des
+     langen Blocks auf einen Wert UNTER dessen eigener ursprünglicher
+     Unterkante (`bbox[3]`) - der Block durfte sich also nicht nur nicht
+     vergrößern, sein nutzbarer Bereich wurde sogar kleiner als im
+     Original. Die übersetzte (deutlich längere) Textmenge passte dort
+     nicht hinein; da die tatsächlich benötigte Höhe wegen der Kappung
+     nie über die ursprüngliche Highlight-Fläche hinausging, hat
+     `_grow_highlight_if_needed()` (die die Markierungsfarbe bei Bedarf
+     nachzeichnet) korrekterweise NICHTS getan - mit dem Ergebnis, dass
+     die per `redact_block()` weiß übermalte Original-Markierungsfläche
+     leer blieb, während der Text (durch den regulären Fit-Fallback,
+     nicht durch die Highlight-Logik) irgendwo in der Nähe, aber ohne
+     zugehörigen farbigen Hintergrund landete. Fix: Vergleich in
+     `_next_block_y0()` auf `other.bbox[1] >= by1` (eigene UNTERKANTE)
+     umgestellt - ein Block auf derselben Zeile zählt jetzt korrekt nicht
+     mehr als "darunter". Geprüft, dass die bestehenden, gezielt für den
+     ÄHNLICHEN, aber verschiedenen Kollisionsfall aus einer früheren
+     Session gebauten Tests (`tests/test_pdf_overlay_collision.py`,
+     `tests/test_pdf_redact_insert_collision.py` - dort liegen die
+     Blöcke echt untereinander, nicht auf derselben Zeile) weiterhin
+     bestehen. Neue, gezielte Regressionsabdeckung in
+     `tests/test_pdf_same_row_sibling_collision.py` (synthetisches PDF,
+     Aufbau spiegelt `tests/test_pdf_overlay_collision.py`; 2 Tests -
+     einer prüft `_collision_aware_max_y1()` direkt, einer den
+     kompletten Redact/Insert/Save-Pfad per Pixel-Stichprobe an der
+     gewachsenen Fläche) - beide Tests per Revert-Probe bestätigt
+     fehlschlagend gegen den alten Vergleich.
+
+  3. **Erster Absatz auf Seite 2 gar nicht bzw. nur teilweise
+     übersetzt.** Ebenfalls anhand der echten Ausgabedatei rendergenau
+     nachvollzogen. Root Cause in `PyMuPdfEngine.extract_blocks()`:
+     `translatable` wurde bislang mit `not any(block_overlaps(bbox,
+     link_bbox) for link_bbox in link_bboxes)` auf der GESAMTEN
+     Block-Bbox berechnet - sobald IRGENDEINE Zeile eines Blocks eine
+     Link-Annotation überlappte, wurde der komplette (potenziell
+     mehrzeilige) Block non-translatable. In diesem Dokument sitzt mitten
+     in einem 6-zeiligen Absatz auf Seite 2 eine einzelne, per Link
+     zitierte Telegram-Post-Zeile ("Divide ➔ ...") - das hat bisher den
+     kompletten umgebenden Absatz von der Übersetzung ausgeschlossen,
+     nicht nur diese eine Zeile. Per Konstruktion bereits korrekt und
+     bewusst so gewollt (siehe `tests/fixtures/representative.pdf`s
+     Kommentar weiter oben in dieser Datei): ein Block, der WIRKLICH nur
+     aus Link-Text besteht, soll komplett ausgeschlossen bleiben - das
+     Problem war die fehlende Granularität für einen Block, der NUR
+     TEILWEISE eine Link-Zeile enthält. Fix, spiegelt die bestehende
+     `_split_by_highlight()`/`_line_is_highlighted()`-Architektur exakt:
+     neue `_split_by_link()`/`_line_overlaps_link()` in
+     `pipeline/pdf/pymupdf_engine.py` zerlegen einen (bereits nach
+     Highlight-Status aufgeteilten) Zeilenlauf zusätzlich in Link-/
+     Nicht-Link-Läufe, bevor `translatable` bestimmt wird - nur die
+     tatsächlich linküberlappende(n) Zeile(n) werden als eigener,
+     separater `translatable=False`-Block ausgegeben, der Rest des
+     ursprünglichen Absatzes bleibt ein normaler, übersetzbarer Block.
+     `_line_overlaps_link()` prüft (anders als `_line_is_highlighted()`,
+     die nur vertikal prüft, weil eine Highlight-Fläche immer die volle
+     Zeilenbreite abdeckt) echte 2D-Überlappung, MIT Toleranz
+     (`_LINK_OVERLAP_TOLERANCE`, Pendant zu `_HIGHLIGHT_LINE_TOLERANCE`):
+     im echten Dokument saß eine völlig unbeteiligte Zeile ("this
+     confirms doubt was always...") nur 0,02pt unterhalb eines fremden,
+     benachbarten Link-Rechtecks - ohne Toleranz hätte allein dieser
+     Rundungsfehler (bei einem exakten, toleranzfreien Rechteck-
+     Überlappungstest) die Zeile mit ausgeschlossen; mit Toleranz bleibt
+     sie korrekt übersetzbar. Verifiziert, dass der ursprüngliche
+     Anwendungsfall (Block besteht komplett aus Link-Text, z. B.
+     `tests/fixtures/representative.pdf`) unverändert vollständig
+     non-translatable bleibt - der Split ändert daran nichts, weil dort
+     jede Zeile überlappt. Docstring von `extract_blocks()` entsprechend
+     aktualisiert (beschreibt jetzt den Highlight-Split UND den
+     nachgelagerten Link-Split). Neue Regressionsabdeckung in
+     `tests/test_pdf_link_line_split.py` (3 Tests: Link auf nur einer
+     Zeile schließt nur diese Zeile aus statt des ganzen Absatzes;
+     0,05pt-Rundungs-Sliver an einer Zeilengrenze schließt die
+     Nachbarzeile NICHT versehentlich mit aus; ein Block, der komplett
+     aus Link-Text besteht, bleibt weiterhin komplett ausgeschlossen).
+
+  Alle drei Fixes zusätzlich End-to-End gegen die echte, vertrauliche
+  "1526 VIRELICON.pdf" mit einem Fake-Provider verifiziert (absichtlich
+  lange Platzhalterübersetzungen, um Wachstum zu erzwingen) und die
+  betroffenen Seiten als PNG vor/nach gerendert und visuell verglichen -
+  in allen drei Fällen sieht das Ergebnis jetzt sichtbar korrekt aus
+  (Markierungsfläche wächst korrekt mit dem Text mit; der vormals
+  übersprungene Absatz auf Seite 2 wird jetzt bis auf die eine
+  Link-Zeile vollständig übersetzt). Gerenderte PNGs und die
+  Platzhalter-Ausgabedatei wurden NICHT dauerhaft abgelegt oder verschickt
+  (vertrauliches Dokument, siehe Projekt-Konvention) - nur lokal in
+  dieser Sitzung geprüft und danach aufgeräumt. Gesamter Testlauf am
+  Ende: 107 passed, 1 skipped (vorher 99 passed, 1 skipped - 5 neue Tests
+  in `tests/test_pdf_same_row_sibling_collision.py` (2) und
+  `tests/test_pdf_link_line_split.py` (3), plus 3 neue Tests in
+  `tests/test_ui_word_mode.py`).

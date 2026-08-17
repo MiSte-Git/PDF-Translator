@@ -142,7 +142,13 @@ def _analyze_one(path: Path) -> tuple[CandidateInfo, str]:
     stat = path.stat()
     try:
         engine = DocxEngine()
-        engine.open(str(path))
+        # This module only ever compares candidates for an ICO duplicate
+        # group (see the module docstring) - ico_mode=True keeps its prior
+        # behaviour of splitting the page-1 metadata block (domain/date/
+        # developer/ICO name) from the translatable body text for the
+        # similarity heuristic below. See DocxEngine.open()'s docstring:
+        # this scan is opt-in now instead of running unconditionally.
+        engine.open(str(path), ico_mode=True)
 
         paragraphs = engine.get_paragraphs()
         header_footer = engine.get_header_footer_paragraphs()

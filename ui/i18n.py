@@ -44,6 +44,28 @@ DE = {
     "field.source_language": "Ausgangssprache",
     "field.target_language": "Zielsprache",
     "field.protected_terms": "Geschützte Begriffe",
+    "field.ico_mode": "ICO-Dokument",
+    "ico_mode.checkbox": "Seite-1-Bereich nicht übersetzen",
+    "ico_mode.tooltip": (
+        "Nur für den internen Dokumententyp ICO: erzwingt, dass der Metadaten-"
+        "bereich vor der Trennlinie auf Seite 1 NICHT übersetzt wird - "
+        "unabhängig davon, ob die Trennlinie gefunden wird. Für alle anderen "
+        "Dokumente deaktiviert lassen."
+    ),
+    "field.exclude_header": "Kopfzeile",
+    "exclude_header.checkbox": "Wiederkehrende Kopfzeile nicht übersetzen",
+    "exclude_header.tooltip": (
+        "Erkennt automatisch Text, der nahe oben auf den meisten Seiten "
+        "identisch (oder nur mit unterschiedlicher Seitenzahl) wiederkehrt, "
+        "und schließt ihn von der Übersetzung aus. Wird nichts Passendes "
+        "gefunden, ändert sich nichts."
+    ),
+    "field.exclude_footer": "Fußzeile",
+    "exclude_footer.checkbox": "Wiederkehrende Fußzeile nicht übersetzen",
+    "exclude_footer.tooltip": (
+        "Wie bei der Kopfzeile, nur für wiederkehrenden Text nahe unten auf "
+        "der Seite (z. B. Copyright-Zeile, Seitenzahl)."
+    ),
     "source_language.placeholder": "optional / automatisch",
     "protected.placeholder": "Ein geschützter Begriff pro Zeile",
     "analysis.group": "Analyse und Kostenkontrolle",
@@ -55,13 +77,41 @@ DE = {
     "analysis.no_warnings": "Keine Analysewarnungen.",
     "analysis.within": "innerhalb",
     "analysis.exceeded": "ÜBERSCHRITTEN",
-    "analysis.summary": "<b>{units} {unit_label}</b> · {characters:,} Textzeichen · {images} eingebettete/Bilddateien<br>Monatsverbrauch {usage:,} / Freikontingent {free:,} Zeichen · Schätzung ${cost:.2f}<br>Lauflimit {limit:,}: {limit_state}<br>{warnings}",
+    "analysis.summary": "<b>{units} {unit_label}</b> · {characters:,} Textzeichen · {images} eingebettete/Bilddateien<br>Lokale Schätzung ({provider}): Monatsverbrauch {usage:,} / Freikontingent {free:,} Zeichen · Schätzung ${cost:.2f}<br>Lauflimit {limit:,}: {limit_state}<br>{warnings}",
+    "analysis.live_quota": "<b>Live-Kontingent (DeepL, gerade abgerufen):</b> {used:,} von {limit:,} Zeichen verbraucht, {remaining:,} verbleibend.",
+    "analysis.live_quota_unlimited": "<b>Live-Kontingent (DeepL, gerade abgerufen):</b> {used:,} Zeichen verbraucht, Konto meldet kein Limit.",
     "unit.pages": "Seiten", "unit.slides": "Folien", "unit.paragraphs": "Absätze", "unit.images": "Bilder",
     "warning.scan_pdf": "Bild-/Scan-PDF erkannt: OCR ist für den Dokumenttext erforderlich.",
     "warning.image_cost_unknown": "OCR-Zeichen und Bildübersetzungskosten sind erst nach der OCR bekannt.",
     "warning.image_selection_later": "Die konkrete Bildauswahl erfolgt nach der Analyse in einer späteren UI-Ausbaustufe.",
+    "warning.live_quota_unavailable": "Live-Kontingent bei DeepL gerade nicht abrufbar (kein Schlüssel, offline, oder API-Fehler) – es wird die lokale Schätzung verwendet.",
     "start.button": "Übersetzung starten",
-    "start.pending": "Die Ausführung wird im nächsten Implementierungsschritt angebunden.",
+    "start.pending": "Für diesen Modus ist der Start noch nicht angebunden (siehe RoadMap.md).",
+    "start.ready": "Bereit zum Start.",
+    "start.blocked_running": "Ein Lauf ist bereits aktiv.",
+    "start.blocked_mode": "Für diesen Modus ist der Start noch nicht angebunden (siehe RoadMap.md) – nur „Präsentation übersetzen“ ist bereits verbunden.",
+    "start.blocked_no_analysis": "Bitte zuerst „Dokument analysieren und Kosten schätzen“ ausführen.",
+    "start.blocked_not_confirmed": "Bitte die Checkbox „Analyse und Kostenschätzung geprüft“ aktivieren.",
+    "dialog.choose_output_dir": "Zielordner wählen",
+    "dialog.confirm_run": "Übersetzung starten",
+    "start.confirm_summary": "Es werden schätzungsweise {characters:,} Zeichen an {provider} gesendet (geschätzte Kosten ${cost:.2f}).\nZieldatei: {destination}\n\nJetzt starten?",
+    "job.group": "Lauf und Ergebnis",
+    "job.idle": "Noch kein Lauf gestartet.",
+    "job.running": "Übersetzung läuft …",
+    "job.progress_prefix": "Verarbeite: {location}",
+    "job.progress_count": "{processed} von {total} Absätzen verarbeitet",
+    "job.stats_summary": "{translated} übersetzt · {skipped} übersprungen · {failed} fehlgeschlagen · {chars:,} Zeichen gesendet",
+    "job.cancel": "Abbrechen",
+    "job.cancel_requested": "Abbruch angefordert – wird nach dem laufenden API-Aufruf gestoppt …",
+    "job.result_summary": "Fertig: {translated} übersetzt, {skipped} übersprungen, {failed} fehlgeschlagen, {chars:,} Zeichen gesendet.\nAusgabedatei: {output}\nQA-Bericht: {report}",
+    "job.result_cancelled_suffix": "\nHinweis: Lauf wurde abgebrochen – dies ist ein Teilergebnis, bereits übersetzte Inhalte wurden gespeichert.",
+    "job.overflow_none": "Keine neuen Überlaufrisiken gefunden.",
+    "job.overflow_count": "{count} Überlaufhinweis(e) im QA-Bericht – bitte manuell in PowerPoint/Impress prüfen.",
+    "job.pdf_overflow_none": "Kein Block musste beim Einfügen wachsen oder schrumpfen.",
+    "job.pdf_overflow_count": "{count} Block/Blöcke musste(n) wachsen oder schrumpfen, um zu passen – bitte im PDF stichprobenartig prüfen.",
+    "job.open_folder": "Ordner öffnen",
+    "job.open_report": "QA-Bericht öffnen",
+    "job.failed_title": "Übersetzung fehlgeschlagen",
     "settings.button": "Einstellungen …",
     "settings.title": "Einstellungen",
     "settings.language": "Oberflächensprache",
@@ -80,6 +130,8 @@ DE = {
     "credentials.title": "Zugangsdaten",
     "credentials.saved": "API-Schlüssel wurde gespeichert.",
     "credential.environment": "Umgebungsvariable (Sitzung)", "credential.keyring": "OS-Keyring", "credential.missing": "Nicht eingerichtet",
+    "provider.missing_key": "Kein API-Schlüssel für „{provider}“ hinterlegt. <a href=\"settings\">Jetzt einrichten</a>",
+    "provider.missing_key_dialog": "Für den Anbieter „{provider}“ ist kein API-Schlüssel hinterlegt. Ohne Schlüssel schlägt jeder Übersetzungsaufruf fehl.",
     "dialog.check_input": "Eingaben prüfen",
     "dialog.analysis": "Analyse",
     "dialog.choose_images": "Bilder auswählen",
@@ -104,6 +156,28 @@ EN = {
     "field.source_language": "Source language",
     "field.target_language": "Target language",
     "field.protected_terms": "Protected terms",
+    "field.ico_mode": "ICO document",
+    "ico_mode.checkbox": "Skip page-1 region",
+    "ico_mode.tooltip": (
+        "Internal ICO document type only: forces the page-1 metadata block "
+        "in front of the separator line to be excluded from translation - "
+        "regardless of whether the separator is found. Leave disabled for "
+        "every other document."
+    ),
+    "field.exclude_header": "Header",
+    "exclude_header.checkbox": "Don't translate recurring header",
+    "exclude_header.tooltip": (
+        "Automatically detects text that repeats near the top of most "
+        "pages (identical, or only differing by a page number) and "
+        "excludes it from translation. If nothing matching is found, "
+        "nothing changes."
+    ),
+    "field.exclude_footer": "Footer",
+    "exclude_footer.checkbox": "Don't translate recurring footer",
+    "exclude_footer.tooltip": (
+        "Same as the header option, for text that repeats near the bottom "
+        "of the page (e.g. a copyright line, page number)."
+    ),
     "source_language.placeholder": "optional / automatic",
     "protected.placeholder": "One protected term per line",
     "analysis.group": "Analysis and cost control",
@@ -115,13 +189,41 @@ EN = {
     "analysis.no_warnings": "No analysis warnings.",
     "analysis.within": "within limit",
     "analysis.exceeded": "EXCEEDED",
-    "analysis.summary": "<b>{units} {unit_label}</b> · {characters:,} text characters · {images} embedded/image files<br>Monthly usage {usage:,} / free allowance {free:,} characters · estimate ${cost:.2f}<br>Run limit {limit:,}: {limit_state}<br>{warnings}",
+    "analysis.summary": "<b>{units} {unit_label}</b> · {characters:,} text characters · {images} embedded/image files<br>Local estimate ({provider}): monthly usage {usage:,} / free allowance {free:,} characters · estimate ${cost:.2f}<br>Run limit {limit:,}: {limit_state}<br>{warnings}",
+    "analysis.live_quota": "<b>Live quota (DeepL, just checked):</b> {used:,} of {limit:,} characters used, {remaining:,} remaining.",
+    "analysis.live_quota_unlimited": "<b>Live quota (DeepL, just checked):</b> {used:,} characters used, account reports no limit.",
     "unit.pages": "pages", "unit.slides": "slides", "unit.paragraphs": "paragraphs", "unit.images": "images",
     "warning.scan_pdf": "Image/scanned PDF detected: OCR is required for the document text.",
     "warning.image_cost_unknown": "OCR characters and image translation costs are unknown until OCR completes.",
     "warning.image_selection_later": "Individual image selection will follow the analysis in a later UI iteration.",
+    "warning.live_quota_unavailable": "DeepL's live quota isn't reachable right now (no key, offline, or an API error) - using the local estimate instead.",
     "start.button": "Start translation",
-    "start.pending": "Execution will be connected in the next implementation step.",
+    "start.pending": "Execution is not yet connected for this mode (see RoadMap.md).",
+    "start.ready": "Ready to start.",
+    "start.blocked_running": "A run is already in progress.",
+    "start.blocked_mode": "Execution is not yet connected for this mode (see RoadMap.md) - only \"Translate presentation\" is wired up so far.",
+    "start.blocked_no_analysis": "Run \"Analyze document and estimate cost\" first.",
+    "start.blocked_not_confirmed": "Please tick \"I reviewed the analysis and cost estimate\".",
+    "dialog.choose_output_dir": "Choose output folder",
+    "dialog.confirm_run": "Start translation",
+    "start.confirm_summary": "About to send an estimated {characters:,} characters to {provider} (estimated cost ${cost:.2f}).\nOutput file: {destination}\n\nStart now?",
+    "job.group": "Run and result",
+    "job.idle": "No run started yet.",
+    "job.running": "Translation running …",
+    "job.progress_prefix": "Processing: {location}",
+    "job.progress_count": "{processed} of {total} paragraphs processed",
+    "job.stats_summary": "{translated} translated · {skipped} skipped · {failed} failed · {chars:,} characters sent",
+    "job.cancel": "Cancel",
+    "job.cancel_requested": "Cancellation requested – will stop after the current API call …",
+    "job.result_summary": "Done: {translated} translated, {skipped} skipped, {failed} failed, {chars:,} characters sent.\nOutput file: {output}\nQA report: {report}",
+    "job.result_cancelled_suffix": "\nNote: the run was cancelled – this is a partial result, already-translated content was saved.",
+    "job.overflow_none": "No new overflow risks found.",
+    "job.overflow_count": "{count} overflow note(s) in the QA report – please review manually in PowerPoint/Impress.",
+    "job.pdf_overflow_none": "No block needed to grow or shrink while inserting.",
+    "job.pdf_overflow_count": "{count} block(s) needed to grow or shrink to fit – please spot-check the PDF.",
+    "job.open_folder": "Open folder",
+    "job.open_report": "Open QA report",
+    "job.failed_title": "Translation failed",
     "settings.button": "Settings …",
     "settings.title": "Settings",
     "settings.language": "Interface language",
@@ -140,6 +242,8 @@ EN = {
     "credentials.title": "Credentials",
     "credentials.saved": "API key was saved.",
     "credential.environment": "Environment variable (session)", "credential.keyring": "OS keyring", "credential.missing": "Not configured",
+    "provider.missing_key": "No API key configured for \"{provider}\". <a href=\"settings\">Set it up now</a>",
+    "provider.missing_key_dialog": "No API key is configured for the \"{provider}\" provider. Every translation call will fail without one.",
     "dialog.check_input": "Check input",
     "dialog.analysis": "Analysis",
     "dialog.choose_images": "Select images",

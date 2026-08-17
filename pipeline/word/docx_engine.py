@@ -442,17 +442,28 @@ class DocxEngine:
         exposed for callers (e.g. tests/manual_inspect_word_blocks.py) to
         warn when a document doesn't follow the expected structure."""
 
-    def open(self, path: str) -> None:
+    def open(self, path: str, ico_mode: bool = False) -> None:
         """Load a .docx document: unzip word/document.xml (+ its rels)
         plus, if present, word/header2.xml and word/footer1.xml (+ their
-        rels), then build one WordParagraph per <w:p> in each. Body
-        paragraphs before the first separator-shape paragraph (see
-        _has_separator_shape()) are marked non-translatable (the page-1
-        metadata block); if no separator shape is found at all, every
-        body paragraph is left translatable=True (no metadata block
-        detected - see self.separator_found). See
+        rels), then build one WordParagraph per <w:p> in each.
+
+        ``ico_mode`` gates the page-1 metadata block detection: it used to
+        run unconditionally for every document, which meant any .docx that
+        happened to contain a similar separator shape for unrelated reasons
+        would silently lose part of its first page to translation. Now the
+        scan for the separator shape (see _has_separator_shape()) only runs
+        when the caller explicitly opts in via ico_mode=True (i.e. the user
+        ticked the "ICO document" checkbox in ui/app.py for a document of
+        that specific internal type) - every other document is translated
+        in full, page 1 included. When ico_mode=True, body paragraphs
+        before the first separator-shape paragraph are marked non-
+        translatable; if no separator shape is found despite ico_mode=True,
+        every body paragraph is left translatable=True and self.
+        separator_found is False, letting the caller (ui/word_job.py) warn
+        that the expected ICO structure wasn't actually present. See
         get_header_footer_paragraphs() for why header/footer paragraphs
-        are always translatable=False, unconditionally.
+        are always translatable=False, unconditionally (independent of
+        ico_mode).
         """
         with zipfile.ZipFile(path) as archive:
             self._archive_entries = [
@@ -473,8 +484,10 @@ class DocxEngine:
             entries_by_name, _FOOTER_PATH, _FOOTER_RELS_PATH, body_tag=None
         )
 
-        anchor_index = next(
-            (i for i, p in enumerate(self._paragraph_elements) if _has_separator_shape(p)), None
+        anchor_index = (
+            next((i for i, p in enumerate(self._paragraph_elements) if _has_separator_shape(p)), None)
+            if ico_mode
+            else None
         )
         self.separator_found = anchor_index is not None
 

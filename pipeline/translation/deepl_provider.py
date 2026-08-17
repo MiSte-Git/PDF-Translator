@@ -85,6 +85,43 @@ class DeepLProvider:
         assert self._api_url is not None
         return self._api_key, self._api_url
 
+    def get_usage(self) -> dict[str, int | None]:
+        """Query DeepL's own GET /v2/usage endpoint for the real, live
+        character count and limit of the current billing period - the same
+        numbers shown on the DeepL account website, authenticated with the
+        same key already used for translation (no separate credential).
+
+        This is authoritative in a way this project's local usage log
+        (pipeline/translation/cost_control.py, keyed "provider:YYYY-MM")
+        cannot be: the local log only counts what THIS app itself has sent,
+        and assumes every plan's free allowance renews monthly. As of this
+        writing that still holds for legacy "DeepL API Free" (":fx") keys,
+        but new signups instead get a non-renewing one-time allowance (per
+        DeepL's own plan documentation) - a monthly-reset assumption would
+        silently under-estimate cost for those accounts. Prefer this live
+        check over the local estimate whenever it succeeds.
+
+        Returns {"character_count": int, "character_limit": int | None} -
+        character_limit is None if DeepL reports no limit for the account
+        (documented as possible on some Pro contracts). Raises
+        TranslationError if the key is missing or the request fails.
+        """
+        api_key, api_url = self._get_api_key_and_url()
+        usage_url = api_url.rsplit("/translate", 1)[0] + "/usage"
+        headers = {"Authorization": f"DeepL-Auth-Key {api_key}"}
+        try:
+            response = requests.get(usage_url, headers=headers, timeout=15)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            raise TranslationError(
+                f"DeepL usage request failed: {_extract_error_message(exc)}"
+            ) from exc
+        data = response.json()
+        return {
+            "character_count": data.get("character_count"),
+            "character_limit": data.get("character_limit"),
+        }
+
     def _call_api(self, body: dict[str, object]) -> dict:
         """POST `body` to the DeepL API v2 endpoint and return the first
         translation object from the response. Raises TranslationError on

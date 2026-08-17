@@ -39,8 +39,10 @@ werden vom Aufrufer bereitgestellt; die Engine selbst kennt keine Zugangsdaten.
   im rohen `<a:rPr>` vollständig dokumentiert)
 - automatische Schriftverkleinerung, Shape-Vergrößerung oder sonstige
   Layoutkorrekturen
-- Live-Übersetzung und produktive Provider-Auswahl in UI/CLI (noch nicht
-  verdrahtet)
+
+Live-Übersetzung ist inzwischen produktiv im UI verdrahtet: `ui/pptx_job.py`
+orchestriert Provider, `TranslationBudgetGuard`, Fortschritt/Abbruch, Speichern
+und QA-Bericht; siehe `ui/README.md` und RoadMap.md Phase 1.
 
 Nicht unterstützte Bestandteile werden nicht interpretiert und bleiben beim
 No-op-Roundtrip byte-identisch. Bei einem Text-Writeback bleiben alle

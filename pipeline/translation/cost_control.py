@@ -38,11 +38,20 @@ GOOGLE_PRICING = PricingModel(
     provider_name="google", cost_per_million_chars=20.0, free_tier_chars_per_month=500_000
 )
 
-# The free tier here (500,000 chars/month) matches DeepL API Free's actual
-# quota. The paid DeepL API Pro tier is subscription-based (a monthly fee
-# plus a fair-use character allowance), not linear pay-per-character, so
-# cost_per_million_chars is only a rough estimate for the guard's budget
-# warning here, not DeepL's real Pro pricing model.
+# The free tier here (500,000 chars/month) matches the legacy "DeepL API
+# Free" plan (":fx" keys) that existing subscribers keep. DeepL no longer
+# sells that plan to new signups: new free accounts instead get a one-time,
+# non-renewing 1,000,000-character allowance (verified against DeepL's own
+# plan documentation, Aug 2026) - this monthly-reset model would silently
+# under-estimate cost for those accounts once the one-time allowance runs
+# out. free_tier_chars_per_month therefore stays a local, provider-agnostic
+# fallback estimate only; prefer DeepLProvider.get_usage() (GET /v2/usage,
+# the account's own live, authoritative character_count/character_limit)
+# wherever a live check is possible - see ui/analysis.py. The paid DeepL API
+# Pro tier is subscription-based (a monthly fee plus a fair-use character
+# allowance), not linear pay-per-character, so cost_per_million_chars is
+# only a rough estimate for the guard's budget warning here either way, not
+# DeepL's real Pro pricing model.
 DEEPL_PRICING = PricingModel(
     provider_name="deepl", cost_per_million_chars=20.0, free_tier_chars_per_month=500_000
 )

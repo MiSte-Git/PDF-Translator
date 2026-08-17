@@ -17,7 +17,7 @@ DocxEngine in place.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from pipeline.translation.base import TranslationError, TranslationProvider
@@ -55,6 +55,19 @@ class TranslationStats:
     tests/output/word_break_anomalies.jsonl (see _check_break_count()) -
     computed from the log's line count before/after, same technique the
     original single-document script used."""
+    cancelled: bool = False
+    """Set when should_cancel() stopped the run early (see
+    translate_document()) - the UI job layer (ui/word_job.py) surfaces this
+    the same way ui/pptx_job.py already does for PresentationTranslationStats:
+    a clearly labelled partial result, not an error."""
+    errors: list[str] = field(default_factory=list)
+    """Human-readable "location: exception" strings for every failed
+    paragraph (body/header/footer), same role as
+    PresentationTranslationStats.errors - the UI job's QA report
+    (ui/word_job.py) lists these so a failure is diagnosable without
+    reproducing it, without ever including credentials (TranslationError
+    messages are already credential-free, same guarantee the PPTX path
+    relies on)."""
 
     @property
     def translated(self) -> int:
@@ -67,6 +80,29 @@ class TranslationStats:
     @property
     def failed(self) -> int:
         return self.body_failed + self.header_failed + self.footer_failed
+
+    @property
+    def processed(self) -> int:
+        """Paragraphs (body + header + footer) that have already reached a
+        final outcome - lets a caller (ui/app.py) drive a progress display
+        without its own counter, the same role
+        PresentationTranslationStats.paragraphs_processed plays for the
+        PPTX path. Named without a "paragraphs_" prefix (unlike that
+        property) since this dataclass's other fields already carry it
+        implicitly through body_/header_/footer_ - kept as-is for backward
+        compatibility with existing callers (ico_translate/batch.py)."""
+        return self.translated + self.skipped + self.failed
+
+
+def total_paragraph_count(engine: DocxEngine) -> int:
+    """Total number of paragraphs translate_document() will eventually
+    report a final outcome for (translated, skipped or failed): every body
+    paragraph plus every header/footer paragraph. Mirrors
+    pipeline.presentation.translate_presentation.total_paragraph_count() -
+    cheap (no API calls), lets a caller (ui/word_job.py) show a determinate
+    "X of N paragraphs" progress bar instead of an indeterminate one.
+    """
+    return len(engine.get_paragraphs()) + len(engine.get_header_footer_paragraphs())
 
 
 def _translate_paragraph(
@@ -101,6 +137,8 @@ def translate_document(
     target_lang: str,
     source_lang: str | None = "en",
     progress_callback: Callable[[str], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+    stats_callback: Callable[[TranslationStats], None] | None = None,
 ) -> TranslationStats:
     """Translate every translatable paragraph of `engine`'s already-open
     document IN PLACE (via engine.replace_paragraph_runs()/
@@ -120,12 +158,33 @@ def translate_document(
     failure - used by tests/manual_translate_full_document.py to print
     per-paragraph progress; left None (silent) by ico_translate/batch.py,
     which reports per-document, not per-paragraph, progress.
+
+    `should_cancel`, if given, is polled before each paragraph (body, then
+    header/footer) - i.e. between API calls, never mid-call - the same
+    cooperative-cancellation contract
+    pipeline.presentation.translate_presentation.translate_presentation()
+    already established for the PPTX path (see its docstring): once it
+    returns True, stats.cancelled is set and the run stops, every paragraph
+    already translated stays translated, the rest is left untouched.
+
+    `stats_callback`, if given, is called after every paragraph reaches a
+    final outcome (translated/skipped/failed, in either loop) with the
+    current cumulative `stats`, letting a caller (ui/word_job.py) drive a
+    live progress display without polling - again mirroring
+    translate_presentation().
     """
     stats = TranslationStats()
 
     def _notify(message: str) -> None:
         if progress_callback is not None:
             progress_callback(message)
+
+    def _report() -> None:
+        if stats_callback is not None:
+            stats_callback(stats)
+
+    def _cancelled() -> bool:
+        return should_cancel is not None and should_cancel()
 
     body_paragraphs = engine.get_paragraphs()
     header_footer_paragraphs = engine.get_header_footer_paragraphs()
@@ -138,8 +197,12 @@ def translate_document(
     )
 
     for index, paragraph in enumerate(body_paragraphs):
+        if _cancelled():
+            stats.cancelled = True
+            break
         if not paragraph.translatable:
             stats.body_skipped += 1
+            _report()
             continue
         _notify(f"Hauptteil-Absatz {index + 1}/{len(body_paragraphs)}...")
         try:
@@ -149,15 +212,26 @@ def translate_document(
         except TranslationError as exc:
             _notify(f"  FEHLER (uebersprungen): {exc}")
             stats.body_failed += 1
+            stats.errors.append(f"body:{index}: {type(exc).__name__}: {exc}")
+            _report()
             continue
         stats.chars_sent += sent
         if new_runs is None:
             stats.body_skipped += 1
+            _report()
             continue
         engine.replace_paragraph_runs(index, new_runs)
         stats.body_translated += 1
+        _report()
 
     for combined_index, paragraph in enumerate(header_footer_paragraphs):
+        # stats.cancelled may already be True here (cancelled during the
+        # body loop above) - re-checking short-circuits immediately without
+        # touching header/footer at all, same "stop cleanly, nothing
+        # in-flight" contract as the body loop.
+        if stats.cancelled or _cancelled():
+            stats.cancelled = True
+            break
         if combined_index < header_count:
             source, sub_index = "header", combined_index
         else:
@@ -168,6 +242,7 @@ def translate_document(
                 stats.header_skipped += 1
             else:
                 stats.footer_skipped += 1
+            _report()
             continue
 
         # Not expected to ever fire (header/footer are translatable=False
@@ -184,6 +259,8 @@ def translate_document(
                 stats.header_failed += 1
             else:
                 stats.footer_failed += 1
+            stats.errors.append(f"{source}:{sub_index}: {type(exc).__name__}: {exc}")
+            _report()
             continue
         stats.chars_sent += sent
         if new_runs is None:
@@ -191,12 +268,14 @@ def translate_document(
                 stats.header_skipped += 1
             else:
                 stats.footer_skipped += 1
+            _report()
             continue
         engine.replace_header_footer_paragraph(source, sub_index, new_runs)
         if source == "header":
             stats.header_translated += 1
         else:
             stats.footer_translated += 1
+        _report()
 
     anomaly_lines_after = (
         len(_BREAK_ANOMALY_LOG_PATH.read_text(encoding="utf-8").splitlines())
