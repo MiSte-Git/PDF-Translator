@@ -3,3 +3,4 @@ keyring
 requests
 python-docx
 lxml
+PySide6

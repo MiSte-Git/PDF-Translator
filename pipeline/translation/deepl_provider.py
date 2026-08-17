@@ -1,6 +1,7 @@
 """TranslationProvider implementation backed by the DeepL API v2 REST endpoint."""
 from __future__ import annotations
 
+import time
 import requests
 
 from pipeline.credentials import get_deepl_api_key
@@ -52,12 +53,14 @@ class DeepLProvider:
     internally.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, min_request_interval: float = 0.0) -> None:
         """Defer API-key lookup (and Free-vs-Pro endpoint choice) until the
         first call.
         """
         self._api_key: str | None = None
         self._api_url: str | None = None
+        self._min_request_interval = max(min_request_interval, 0.0)
+        self._last_request_started: float | None = None
 
     @property
     def model_name(self) -> str:
@@ -89,13 +92,29 @@ class DeepLProvider:
         """
         api_key, api_url = self._get_api_key_and_url()
         headers = {"Authorization": f"DeepL-Auth-Key {api_key}"}
-        try:
-            response = requests.post(api_url, headers=headers, json=body, timeout=30)
-            response.raise_for_status()
-        except requests.RequestException as exc:
-            raise TranslationError(
-                f"DeepL API request failed: {_extract_error_message(exc)}"
-            ) from exc
+        for attempt in range(3):
+            if self._last_request_started is not None and self._min_request_interval:
+                elapsed = time.monotonic() - self._last_request_started
+                if elapsed < self._min_request_interval:
+                    time.sleep(self._min_request_interval - elapsed)
+            self._last_request_started = time.monotonic()
+            try:
+                response = requests.post(api_url, headers=headers, json=body, timeout=30)
+                response.raise_for_status()
+                break
+            except requests.RequestException as exc:
+                response = getattr(exc, "response", None)
+                if response is not None and response.status_code == 429 and attempt < 2:
+                    retry_after = response.headers.get("Retry-After")
+                    try:
+                        delay = max(float(retry_after), 1.0) if retry_after else 60.0
+                    except ValueError:
+                        delay = 60.0
+                    time.sleep(delay)
+                    continue
+                raise TranslationError(
+                    f"DeepL API request failed: {_extract_error_message(exc)}"
+                ) from exc
         return response.json()["translations"][0]
 
     def translate(

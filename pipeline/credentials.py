@@ -1,13 +1,12 @@
-"""OS-keyring-backed access to external API keys.
+"""Environment-variable and optional OS-keyring access to API keys.
 
-This is the only place API keys are read from/written to storage. Unlike
-TME's credentials.py, there is deliberately no plaintext credentials.json
-fallback - if the OS keyring has no value, callers get a clear error
-instead of silently falling back to an unencrypted file.
+Environment variables are checked first for machines that have not yet been
+migrated to an OS keyring.  There is deliberately no plaintext credentials
+file fallback.
 """
 from __future__ import annotations
 
-import keyring
+import os
 
 # Service name under which all provider API keys are stored in the OS
 # keyring (Windows Credential Locker / macOS Keychain / Secret Service on
@@ -15,21 +14,41 @@ import keyring
 _KEYRING_SERVICE = "pdf-translator"
 
 
-def get_api_key(key_name: str) -> str:
-    """Read an API key from the OS keyring under _KEYRING_SERVICE.
+def _keyring_module():
+    try:
+        import keyring
+    except ImportError:
+        return None
+    return keyring
 
-    Raises RuntimeError with a clear message (incl. a one-liner to set the
-    value) if nothing is stored under `key_name`.
+
+def get_api_key(key_name: str, env_names: tuple[str, ...] = ()) -> str:
+    """Read an API key from environment first, then the optional keyring.
+
+    ``env_names`` are checked in order, followed by the uppercase key name.
+    Keyring import/backend errors are treated as an unavailable fallback and
+    reported without exposing any credential value.
     """
-    value = keyring.get_password(_KEYRING_SERVICE, key_name)
-    if not value or not value.strip():
-        raise RuntimeError(
-            f"No value stored for {key_name!r} in the OS keyring "
-            f"(service={_KEYRING_SERVICE!r}). Set it once via:\n"
-            f"  python -c \"import keyring; keyring.set_password("
-            f"'{_KEYRING_SERVICE}', '{key_name}', 'YOUR_KEY')\""
-        )
-    return value.strip()
+    candidates = (*env_names, key_name.upper())
+    for env_name in candidates:
+        value = os.environ.get(env_name)
+        if value and value.strip():
+            return value.strip()
+
+    keyring = _keyring_module()
+    if keyring is not None:
+        try:
+            value = keyring.get_password(_KEYRING_SERVICE, key_name)
+        except Exception:  # backend not installed/configured
+            value = None
+        if value and value.strip():
+            return value.strip()
+
+    raise RuntimeError(
+        f"No credential available for {key_name!r}. Set one of the environment "
+        f"variables {', '.join(candidates)} or configure OS keyring service "
+        f"{_KEYRING_SERVICE!r}."
+    )
 
 
 def set_api_key(key_name: str, value: str) -> None:
@@ -37,24 +56,30 @@ def set_api_key(key_name: str, value: str) -> None:
     value = value.strip()
     if not value:
         raise ValueError("Cannot store an empty API key")
-    keyring.set_password(_KEYRING_SERVICE, key_name, value)
+    keyring = _keyring_module()
+    if keyring is None:
+        raise RuntimeError("The optional 'keyring' package is not installed")
+    try:
+        keyring.set_password(_KEYRING_SERVICE, key_name, value)
+    except Exception as exc:
+        raise RuntimeError(f"OS keyring is unavailable: {exc}") from exc
 
 
 def get_google_translate_api_key() -> str:
     """Google Cloud Translation API key from the OS keyring."""
-    return get_api_key("google_translate_api_key")
+    return get_api_key("google_translate_api_key", ("GOOGLE_TRANSLATE_API_KEY",))
 
 
 def get_deepl_api_key() -> str:
     """DeepL API key from the OS keyring."""
-    return get_api_key("deepl_api_key")
+    return get_api_key("deepl_api_key", ("DEEPL_API_KEY",))
 
 
 def get_openai_api_key() -> str:
     """OpenAI API key from the OS keyring."""
-    return get_api_key("openai_api_key")
+    return get_api_key("openai_api_key", ("OPENAI_API_KEY",))
 
 
 def get_grok_api_key() -> str:
     """xAI Grok API key from the OS keyring."""
-    return get_api_key("grok_api_key")
+    return get_api_key("grok_api_key", ("GROK_API_KEY", "XAI_API_KEY"))

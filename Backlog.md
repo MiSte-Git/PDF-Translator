@@ -1,24 +1,60 @@
 # Backlog
 
+> Technisches Detailarchiv für untersuchte Einzelfälle und historische
+> Implementierungsentscheidungen. Die aktuelle projektweite Priorisierung und
+> Abnahmekriterien stehen in [RoadMap.md](RoadMap.md). Bei abweichender
+> Priorisierung ist die Roadmap maßgeblich.
+
 ## Geplant
-- [ ] **Word-Pfad (aktueller Hauptfokus)**: Umstieg auf Word-basierte Übersetzung beschlossen (Word übersetzen → als PDF exportieren), da der PDF-Redact/Insert-Pfad einen offenen Duplikat-Text-Bug hat und für 2191/2196 PDFs Word-Originale existieren. Der PDF-Pfad wird eingefroren, nicht gelöscht (siehe "Erledigt" unten). Struktur-Analyse an 6 Dokumenten (1526 Virelicon + 5 Stichproben: 2210 INERTIARA, 2181 ARCTHRESHOLD, 2173 NULLARISLOOM, 2156 FRICTURA, 2130 SOMAGRAMMA) abgeschlossen und generisch bestätigt:
+- [ ] **Aktueller Hauptfokus:** produktiven PPTX-DeepL-Lauf an das UI anbinden
+  (sicheres Ausgabeziel, Kostenbestätigung, Fortschritt, Abbruch und QA-Bericht),
+  danach DOCX und den freigegebenen PDF-Pfad über dasselbe Auftragsmodell
+  anbinden. Details und Reihenfolge: [RoadMap.md](RoadMap.md).
+- [x] **Word-Grundpfad:** Umstieg auf Word-basierte Übersetzung wurde umgesetzt,
+  da der direkte PDF-Redact/Insert-Pfad weiterhin einen offenen
+  Duplikat-Text-Bug hat und für 2191/2196 PDFs Word-Originale existieren. Die
+  Struktur-Analyse an 6 Dokumenten (1526 Virelicon + 5 Stichproben: 2210
+  INERTIARA, 2181 ARCTHRESHOLD, 2173 NULLARISLOOM, 2156 FRICTURA, 2130
+  SOMAGRAMMA) wurde generisch bestätigt:
   - Header (header2.xml, aktiv) / Footer (footer1.xml) identisch auf jeder Seite, PAGE-Feld für Seitenzahl
   - Metadatenblock Seite 1 variabler Länge, zuverlässig begrenzt durch straightConnector1-Trennstrich-Shape (mc:AlternateContent) statt fixer Absatzzahl
   - Ersetzungslogik muss auf Run-Ebene arbeiten (Bilder stehen teils im selben Absatz wie übersetzbarer Text)
   - Protected-Terms-Prüfung (Entwicklername, ICO-Name, "QSI") muss auch innerhalb von `<w:hyperlink>`-Runs greifen, nicht nur in normalem Fließtext
-  - Vollständige Anforderungsliste: anforderungen_word_pfad.md
   - Word-Lese-/Schreib-Pfad ist seitdem fertig implementiert, siehe "Erledigt" unten
+- [ ] Optionalen Export übersetzter Word-Dokumente nach PDF implementieren und
+  getrennt vom verlustarmen DOCX-Writeback prüfen.
 - [x] Duplikat-Quellenregel für Stapelverarbeitung umsetzen: bei den 7 "(LS)"-Paaren (HARMONICJ, MNEMOSYNE, CONTINUUM, AXIOMCRADLE, WOUNDS, ONEPERCENT, SILENCE) Standardversion als Quelle verwenden, außer bei **MNEMOSYNE** → dort (LS)-Version (enthält ~35 zusätzliche Absätze, die die Standardversion nicht hat; die übrigen 6 Paare sind inhaltlich identisch, nur XML-Formatierungsartefakte als Unterschied) - umgesetzt über ico_translate/source_manifest.json (siehe "Erledigt" unten), nicht über eine hartkodierte Regel im Code.
-- [x] Translation-Provider implementieren (DeepL, Google, OpenAI) gemäß pipeline/translation/base.py
-- [x] Pipeline-Orchestrierung (extractor → translate → reflow → engine.write) - fuer den Word-Pfad umgesetzt als ico_translate/batch.py (siehe "Erledigt" unten); fuer den eingefrorenen PDF-Pfad weiterhin offen, falls der je reaktiviert wird.
-- [ ] PySide6/Qt-UI aufbauen
-- [ ] UI-Mehrsprachigkeit via Qt Linguist (.ts/.qm-Dateien) – analog zu TME, nicht vergessen
+- [x] Translation-Provider DeepL, Google, OpenAI und Grok gemäß
+  pipeline/translation/base.py implementieren.
+- [x] Pipeline-Orchestrierung für den Word-Pfad als ico_translate/batch.py
+  umgesetzt; der direkte PDF-Pfad bleibt bis zur Klärung seiner offenen
+  Qualitätsbefunde eingeschränkt.
+- [x] PySide6/Qt-UI-Grundgerüst mit expliziter Moduswahl, Dokumentanalyse,
+  Kostenübersicht und Einstellungsdialog aufgebaut.
+- [ ] UI vollständig übersetzungsfähig machen: PPTX, DOCX, PDF und Bilder an
+  den gemeinsamen Start-/Fortschritts-/Abbruchablauf anbinden.
+- [x] UI-Mehrsprachigkeitsbasis mit deutschen und englischen Python-Katalogen
+  und Umschaltung ohne Neustart umgesetzt; Französisch, Spanisch, Italienisch,
+  Niederländisch, Finnisch, Kroatisch und Russisch sind vorbereitet.
+- [ ] Weitere UI-Sprachkataloge befüllen und später bewerten, ob eine Migration
+  auf Qt Linguist (`.ts`/`.qm`) gegenüber den bestehenden Python-Katalogen
+  sinnvoll ist.
+- [x] PPTX-OOXML-Grundengine mit verlustarmem Roundtrip, minimalem
+  `<a:t>`-Writeback, Format-Inventar, Footer-Schutz und Überlauferkennung
+  umgesetzt.
+- [ ] PPTX-Live-Übersetzung produktiv im UI verdrahten und anschließend nicht
+  unterstützte Inhalte (SmartArt, Charts, Notizen, Master/Layout, OLE und
+  Bildtext) schrittweise katalogisieren beziehungsweise freigeben.
 - [ ] Bildübersetzungs-Modul (OCR + Inpainting) als separater Bereich
 - [ ] PyInstaller-Bundles für Releases (später, nach stabiler Kernfunktion)
 - [ ] Optional: PyPI-Package
 
 ## Ideen / später bewerten
-(Word-Ansatz wurde entschieden und nach "Geplant" verschoben, siehe oben.)
+
+- Einheitliches Plugin-/Adaptermodell für weitere Dokumenttypen erst nach dem
+  stabilen gemeinsamen Auftragsmodell bewerten.
+- Automatische Layoutänderungen nur als separate, explizit aktivierte Phase mit
+  Vorher-/Nachher-QA untersuchen.
 
 ## Zu verifizieren
 - [ ] Word-Pfad: PAGE-Feld in footer1.xml sollte sich bei Neuberechnung automatisch aktualisieren, auch wenn das übersetzte Dokument länger wird als das Original - noch nicht an einem tatsächlich länger werdenden Dokument verifiziert (Word aktualisiert Felder nicht immer automatisch beim programmatischen Schreiben, ggf. muss ein Feld-Update erzwungen werden)
@@ -71,7 +107,10 @@
 - [x] Formatierungserhaltende echte Übersetzung implementiert: spans_to_html() baut HTML aus TextSpans, GoogleTranslateProvider.translate_html() nutzt Googles format="html" (übersetzt nur Text zwischen Tags, Tag-Position bleibt erhalten), TranslationBudgetGuard.translate_html() wendet dieselbe Budget-/Logging-Logik an, insert_text() nimmt übersetztes HTML direkt entgegen. Verifiziert am realen Testfall (fette Überschrift korrekt übersetzt, Formatierung erhalten).
 - [x] cost_control.py provider-abhängig gemacht: PricingModel-Dataclass, TranslationBudgetGuard nimmt pricing-Parameter entgegen, Nutzungs-Logging jetzt pro Provider getrennt (Schlüssel "{provider}:{YYYY-MM}")
 - [x] DeepLProvider implementiert (REST gegen DeepL API v2, Free/Pro-Endpunkt-Erkennung via ":fx"-Key-Suffix, Sprachcode-Normalisierung Groß-/Kleinschreibung, translate() + translate_html() via tag_handling=html), live gegen die echte DeepL API getestet (tests/manual_test_deepl_provider.py) - Free/Pro-Endpunkt-Erkennung und Auto-Spracherkennung funktionieren korrekt
-- [x] OpenAIProvider implementiert (Chat Completions API, DEFAULT_MODEL "gpt-5-mini" nach Verifikation auf offizieller Pricing-Seite). tests/manual_test_openai_provider.py erstellt und ausgeführt: Fehlerbehandlung greift korrekt (TranslationError bei HTTP 429), der eigentliche API-Aufruf scheitert aktuell an einer temporären Kontingent-/Billing-Sperre auf OpenAI-Seite (kein Code-Problem) - finaler Live-Test mit erfolgreicher Übersetzung steht noch aus, sobald das Konto-Kontingent wieder freigeschaltet ist
+- [x] OpenAIProvider über die Chat-Completions-API implementiert; aktuelles
+  `DEFAULT_MODEL` ist `gpt-5.6-terra`. Fehlerbehandlung und modellabhängiger
+  Temperature-Parameter sind mit gemockten Requests geprüft. Ein erfolgreicher
+  aktueller Live-Test bleibt abhängig vom verfügbaren Konto-Kontingent.
 - [x] GrokProvider implementiert (xAI, OpenAI-kompatible Chat Completions API, DEFAULT_MODEL "grok-4.20-0309-non-reasoning" nach Verifikation auf docs.x.ai), live getestet gegen echte API (tests/manual_test_grok_provider.py), inkl. Hinweis: source_lang bei Auto-Erkennung liefert leeren String zurück (kein natives Source-Language-Feedback bei Chat-Completions-artigen APIs, anders als Google/DeepL)
 - [x] Anker-Text-basierter Split für Seite-1-Metadaten implementiert (FIRST_PAGE_ANCHOR_TERMS = ["Issuer Address", "Asset Matrix"] in pymupdf_engine.py, _split_first_page_metadata()): trennt auf Seite 0 einen zusammenhängenden Block an der ersten Anker-Zeile in einen untranslatable Metadaten-Teil (inkl. mehrfacher Anker-Chunks, z. B. Issuer Address + Asset Matrix hintereinander) und einen translatable Teil danach. Verifiziert an 2182 INDELEGATA.pdf und 1526 Virelicon.pdf. DocumentTemplate.first_page_zones bleibt als alternativer/abwärtskompatibler Mechanismus bestehen, first_page_zones=None reicht jetzt aus.
 - [x] TextBlock.insert_bbox ergänzt (pipeline/pdf/base.py): separates Feld für die beim Einfügen tatsächlich verwendete Ziel-Box, getrennt von block.bbox (das weiterhin die volle Zeilen-Union für Overlap-Checks bleibt). Behebt Bug: Blöcke mit führenden Leerzeilen (die _build_text_spans() beim HTML-Aufbau verwirft) wurden bisher zu weit oben eingefügt, da block.bbox.y0 die verworfenen Leerzeilen mit einrechnete. insert_text() nutzt jetzt insert_bbox or bbox. Verifiziert an 1526 Virelicon.pdf (Titelzeile saß vorher bei y=249, überlappte eine Trennlinie bei y=259; jetzt korrekt bei y=292.5, unterhalb der Linie).
