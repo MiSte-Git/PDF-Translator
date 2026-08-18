@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw, ImageFont
 
-from pipeline.images.inpainting import BoxOverlayBackend
+from pipeline.images.inpainting import BoxOverlayBackend, TextReplacement
 from pipeline.images.ocr import OcrError, OcrTextRegion, TesseractOcrEngine, tesseract_available
-from pipeline.images.translate_image import translate_image
+from pipeline.images.translate_image import build_corrected_replacements, translate_image
 from pipeline.translation.base import TranslationError, TranslationResult
 
 _FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
@@ -96,6 +96,66 @@ def test_translate_image_counts_failed_region_without_aborting_others(tmp_path: 
     assert len(stats.errors) == 1
     assert "region" in stats.errors[0]
     assert destination.exists()
+
+
+def test_translate_image_replacements_only_include_successful_regions(tmp_path: Path) -> None:
+    """stats.replacements (used by the manual correction dialog, see
+    ui/image_correction_dialog.py) must mirror PdfTranslationStats.blocks'
+    contract: only successfully-translated regions are included - a
+    failed region (see test above) has no translated text to show/edit,
+    so it must be absent here rather than included with a placeholder.
+    """
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+
+    stats = translate_image(
+        str(source), str(destination), TesseractOcrEngine(), BoxOverlayBackend(),
+        _SelectiveFailProvider(fail_text="Hello World"), [], target_lang="de",
+    )
+
+    assert len(stats.replacements) == 1
+    assert stats.replacements[0].region.text == "Second Line"
+    assert stats.replacements[0].translated_text == "Second Line [DE]"
+    # Exactly the list handed to inpainting_backend.apply() - same object
+    # identity check would be too strict across a hypothetical future
+    # refactor, so compare by content instead.
+    assert len(stats.replacements) == stats.translated
+
+
+def _make_replacement(text: str, translated_text: str) -> TextReplacement:
+    region = OcrTextRegion(text=text, x=20, y=20, width=150, height=24, confidence=95.0)
+    return TextReplacement(region=region, translated_text=translated_text)
+
+
+def test_build_corrected_replacements_replaces_only_edited_rows() -> None:
+    original = [
+        _make_replacement("Hello World", "Hallo Welt"),
+        _make_replacement("Second Line", "Zweite Zeile"),
+    ]
+
+    corrected = build_corrected_replacements(original, {0: "Hallo Welt (korrigiert)"})
+
+    assert corrected[0].translated_text == "Hallo Welt (korrigiert)"
+    assert corrected[0].region is original[0].region  # same region, only text changed
+    # Untouched row passes through as the EXACT original object.
+    assert corrected[1] is original[1]
+
+
+def test_build_corrected_replacements_treats_unchanged_text_as_untouched() -> None:
+    original = [_make_replacement("Hello World", "Hallo Welt")]
+
+    corrected = build_corrected_replacements(original, {0: "Hallo Welt"})
+
+    assert corrected[0] is original[0]
+
+
+def test_build_corrected_replacements_ignores_out_of_range_index() -> None:
+    original = [_make_replacement("Hello World", "Hallo Welt")]
+
+    corrected = build_corrected_replacements(original, {5: "Egal"})
+
+    assert corrected == original
 
 
 def test_translate_image_cancellation_stops_further_translation(tmp_path: Path) -> None:

@@ -9,7 +9,7 @@ from PySide6.QtCore import QSettings, QThreadPool, QUrl, Qt
 from PySide6.QtGui import QColor, QDesktopServices, QPalette
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
-    QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+    QFormLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
     QMessageBox, QProgressBar, QPushButton, QSpinBox, QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -26,7 +26,7 @@ from ui.document_job_common import (
     safe_destination,
 )
 from ui.i18n import LOCALES, LanguageManager
-from ui.image_job import ImageBatchJobResult, ImageBatchStats
+from ui.image_job import ImageBatchJobResult, ImageBatchStats, ImageJobResult
 from ui.models import AnalysisResult, EmbeddedImageMode, TranslationMode, TranslationRequest
 from ui.pdf_job import PdfJobResult
 from ui.pptx_job import PresentationJobResult
@@ -681,6 +681,13 @@ class MainWindow(QMainWindow):
         self._job_source_path = source
         self._job_exclude_header = request.exclude_header
         self._job_exclude_footer = request.exclude_footer
+        # IMAGES-only, mirrors the PDF-only fields above: needed by
+        # _open_image_correction_dialog() to re-run the SAME
+        # InpaintingBackend the original run used (see
+        # run_image_correction_job()'s docstring). Harmlessly set (but
+        # never read) for every other mode too, same as the PDF fields
+        # above are for IMAGES.
+        self._job_inpainting_backend = request.inpainting_backend
         # Mode-aware progress wording (see _update_job_status()): every
         # other mode counts paragraphs/pages/slides, IMAGES counts whole
         # files instead - "X von Y Absätzen" would be nonsensical for a
@@ -870,23 +877,36 @@ class MainWindow(QMainWindow):
         # button that would open one specific report file is hidden for
         # this type.
         self.open_report_button.setVisible(not isinstance(result, ImageBatchJobResult))
-        # Only for PDF runs that actually produced correctable blocks
+        # PDF: only for runs that actually produced correctable blocks
         # (empty for e.g. an all-skipped or fully-cancelled run) - see
-        # PdfTranslationStats.blocks' docstring.
-        self.correct_translation_button.setVisible(
-            isinstance(result, PdfJobResult) and bool(stats.blocks)
-        )
+        # PdfTranslationStats.blocks' docstring. IMAGES: only if at least
+        # ONE file in the batch produced correctable replacements - see
+        # ImageTranslationStats.replacements' docstring; the dialog itself
+        # (_open_image_correction_dialog()) is what lets the user pick
+        # WHICH file, if there's more than one candidate.
+        if isinstance(result, PdfJobResult):
+            self.correct_translation_button.setVisible(bool(stats.blocks))
+        elif isinstance(result, ImageBatchJobResult):
+            self.correct_translation_button.setVisible(
+                any(file_result.stats.replacements for file_result in stats.results)
+            )
+        else:
+            self.correct_translation_button.setVisible(False)
 
     def _open_correction_dialog(self) -> None:
-        if self._job_result is None or not isinstance(self._job_result, PdfJobResult):
-            return
+        if isinstance(self._job_result, PdfJobResult):
+            self._open_pdf_correction_dialog(self._job_result)
+        elif isinstance(self._job_result, ImageBatchJobResult):
+            self._open_image_correction_dialog(self._job_result)
+
+    def _open_pdf_correction_dialog(self, job_result: PdfJobResult) -> None:
         from ui.correction_dialog import PdfCorrectionDialog
 
         dialog = PdfCorrectionDialog(
             self.language,
             self._job_source_path,
-            self._job_result.output_path,
-            self._job_result.stats.blocks,
+            job_result.output_path,
+            job_result.stats.blocks,
             exclude_header=self._job_exclude_header,
             exclude_footer=self._job_exclude_footer,
             parent=self,
@@ -907,6 +927,56 @@ class MainWindow(QMainWindow):
             corrected_result.stats.blocks = dialog.last_corrected_records
             self._job_result = corrected_result
             self._show_job_result(corrected_result)
+
+    def _open_image_correction_dialog(self, batch_result: ImageBatchJobResult) -> None:
+        t = self.language.text
+        candidates = [
+            file_result for file_result in batch_result.stats.results if file_result.stats.replacements
+        ]
+        if not candidates:
+            return
+        if len(candidates) == 1:
+            target = candidates[0]
+        else:
+            # More than one file in the batch has correctable regions -
+            # ask which one, by output filename (unambiguous even if two
+            # sources shared a stem, since safe_destination() already
+            # made every output filename in the batch unique).
+            names = [candidate.output_path.name for candidate in candidates]
+            chosen_name, confirmed = QInputDialog.getItem(
+                self, t("image_correction.choose_file_title"),
+                t("image_correction.choose_file_label"), names, 0, False,
+            )
+            if not confirmed:
+                return
+            target = candidates[names.index(chosen_name)]
+
+        from ui.image_correction_dialog import ImageCorrectionDialog
+
+        dialog = ImageCorrectionDialog(
+            self.language,
+            target.source_path,
+            target.output_path,
+            target.stats.replacements,
+            inpainting_backend_name=self._job_inpainting_backend,
+            parent=self,
+        )
+        dialog.exec()
+        if dialog.last_result is not None and dialog.last_corrected_replacements is not None:
+            # Mirrors _open_pdf_correction_dialog()'s identical reasoning:
+            # a correction run overwrote this one file's output/QA-report
+            # paths in place, so splice the corrected ImageJobResult back
+            # into the batch result at the same position, keeping every
+            # OTHER file's result untouched, then refresh the job panel.
+            corrected_file_result = dialog.last_result
+            corrected_file_result.stats.replacements = dialog.last_corrected_replacements
+            # Identity (is), not equality: two ImageJobResult entries could
+            # otherwise compare equal by field values, which .index() would
+            # match against the wrong (e.g. first) one.
+            index = next(i for i, r in enumerate(batch_result.stats.results) if r is target)
+            batch_result.stats.results[index] = corrected_file_result
+            self._job_result = batch_result
+            self._show_job_result(batch_result)
 
     def _job_failed(self, message: str) -> None:
         log.error("Übersetzungslauf fehlgeschlagen: %s", message)

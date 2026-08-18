@@ -50,15 +50,63 @@ class ImageTranslationStats:
     never includes credentials."""
     regions: list[OcrTextRegion] = field(default_factory=list)
     """Every region OCR actually recognized, in reading order -
-    independent of translated/failed outcome. Kept for the QA report and
-    a future Korrektur-Dialog (RoadMap.md Phase 3, not yet built) -
-    mirrors TranslatedBlockRecord's role for PDF, though this is the
-    plain OcrTextRegion list rather than a translated-record list, since
-    a failed region has no translated text to show."""
+    independent of translated/failed outcome. Kept for the QA report."""
+    replacements: list[TextReplacement] = field(default_factory=list)
+    """Every SUCCESSFULLY translated region, paired with its translated
+    text - mirrors PdfTranslationStats.blocks' role for the manual
+    correction dialog (RoadMap.md Phase 3's "Korrektur-Möglichkeit ...
+    analog zur PDF-Variante" item, see ui/image_correction_dialog.py).
+    Like TranslatedBlockRecord, only successfully-translated regions are
+    included here - a FAILED region (see `errors` above) has no
+    translated text to show/correct, so it's simply absent from this
+    list rather than included with an empty placeholder. This is the
+    exact same list that was handed to inpainting_backend.apply() to
+    produce the output file - re-running apply() with an edited copy of
+    it against the pristine source is the entire correction mechanism
+    (see ui/image_job.py::run_image_correction_job()), no OCR/provider
+    re-run needed."""
 
     @property
     def processed(self) -> int:
         return self.translated + self.failed
+
+
+def build_corrected_replacements(
+    replacements: list[TextReplacement],
+    edited_texts: dict[int, str],
+) -> list[TextReplacement]:
+    """Turn a correction-table UI's edits back into a new list of
+    TextReplacement ready for a fresh InpaintingBackend.apply() call -
+    the image counterpart of pipeline.pdf.translate_pdf's
+    build_corrected_records_from_html(), simplified because
+    TextReplacement.translated_text is a plain str (raster-drawn image
+    text via ImageDraw.text() has no bold/italic/underline concept the
+    way a PDF's rich-text box does - see ui/image_correction_dialog.py).
+
+    `edited_texts` maps a `replacements` LIST INDEX (row position in the
+    correction table, not a (page_index, block_index) pair - a single
+    image's replacements have no page concept) -> the CURRENT text shown
+    in that row's editable cell. Only an index actually present in
+    `edited_texts` AND whose text differs from the original
+    `translated_text` gets a brand new TextReplacement (same `region`,
+    new `translated_text`); every other row is passed through with its
+    EXACT original TextReplacement object, unchanged - mirrors
+    build_corrected_records_from_html()'s "only touch rows that were
+    genuinely dirty" contract.
+
+    An index outside `range(len(replacements))` in `edited_texts` is
+    silently ignored - lets a caller pass a dict built once against a
+    possibly-stale `replacements` length without needing to defensively
+    filter it first.
+    """
+    corrected: list[TextReplacement] = []
+    for index, replacement in enumerate(replacements):
+        edited_text = edited_texts.get(index)
+        if edited_text is None or edited_text == replacement.translated_text:
+            corrected.append(replacement)
+            continue
+        corrected.append(TextReplacement(region=replacement.region, translated_text=edited_text))
+    return corrected
 
 
 def translate_image(
@@ -115,7 +163,6 @@ def translate_image(
     regions = ocr_engine.recognize(source_path, language=ocr_language)
     stats.regions = regions
 
-    replacements: list[TextReplacement] = []
     for index, region in enumerate(regions):
         if _cancelled():
             stats.cancelled = True
@@ -134,12 +181,12 @@ def translate_image(
             continue
 
         stats.chars_sent += len(protected_text)
-        replacements.append(TextReplacement(region=region, translated_text=translated_text))
+        stats.replacements.append(TextReplacement(region=region, translated_text=translated_text))
         stats.translated += 1
         _report()
 
     try:
-        inpainting_backend.apply(source_path, replacements, destination_path)
+        inpainting_backend.apply(source_path, stats.replacements, destination_path)
     except InpaintingError:
         # Re-raised, not swallowed: without a written output file the
         # job cannot claim success, no matter how many regions were

@@ -809,6 +809,49 @@ Formulierung war hier nicht mehr aktuell.
       Testlauf auf Michaels Maschine am Ende: 230 passed, 1 skipped
       (der verbleibende Skip: DeepL-Live-Kontingent-Test ohne
       konfigurierten Schlüssel, nicht GPU-bezogen).
+- [x] Manueller Korrektur-Dialog für Bildübersetzungen implementiert
+      (18.08.2026), analog zum bestehenden PDF-Korrektur-Dialog - bewusst
+      VOR Cloud-Inpainting und der Einbettung von Bildübersetzung in PDF/
+      Word/PPTX gebaut, da das Korrektur-Muster in allen diesen Fällen
+      gebraucht wird und einmal gut statt mehrfach neu erfunden werden
+      sollte.
+      - Datenschicht: `ImageTranslationStats.replacements: list[TextReplacement]`
+        (nur erfolgreich übersetzte Regionen, spiegelt
+        `PdfTranslationStats.blocks`' Vertrag) plus
+        `build_corrected_replacements(replacements, edited_texts: dict[int, str])`
+        (Bild-Gegenstück zu `build_corrected_records_from_html()` - da
+        `TextReplacement.translated_text` ein reiner `str` ist, kein
+        Rich-Text, ist der Schlüssel schlicht der Listenindex, keine
+        Seiten-/Block-Indizes wie bei PDF nötig).
+      - `ImageJobResult` um `source_path` erweitert (nötig, da ein
+        Batch-Lauf mehrere Dateien übersetzt und der Korrektur-Dialog pro
+        Datei die passende PRISTINE Quelle braucht, nicht die schon
+        übersetzte).
+      - `ui/image_job.py::run_image_correction_job()` (Gegenstück zu
+        `run_pdf_correction_job()`): kein OCR-/Provider-/Netzwerk-Aufruf,
+        `destination` darf/soll bereits existieren (wird überschrieben),
+        ruft direkt `InpaintingBackend.apply()` mit der (ggf. korrigierten)
+        Replacement-Liste gegen die pristine Quelle auf.
+      - `ui/image_correction_dialog.py::ImageCorrectionDialog` (neue
+        Datei) - bewusst EINFACHER als `PdfCorrectionDialog`: reiner
+        Klartext-Editor (`QPlainTextEdit`, kein Rich-Text-Toolbar/keine
+        Tastenkürzel), da rasterisiert eingefügter Bildtext
+        (`ImageDraw.text()`) kein Fett/Kursiv/Unterstrichen kennt; keine
+        Seiten-Spalte, da ein Bild kein Seitenkonzept hat.
+      - `ui/app.py`-Anbindung: `correct_translation_button` wird jetzt
+        auch für einen `ImageBatchJobResult` mit mindestens einer
+        korrigierbaren Datei angezeigt; hat der Batch mehrere
+        korrigierbare Dateien, fragt ein `QInputDialog`-Picker (nach
+        Ausgabedateiname) welche Datei korrigiert werden soll.
+      - Neue i18n-Schlüssel `image_correction.*` (DE/EN, Parität über
+        `tests/test_ui_i18n.py` geprüft).
+      - Neue Tests: `tests/test_translate_image.py` (Datenschicht-
+        Vertrag), `tests/test_image_correction_job.py`,
+        `tests/test_ui_image_correction.py` (Button-Sichtbarkeit,
+        End-to-End-Korrektur inkl. echtem OCR-Rückcheck, Datei-Picker bei
+        mehreren Kandidaten). Kern-Mechanik (`_flush_active_row()`s
+        Dirty-Guard) per Revert-Probe verifiziert. Gesamter Testlauf am
+        Ende: 242 passed, 2 skipped.
 - [ ] Gemeinsames Bildmodell für PDF, DOCX, PPTX und einzelne Bilddateien
       definieren.
 - [ ] OCR-Engine auswählen, kapseln und Sprachpakete verwalten.
@@ -823,7 +866,8 @@ Formulierung war hier nicht mehr aktuell.
 - [ ] Identische, mehrfach eingebettete Bilder deduplizieren, um API- und
       OCR-Kosten nicht mehrfach zu berechnen.
 - [ ] OCR-, Übersetzungs- und Bildmodellkosten getrennt schätzen und erfassen.
-- [ ] Originalbild, OCR-Text und Ergebnis in einer manuellen Prüfansicht zeigen.
+- [x] Originalbild, OCR-Text und Ergebnis in einer manuellen Prüfansicht zeigen
+      (siehe Korrektur-Dialog-Eintrag oben).
 
 **Abnahmekriterium:** Einzelbilder und ausgewählte eingebettete Bilder können
 kontrolliert übersetzt werden; Scan-PDFs werden eindeutig als OCR-Auftrag

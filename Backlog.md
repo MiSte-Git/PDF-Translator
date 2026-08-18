@@ -2356,3 +2356,108 @@
   konfigurierten Schlüssel, nicht GPU-bezogen) - gegenüber der
   Sandbox-Baseline von 229 passed, 2 skipped bedeutet das genau EINEN
   zusätzlichen echten Testdurchlauf: `test_apply_end_to_end_on_a_real_gpu`.
+
+- **Bildübersetzung/OCR - manueller Korrektur-Dialog implementiert
+  (18.08.2026):** Auf Michaels expliziten Wunsch ("Sollten wir nicht
+  zuerst den Korrektur Dialog einbauen? Den brauchen wir ja überall.")
+  VOR Cloud-Inpainting und der Einbettung von Bildübersetzung in PDF/
+  Word/PPTX gebaut - das Korrektur-Muster wird in all diesen Fällen
+  gebraucht und sollte einmal ordentlich stehen statt mehrfach neu
+  erfunden zu werden. Direkt nach `ui/correction_dialog.py::PdfCorrectionDialog`
+  entworfen, mit denselben drei Schichten (Datenmodell → Job-Funktion →
+  Qt-Dialog → App-Anbindung), aber überall dort vereinfacht, wo Bild-
+  Rückschreibung tatsächlich weniger kann/braucht als PDF-Text-Einfügung.
+
+  **Datenschicht (`pipeline/images/translate_image.py`):**
+  `ImageTranslationStats` bekam ein neues Feld `replacements:
+  list[TextReplacement]` - genau die Liste, die am Ende an
+  `InpaintingBackend.apply()` übergeben wird, gefüllt im selben Zug wie
+  `translated`/`failed` (nur ERFOLGREICH übersetzte Regionen landen
+  darin, exakt wie `PdfTranslationStats.blocks`' Vertrag - ein neuer Test
+  `test_translate_image_replacements_only_include_successful_regions`
+  bestätigt das explizit anhand eines simulierten Anbieterfehlers für
+  eine von zwei Regionen). Dazu `build_corrected_replacements(replacements,
+  edited_texts: dict[int, str])` als Bild-Gegenstück zu
+  `build_corrected_records_from_html()` - da `TextReplacement.translated_text`
+  ein reiner `str` ist (kein Rich-Text-HTML wie bei PDF), ist der
+  Schlüssel schlicht der Listenindex (Zeilenposition in der
+  Korrekturtabelle) statt eines (Seite, Block)-Tupels, weil eine
+  Bilddatei kein Seitenkonzept hat. Nur Zeilen, deren Text sich
+  tatsächlich geändert hat, bekommen ein neues `TextReplacement`-Objekt;
+  alle anderen werden 1:1 (Objektidentität) durchgereicht.
+
+  **Job-Schicht (`ui/image_job.py`):** `ImageJobResult` bekam ein neues
+  Pflichtfeld `source_path` (vorher fehlte diese Information komplett) -
+  nötig, weil ein Batch-Lauf mehrere Dateien übersetzt und der
+  Korrektur-Dialog pro Datei die passende PRISTINE Quelle braucht, nicht
+  die schon übersetzte (siehe `run_image_correction_job()`s Docstring für
+  die Begründung, warum eine bereits übersetzte Datei als "Quelle" für
+  eine zweite Rückschreibe-Runde stehenbleibende Reste der ersten
+  Übersetzung hinterlassen könnte). `run_image_correction_job(source,
+  destination, replacements, inpainting_backend_name="box_overlay")`
+  spiegelt `run_pdf_correction_job()`s Vertrag: kein OCR-/Provider-/
+  Netzwerk-Aufruf, `destination` darf/soll bereits existieren (wird
+  überschrieben statt eines `DestinationConflictError`s), nur der
+  Quelle-gleich-Ziel-Schutz bleibt bestehen. Baut intern ein neues
+  `ImageTranslationStats`-Objekt (da `InpaintingBackend.apply()` selbst
+  `None` zurückgibt) und schreibt einen eigenen, kürzeren
+  "nach manueller Korrektur"-QA-Bericht, exakt wie
+  `run_pdf_correction_job()`s `_build_correction_qa_report()`.
+
+  **Dialog (`ui/image_correction_dialog.py`, neue Datei):**
+  `ImageCorrectionDialog` - bewusst EINFACHER als `PdfCorrectionDialog`:
+  ein reiner `QPlainTextEdit` statt eines Rich-Text-`QTextEdit` mit Fett/
+  Kursiv/Unterstrichen-Toolbar und Strg+B/I/U-Tastenkürzeln, weil
+  rasterisiert eingefügter Bildtext (`PIL.ImageDraw.text()`) keine
+  Formatierung kennt, die es zu erhalten gäbe; die Übersichtstabelle hat
+  nur zwei statt drei Spalten (Original/Übersetzung, keine Seiten-
+  Spalte). Ansonsten identisches Verhalten: Zeilenauswahl lädt die
+  Übersetzung in den Editor, Dirty-Tracking pro Zeile
+  (`_flush_active_row()` überschreibt `_row_text[row]` nur, wenn die
+  Zeile tatsächlich in `_dirty` steht - ein nur angesehener, nie
+  bearbeiteter Wechsel zwischen Zeilen lässt das Original-Objekt
+  unangetastet), "Anwenden und speichern" ruft
+  `build_corrected_replacements()` und dann `run_image_correction_job()`
+  direkt auf dem UI-Thread auf (kein Hintergrund-Worker nötig, da kein
+  Netzwerkaufruf involviert ist).
+
+  **App-Anbindung (`ui/app.py`):** `correct_translation_button` wird
+  jetzt für zwei Fälle sichtbar: ein `PdfJobResult` mit Blöcken (wie
+  vorher) ODER ein `ImageBatchJobResult`, bei dem mindestens EINE Datei
+  im Batch `stats.replacements` hat. `_open_correction_dialog()` wurde in
+  einen gemeinsamen Dispatcher plus `_open_pdf_correction_dialog()`/
+  `_open_image_correction_dialog()` aufgeteilt. Hat der Batch mehr als
+  eine korrigierbare Datei, fragt `_open_image_correction_dialog()` per
+  `QInputDialog.getItem()` (Auswahlliste nach Ausgabedateiname, eindeutig
+  dank `safe_destination()`s Kollisionsvermeidung) welche Datei gemeint
+  ist, bevor der Dialog geöffnet wird. Nach erfolgreicher Korrektur wird
+  das passende `ImageJobResult` per Objektidentität (nicht `list.index()`s
+  Wertevergleich, um eine Verwechslung bei zufällig feldgleichen
+  Einträgen auszuschließen) im Batch-Ergebnis ersetzt und die Job-Anzeige
+  aktualisiert - spiegelt `_open_pdf_correction_dialog()`s "Reopening muss
+  von DIESER Korrekturrunde starten, nicht die alte Maschinenübersetzung
+  wiederherstellen"-Verhalten.
+
+  Neue i18n-Schlüssel `image_correction.*` (DE/EN, Parität über
+  `tests/test_ui_i18n.py` geprüft, wiederverwendet `job.correct_translation`
+  für den Button selbst, da der Text formatneutral genug ist).
+
+  Neue/erweiterte Tests: `tests/test_translate_image.py` (drei neue
+  Tests für `build_corrected_replacements()` plus der oben genannte
+  `replacements`-Vertragstest), `tests/test_image_correction_job.py`
+  (neue Datei, spiegelt `tests/test_pdf_correction_job.py`),
+  `tests/test_ui_image_correction.py` (neue Datei, spiegelt
+  `tests/test_ui_pdf_correction.py`: Button-Sichtbarkeit für beide
+  Zustände, End-to-End-Korrektur inklusive echtem Tesseract-Rückcheck auf
+  der Ausgabedatei, Datei-Picker-Pfad bei mehreren Kandidaten,
+  Dirty-Guard-Verhalten beim Zeilenwechsel ohne Bearbeitung). Kern-
+  Mechanik (`ImageCorrectionDialog._flush_active_row()`s Dirty-Guard) per
+  Revert-Probe verifiziert: gezielt auf ein bedingungsloses
+  `_row_text[row] = ...` zurückgebaut (Dirty-Check entfernt), erwarteter
+  Testfehler bestätigt (`test_switching_rows_without_editing_keeps_original_text`
+  schlägt fehl, weil ein unbearbeiteter Wert nun durch ein neues
+  gleichlautendes String-Objekt statt des Originals ersetzt wird), aus
+  Backup wiederhergestellt, `diff` bestätigt byte-genaue
+  Wiederherstellung, danach Gesamtsuite erneut grün. Gesamter Testlauf am
+  Ende: 242 passed, 2 skipped (vorher 229 passed, 2 skipped in dieser
+  Sandbox - genau die 13 neu hinzugekommenen Tests aus diesem Eintrag).

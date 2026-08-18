@@ -26,6 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+from pipeline.images.inpainting import TextReplacement
 from pipeline.images.translate_image import ImageTranslationStats, translate_image
 from pipeline.translation.base import TranslationProvider
 from pipeline.translation.cost_control import PricingModel, TranslationBudgetGuard
@@ -40,6 +41,16 @@ from ui.document_job_common import (
 
 @dataclass
 class ImageJobResult:
+    source_path: Path
+    """The pristine source image this result was translated from - kept
+    around (unlike e.g. PdfJobResult, whose caller already tracks a
+    single source separately) because IMAGES mode can translate SEVERAL
+    files in one batch (see ImageBatchJobResult.results below); without
+    this field, ui/app.py's correction-dialog wiring would have no way
+    to recover which source file a given batch entry's output came from
+    when the user picks one file out of several to correct (see
+    run_image_correction_job()'s docstring for why the correct pristine
+    source matters there)."""
     output_path: Path
     qa_report_path: Path
     stats: ImageTranslationStats
@@ -117,7 +128,81 @@ def run_image_job(
         ),
         encoding="utf-8",
     )
-    return ImageJobResult(destination, qa_report_path, stats)
+    return ImageJobResult(source, destination, qa_report_path, stats)
+
+
+def run_image_correction_job(
+    source: Path,
+    destination: Path,
+    replacements: list[TextReplacement],
+    inpainting_backend_name: str = "box_overlay",
+) -> ImageJobResult:
+    """Re-render a Bildübersetzung from a corrected list of TextReplacement
+    (see pipeline.images.translate_image.build_corrected_replacements()) -
+    the image counterpart of ui/pdf_job.py::run_pdf_correction_job(), the
+    "Anwenden" step of the correction table opened from
+    ImageJobResult.stats.replacements (RoadMap.md Phase 3's "Korrektur-
+    Möglichkeit ... analog zur PDF-Variante" item).
+
+    Unlike run_image_job(), `destination` is allowed - expected - to
+    already exist: the user explicitly chose "overwrite the existing
+    translation" over "always write a new file" for this workflow,
+    mirroring run_pdf_correction_job()'s identical decision. Only the
+    identical-to-source guard every job function has still applies.
+
+    `source` must be the SAME pristine source image the original
+    translate_image() run used - never `destination` itself, and never
+    an already-translated file: every InpaintingBackend.apply() call
+    re-renders from scratch against whatever `image_path` it's given, so
+    reusing an already-translated image as `source` here would layer a
+    second rewrite on top of the first instead of replacing it cleanly.
+
+    No OCR pass, no translation provider, no cost/budget guard, no
+    progress callback: unlike run_image_job(), this makes no OCR/network
+    calls at all (every replacement already carries its final
+    translated_text) - see ui/app.py for why that lets the correction
+    dialog call this directly on the UI thread instead of via a
+    background QThreadPool worker.
+    """
+    source = Path(source)
+    destination = Path(destination)
+    if destination.resolve() == source.resolve():
+        raise DestinationConflictError(
+            "Zieldatei darf technisch nicht mit der Quelldatei identisch sein."
+        )
+
+    inpainting_backend = build_inpainting_backend(inpainting_backend_name)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    inpainting_backend.apply(str(source), replacements, str(destination))
+
+    stats = ImageTranslationStats(
+        translated=len(replacements),
+        regions=[replacement.region for replacement in replacements],
+        replacements=replacements,
+    )
+
+    qa_report_path = destination.with_name(f"{destination.stem}_qa_report.txt")
+    qa_report_path.write_text(
+        _build_correction_qa_report(source, destination, stats), encoding="utf-8"
+    )
+    return ImageJobResult(source, destination, qa_report_path, stats)
+
+
+def _build_correction_qa_report(source: Path, destination: Path, stats: ImageTranslationStats) -> str:
+    lines = [
+        "Bildübersetzung - QA-Bericht (nach manueller Korrektur)",
+        f"Erstellt: {datetime.now().isoformat(timespec='seconds')}",
+        f"Quelle: {source}",
+        f"Ziel: {destination}",
+        "",
+        "Ergebnis",
+        f"  Regionen neu eingefügt: {stats.translated}",
+        "",
+        "Diese Datei wurde durch eine manuelle Korrektur-Runde ersetzt (siehe RoadMap.md "
+        "Phase 3, 'Korrektur-Möglichkeit ... analog zur PDF-Variante'). Der ursprüngliche "
+        "QA-Bericht des ersten Übersetzungslaufs wurde durch diesen ersetzt.",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 _INPAINTING_BACKEND_LABELS = {
