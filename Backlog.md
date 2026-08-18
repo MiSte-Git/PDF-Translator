@@ -2285,3 +2285,74 @@
   `diff` bestätigt byte-genaue Wiederherstellung, danach Gesamtsuite
   erneut grün. Gesamter Testlauf am Ende: 229 passed, 2 skipped (vorher
   212 passed, 1 skipped).
+
+- **Bildübersetzung/OCR - GPU-Inpainting live verifiziert, zwei
+  Installationsprobleme gefixt (18.08.2026):** Direkte Fortsetzung des
+  GPU-Inpainting-Eintrags oben - Michael hat die neuen Abhängigkeiten
+  installiert und die Suite auf seiner eigenen Maschine laufen lassen,
+  wodurch `test_apply_end_to_end_on_a_real_gpu` zum ersten Mal wirklich
+  ausgeführt (nicht übersprungen) wurde: PASSED, echter LaMa-
+  Gewichte-Download plus echte GPU-Inferenz bestätigt. Der in RoadMap.md
+  offen gelassene "muss auf echter Hardware verifiziert werden"-Punkt
+  ist damit geschlossen.
+
+  **Problem 1 - Paketkonflikt durch `simple-lama-inpainting`s eigene
+  Abhängigkeitsangaben:** Ein naiver `pip install -r
+  requirements-gpu.txt` in Michaels NICHT isolierter (kein venv)
+  Python-Umgebung installierte zusätzlich zum bereits vorhandenen
+  `opencv-python-headless` (aus `requirements-ocr.txt`) das GUI-Paket
+  `opencv-python` (`simple-lama-inpainting`s eigene Abhängigkeitsangabe)
+  - beide belegen dasselbe `cv2`-Modul, ein von den opencv-python-
+  Maintainern selbst als problematisch dokumentiertes Setup. Gleichzeitig
+  wurden numpy (auf `<2.0.0`) und Pillow (auf `<10.0.0`) heruntergestuft,
+  was mit `opencv-python-headless`s eigener Anforderung (`numpy>=2`)
+  sowie einem projektfremden, in derselben geteilten Umgebung installierten
+  Paket (scikit-image, braucht `pillow>=10.1`) kollidierte. Der naheliegende
+  Reparaturschritt `pip uninstall opencv-python` hat es noch schlimmer
+  gemacht: opencv-python und opencv-python-headless teilen sich
+  Installationspfade im `cv2`-Verzeichnis, daher hat das Uninstall die
+  tatsächlichen `cv2`-Dateien von `opencv-python-headless` mitgerissen
+  (nur noch dessen Paket-Metadaten blieben übrig) - `import cv2` schlug
+  danach komplett fehl. Endgültig behoben über
+  `pip install --force-reinstall --no-deps opencv-python-headless`
+  (stellt die tatsächlichen Dateien sauber wieder her) plus
+  `pip install "numpy>=2,<2.3.0"`.
+
+  `requirements-gpu.txt` wurde daraufhin grundlegend überarbeitet: die
+  empfohlene Installation ist jetzt explizit
+  `pip install --no-deps simple-lama-inpainting` statt eines naiven
+  `pip install -r requirements-gpu.txt` für dieses Paket - durch direkte
+  Quellcode-Prüfung des GitHub-Repos verifiziert (nicht angenommen),
+  dass `simple-lama-inpainting` nur torch, numpy, PIL und cv2 für reine
+  Array-/Resize-Operationen importiert, keine GUI-Funktionen -
+  `opencv-python-headless` deckt das vollständig ab, die von
+  `simple-lama-inpainting` sonst mitinstallierten `fire`/`six`/
+  `termcolor` gehören nur zu seinem (hier nie benutzten) CLI-Tool. Die
+  Datei enthält jetzt außerdem einen expliziten
+  Troubleshooting-Abschnitt für genau diesen Konfliktfall, inklusive der
+  Force-Reinstall-Reparaturbefehle, für den Fall, dass jemand anders
+  denselben Weg naiv geht.
+
+  **Problem 2 - Pillow-Versionsinkompatibilität in drei Tests:**
+  `tests/test_image_cv_inpainting.py`/`tests/test_image_inpainting.py`
+  nutzten `Image.get_flattened_data()` für Pixel-für-Pixel-Vergleiche -
+  eine Methode, die nur in sehr neuen Pillow-Versionen existiert (in der
+  Cloud-Sandbox dieser Session vorhanden, auf Michaels durch Problem 1
+  auf 9.5.0 heruntergestufter Installation nicht: `AttributeError:
+  get_flattened_data`). Auf `.tobytes()` umgestellt - eine seit
+  praktisch jeder Pillow-Version stabile Methode für denselben Zweck
+  (Rohbyte-Vergleich statt Tupel-Liste, sogar effizienter). Allgemeine
+  Lehre für künftige Tests: keine sehr neuen/wenig verbreiteten
+  API-Methoden in Test-Hilfsfunktionen verwenden, wenn eine ebenso
+  geeignete, breiter kompatible Alternative existiert - ein Test, der
+  nur in der Entwicklungsumgebung läuft, aber beim ersten Einsatz in
+  einer anderen (älteren) Umgebung bricht, verfehlt seinen Zweck als
+  Regressionsschutz.
+
+  Kein Produktionscode betroffen - beide Probleme lagen ausschließlich
+  in der Installationsanleitung (`requirements-gpu.txt`) bzw. in
+  Testcode. Testlauf auf Michaels Maschine am Ende: 230 passed, 1
+  skipped (verbleibender Skip: DeepL-Live-Kontingent-Test ohne
+  konfigurierten Schlüssel, nicht GPU-bezogen) - gegenüber der
+  Sandbox-Baseline von 229 passed, 2 skipped bedeutet das genau EINEN
+  zusätzlichen echten Testdurchlauf: `test_apply_end_to_end_on_a_real_gpu`.

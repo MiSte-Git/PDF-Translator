@@ -761,6 +761,54 @@ Formulierung war hier nicht mehr aktuell.
       Schwellwertvergleich in `gpu_inpainting_available()`) per
       Revert-Probe verifiziert. Gesamter Testlauf am Ende: 229 passed, 2
       skipped (vorher 212 passed, 1 skipped).
+- [x] GPU-Inpainting auf echter Nutzer-Hardware verifiziert (18.08.2026):
+      `test_apply_end_to_end_on_a_real_gpu` lief auf Michaels Maschine
+      tatsächlich durch (PASSED, nicht übersprungen) - echter LaMa-
+      Modell-Download von GitHub Releases plus echte Inferenz auf einer
+      CUDA-GPU bestätigt. Damit ist der oben offen gelassene
+      Verifikations-Punkt geschlossen.
+
+      Auf dem Weg dorthin zwei reale Installationsprobleme aufgetreten
+      und behoben, beide dokumentiert für künftige Installationen:
+      - `simple-lama-inpainting`s eigene (zu enge) Abhängigkeitsangaben
+        (`numpy<2.0.0`, `pillow<10.0.0`, `opencv-python` statt der von
+        `requirements-ocr.txt` verwendeten `opencv-python-headless`-
+        Variante) haben bei einer naiven `pip install -r
+        requirements-gpu.txt`-Installation in einer NICHT isolierten
+        Python-Umgebung `opencv-python` zusätzlich zu
+        `opencv-python-headless` installiert (beide belegen dasselbe
+        `cv2`-Modul - ein von den opencv-python-Maintainern selbst als
+        problematisch dokumentiertes Setup) und numpy/Pillow
+        heruntergestuft, was mit dem bereits installierten
+        `opencv-python-headless` sowie einem projektfremden Paket
+        (scikit-image) in derselben geteilten Umgebung kollidierte.
+        `pip uninstall opencv-python` hat dabei zusätzlich die
+        tatsächlichen `cv2`-Dateien von `opencv-python-headless`
+        mitgerissen (geteilte Installationspfade zwischen den
+        opencv-python-Varianten) - behoben über
+        `pip install --force-reinstall --no-deps opencv-python-headless`.
+        `requirements-gpu.txt` empfiehlt seitdem ausdrücklich
+        `pip install --no-deps simple-lama-inpainting` (durch
+        Quellcode-Prüfung bestätigt: das Paket importiert nur torch,
+        numpy, PIL und cv2 für reine Array-Operationen, keine
+        GUI-Funktionen - `opencv-python-headless` deckt das vollständig
+        ab) statt eines naiven `pip install -r requirements-gpu.txt`,
+        um genau diesen Konflikt künftig gar nicht erst entstehen zu
+        lassen.
+      - Drei Tests (`tests/test_image_cv_inpainting.py`,
+        `tests/test_image_inpainting.py`) nutzten `get_flattened_data()`
+        für Pixel-Vergleiche - eine Pillow-Methode, die nur in sehr
+        neuen Pillow-Versionen existiert (in dieser Entwicklungs-
+        Sandbox vorhanden, auf Michaels durch obigen Konflikt auf 9.5.0
+        heruntergestufter Installation nicht). Auf `.tobytes()`
+        umgestellt (stabil über praktisch jede Pillow-Version hinweg,
+        auch schneller als eine Tupel-Liste) - allgemeine Lehre: Test-
+        Hilfsfunktionen sollten sich nicht auf sehr neue, wenig
+        verbreitete API-Methoden stützen, wenn eine ebenso geeignete,
+        breit kompatible Alternative existiert.
+      Testlauf auf Michaels Maschine am Ende: 230 passed, 1 skipped
+      (der verbleibende Skip: DeepL-Live-Kontingent-Test ohne
+      konfigurierten Schlüssel, nicht GPU-bezogen).
 - [ ] Gemeinsames Bildmodell für PDF, DOCX, PPTX und einzelne Bilddateien
       definieren.
 - [ ] OCR-Engine auswählen, kapseln und Sprachpakete verwalten.
