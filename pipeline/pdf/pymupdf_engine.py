@@ -48,6 +48,56 @@ _FONT_VARIANTS = {
 _MIN_FONT_SIZE = 6.0
 _FONT_STEP = 0.5
 
+# _insert_html_css()'s p+p gap, as a multiple of the current font size -
+# picked to roughly match PyMuPDF's own DEFAULT (pre-reset) <p> margin, so
+# a genuine multi-paragraph block keeps about the same visual paragraph
+# gap as before the margin:0 reset below (measured directly: ~0.83x
+# font-size at 11pt). Not meant to be pixel-exact, just close enough that
+# a real paragraph break still reads as a paragraph break.
+_PARAGRAPH_GAP_RATIO = 0.8
+
+
+def _insert_html_css(fontsize: float) -> str:
+    """CSS for page.insert_htmlbox() calls in _insert_html_text() (both the
+    `fits()` fit-check and the final forced scale_low=0 insert - see that
+    function's calls to this).
+
+    `p {margin:0; line-height:1;}` matters, not just cosmetics:
+    spans_to_html() always wraps every paragraph in <p>...</p> (even a
+    single-line block with no paragraph breaks gets one <p>), and a
+    translation provider's HTML response preserves that same structure.
+    Without this reset, PyMuPDF's Story/CSS engine reserves extra
+    margin/line-height space for a <p> element that this method's own
+    growth logic (_estimate_line_height()-based height steps, then width -
+    see try_grow() below) doesn't know about and can't compensate for.
+    Confirmed by direct reproduction against "1526 VIRELICON.pdf": several
+    short, single-line highlighted blocks (tight ~13.5pt original boxes,
+    normal single-line spacing - nothing unusual about the source layout)
+    needed a translation only slightly longer than the English original,
+    and NEVER fit no matter how far try_grow() widened the box (even at
+    the full page width) - purely because of this reserved <p> space, not
+    genuine lack of room. That forced a shrink all the way to
+    _MIN_FONT_SIZE (6pt) for text that, with this reset, fits at the
+    block's own original font size after a single 20pt width-growth step.
+
+    `p + p {margin-top: ...}` restores JUST enough of that removed margin
+    to keep a visible gap between two ACTUAL sibling paragraphs within one
+    block (a real blank-line paragraph break, see spans_to_html()'s
+    PARAGRAPH_BREAK_MARKER handling) - the CSS sibling-combinator means a
+    single, lone <p> (the common case this whole reset targets) still
+    gets zero margin, only a <p> that directly follows another <p> does
+    not. Without this, the first version of this fix (plain `margin:0`
+    with no sibling rule) passed every single-paragraph case but broke
+    tests/test_pdf_formatting_roundtrip.py's multi-paragraph gap
+    round-trip - two paragraphs rendered back-to-back with no
+    detectable gap at all once the margin was fully zeroed unconditionally.
+    """
+    return (
+        f"body {{font-family: sans-serif; font-size: {fontsize}pt;}} "
+        f"p {{margin: 0; line-height: 1;}} "
+        f"p + p {{margin-top: {fontsize * _PARAGRAPH_GAP_RATIO:.2f}pt;}}"
+    )
+
 # Overflow fallback (insert_text): once at _MIN_FONT_SIZE, widen the box
 # toward the right page edge before resorting to growing its height.
 _WIDTH_STEP = 20.0
@@ -855,7 +905,7 @@ def _insert_html_text(
     content_html = translated_html if translated_html is not None else spans_to_html(block.spans)
 
     def fits(fontsize: float) -> bool:
-        css = f"body {{font-family: sans-serif; font-size: {fontsize}pt;}}"
+        css = _insert_html_css(fontsize)
         spare_height, _ = page.insert_htmlbox(rect, content_html, css=css, scale_low=1)
         return spare_height >= 0
 
@@ -898,7 +948,7 @@ def _insert_html_text(
     # would silently drop the text - force a real write instead via
     # scale_low=0, which lets PyMuPDF auto-shrink the content as much as
     # needed to fit the capped rect.
-    css = f"body {{font-family: sans-serif; font-size: {size}pt;}}"
+    css = _insert_html_css(size)
     page.insert_htmlbox(rect, content_html, css=css, scale_low=0)
     return False, rect, size
 
@@ -1295,15 +1345,43 @@ class PyMuPdfEngine:
         only the (often much narrower, single-word/short-phrase) block
         width left a white hole under the text with an untouched, wider
         blue band around it, i.e. the text ended up sitting on white while
-        empty space nearby stayed highlighted. Height still comes from
-        block.insert_bbox/bbox as before (or whatever
-        _grow_highlight_if_needed() grows it to afterward) - only the
-        width changes here, and only for a highlighted block.
+        empty space nearby stayed highlighted.
+
+        For a highlighted block, the highlight-color background is ALSO
+        immediately redrawn here, covering the full associated-highlight
+        extent (both axes this time, not just width) - confirmed as a real
+        bug via a live user run against "1526 VIRELICON.pdf": the OLD
+        assumption (see the docstring history in git blame / Backlog.md)
+        was that the original quote-highlight rectangle simply survives
+        underneath this redaction, needing no redraw unless
+        _grow_highlight_if_needed() later found the text needed MORE room
+        than the original. That assumption is false - add_redact_annot()'s
+        white fill covers its ENTIRE rect regardless of what's underneath,
+        so every highlighted block this method touches loses its
+        background, not just ones that grow. Two symptoms depending on
+        exact geometry: if the redaction rect (block.insert_bbox/bbox,
+        only width-widened above) happens to fall a bit SHORT of the
+        drawn highlight rectangle's own true extent (block.bbox's own
+        y-range is derived from the TEXT's glyph bbox, which isn't always
+        identical to the highlight rectangle's own, independently-drawn
+        bounds), a thin sliver of the original highlight color survives
+        peeking out past the white fill's edge - reproduced directly
+        (~2pt strip at a block's bottom edge); otherwise (redaction rect
+        happens to fully contain the highlight rectangle) the background
+        is just gone, plain white behind the new text. Redrawing here,
+        unconditionally and at the FULL extent, fixes both: the block
+        starts from a correctly-colored baseline before insert_text() ever
+        draws anything on top - the same baseline
+        _grow_highlight_if_needed() already assumed existed and now
+        actually does. That method's own conditional redraw (needed only
+        when growth is required) still runs on top of this when relevant,
+        unchanged.
         """
         assert self._doc is not None, "Document not opened. Call open() first."
         page = self._doc[block.page_index]
         rect = fitz.Rect(*(block.insert_bbox if block.insert_bbox is not None else block.bbox))
 
+        extent: fitz.Rect | None = None
         if block.highlighted:
             highlight_rects = self._get_page_highlight_rects(page, block.page_index)
             extent = _associated_highlight_extent(block.bbox, highlight_rects)
@@ -1313,6 +1391,15 @@ class PyMuPdfEngine:
 
         page.add_redact_annot(rect, fill=(1, 1, 1))
         page.apply_redactions()
+
+        if extent is not None:
+            highlight_rect = fitz.Rect(
+                min(block.bbox[0], extent.x0),
+                extent.y0,
+                max(block.bbox[2], extent.x1),
+                extent.y1,
+            )
+            page.draw_rect(highlight_rect, color=None, fill=_HIGHLIGHT_FILL_COLOR, width=0)
 
     def insert_text(
         self,
@@ -1559,14 +1646,19 @@ class PyMuPdfEngine:
         text: str,
         translated_html: str | None,
     ) -> None:
-        """Redraw a highlighted block's quote-highlight background taller
-        if the actually-inserted text (`final_rect`, from
+        """Redraw a highlighted block's quote-highlight background EVEN
+        TALLER if the actually-inserted text (`final_rect`, from
         _insert_html_text()/_insert_plain_text()) extends past the bottom
         of its original highlight rectangle(s) (`original_extent`, see
         _associated_highlight_extent()) by more than
-        _HIGHLIGHT_GROW_TOLERANCE. Does nothing - existing rectangles stay
-        exactly as in the original PDF - if the original height already
-        covers the actual text.
+        _HIGHLIGHT_GROW_TOLERANCE. Does nothing further if the original
+        extent already covers the actual text - by the time this runs,
+        redact_block() has already redrawn the background at (at least)
+        `original_extent`, so "nothing further" here means the correctly-
+        colored baseline redact_block() established stays as-is, not (as
+        an earlier version of this docstring implied) that the ORIGINAL,
+        pre-redaction rectangle was left untouched and simply survived -
+        see redact_block()'s docstring for why that assumption was wrong.
 
         PyMuPDF's insert_htmlbox()/insert_textbox() only WRITE when they
         successfully fit (see insert_text()'s docstring) - there is no

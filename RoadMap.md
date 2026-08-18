@@ -1,6 +1,6 @@
 # Projekt-Roadmap
 
-Stand: 17. August 2026
+Stand: 18. August 2026
 
 Diese Roadmap bündelt die offenen Arbeiten für PDF-, Word-, Präsentations- und
 Bildübersetzung sowie UI, Provider, Kostenkontrolle, Qualitätssicherung und
@@ -267,9 +267,84 @@ Nutzers abgeschlossen (17.08.2026).
       visuell verifiziert (Vorher/Nachher-Rendering der betroffenen
       Seiten) sowie zusätzlich gegen einen kompletten End-to-End-Lauf mit
       Fake-Provider (erzwungene lange Übersetzungen zur Wachstumsprobe).
-      Gesamter Testlauf am Ende: 107 passed, 1 skipped (vorher 99 passed,
-      1 skipped - 8 neue Tests in 2 neuen Dateien plus 3 neue Tests in
-      `tests/test_ui_word_mode.py`).
+      Gesamter Testlauf zu diesem Zeitpunkt: 107 passed, 1 skipped
+      (vorher 99 passed, 1 skipped - 8 neue Tests in 2 neuen Dateien plus
+      3 neue Tests in `tests/test_ui_word_mode.py`).
+- [x] Zwei weitere reale Formatierungsbugs auf Seite 2 derselben
+      "1526 VIRELICON.pdf" gefunden (vom Nutzer anhand der echten
+      Ausgabedatei gemeldet, nicht nur Screenshots) und behoben
+      (17.08.2026):
+      4. **Mehrere kurze, einzeilige Blöcke wurden nach der Übersetzung
+         sichtbar kleiner geschrieben als ihre Nachbarn** - bis hinunter
+         zu `_MIN_FONT_SIZE` (6pt) gegenüber dem normalen ~11pt-
+         Fließtext. Erste Vermutung (zu knapp bemessene Original-Boxen)
+         war falsch und wurde vom Nutzer korrekt zurückgewiesen - der
+         Nutzer wies richtig darauf hin, dass der Originaltext an der
+         fraglichen Stelle ganz gewöhnlich in der nächsten Zeile
+         weiterläuft. Tatsächliche Root Cause in
+         `PyMuPdfEngine._insert_html_text()`s CSS gefunden:
+         `spans_to_html()` verpackt JEDEN Absatz in `<p>...</p>`, auch
+         einen einzeiligen Block ohne echten Absatzumbruch, und
+         PyMuPDFs Story-/CSS-Engine reserviert für ein `<p>`-Element
+         zusätzlichen Rand-/Zeilenhöhenraum, den die Wachstumslogik
+         (`try_grow()`) nicht kennt und nicht ausgleicht - direkt
+         reproduziert: eine knapp bemessene, einzeilige Originalbox nahe
+         Seitenrand/Kollisionsgrenze (wenig Wachstumsspielraum in beiden
+         Achsen) passte mit einer nur geringfügig längeren Übersetzung
+         NIE, egal wie weit `try_grow()` die Box verbreiterte - rein
+         wegen dieses reservierten `<p>`-Raums, nicht aus echtem
+         Platzmangel. Das erzwang ein Schrumpfen bis zur Untergrenze.
+         Fix in neuer `_insert_html_css()`-Hilfsfunktion:
+         `p {margin:0; line-height:1;}` setzt den reservierten Raum auf
+         null; eine zusätzliche `p + p {margin-top: ...}`-Regel (nur für
+         direkt aufeinanderfolgende `<p>`-Geschwister) stellt gezielt
+         den Abstand zwischen zwei ECHTEN Absätzen innerhalb eines
+         Blocks wieder her, damit ein echter Absatzumbruch nicht mit
+         verschwindet - ohne diese Geschwister-Regel brach der erste
+         Fix-Versuch (blankes `margin:0`) den bereits bestehenden
+         Absatzabstand-Test in
+         `tests/test_pdf_formatting_roundtrip.py`. Regressionsabdeckung
+         in `tests/test_pdf_paragraph_css_reset.py` (2 Tests: keine
+         Schrumpfung bei wenig Wachstumsspielraum, echter Mehrfach-
+         Absatzabstand bleibt sichtbar) - beide Tests schlagen
+         nachweislich fehl, wenn der alte CSS-String (ohne `p`-Reset)
+         wiederhergestellt wird.
+      5. **Markierte (blau hinterlegte) Blöcke verloren nach der
+         Übersetzung ihren farbigen Hintergrund** - betraf ALLE
+         markierten Blöcke außer dem einen, der (Symptom 3 oben) gar
+         nicht übersetzt wurde. Vom Nutzer präzise beschrieben: ein
+         dünner blauer Strich am unteren Rand der Box, "als wenn eine
+         weiße Box mit Text drüberliegt". Root Cause in
+         `PyMuPdfEngine.redact_block()` gefunden: die bisherige Annahme
+         war, dass die ursprüngliche Markierungsfläche (als Seiteninhalt
+         HINTER dem Blocktext gezeichnet) die Redaction unbeschadet
+         übersteht und nur bei tatsächlichem Höhenwachstum
+         (`_grow_highlight_if_needed()`) neu gezeichnet werden muss.
+         Das ist falsch: `page.add_redact_annot(rect, fill=(1,1,1))`
+         übermalt sein GESAMTES Rechteck weiß, unabhängig vom
+         darunterliegenden Vektorinhalt - jeder redigierte markierte
+         Block verlor daher seinen Hintergrund, nicht nur wachsende;
+         `_grow_highlight_if_needed()` lief aber nur im Wachstumsfall
+         und stellte die Farbe entsprechend auch nur dann wieder her.
+         Fix: `redact_block()` zeichnet die Markierungsfarbe jetzt
+         unmittelbar nach der Weiß-Redaction unbedingt neu, über die
+         volle `_associated_highlight_extent()` (beide Achsen, nicht nur
+         die bereits vorhandene Breiten-Verbreiterung) - jeder markierte
+         Block startet damit vor jeder Texteinfügung von einer korrekt
+         eingefärbten Ausgangslage, genau das, was
+         `_grow_highlight_if_needed()` schon immer vorausgesetzt hatte.
+         Regressionsabdeckung in
+         `tests/test_pdf_highlight_background_persists.py` (2 Tests: Fall
+         ohne nötiges Wachstum behält seinen Hintergrund vollständig -
+         inklusive des Falls, dass die gezeichnete Markierungsfläche
+         etwas über die reine Textbbox hinausragt -, unmarkierte Blöcke
+         bleiben unverändert weiß).
+
+      Beide Fixes zusätzlich gemeinsam gegen die echte, vertrauliche
+      "1526 VIRELICON.pdf" verifiziert (Rendering der betroffenen
+      Blöcke mit echtem extrahiertem deutschem Übersetzungstext zeigt
+      durchgängig volle Originalschriftgröße und vollständigen blauen
+      Hintergrund). Gesamter Testlauf am Ende: 111 passed, 1 skipped.
 
 **Abnahmekriterium:** DOCX und freigegebene PDF-Typen verwenden denselben
 kontrollierten UI-Lauf und liefern neue, prüfbare Ausgabedateien ohne Änderungen
