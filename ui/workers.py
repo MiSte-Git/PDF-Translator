@@ -11,6 +11,7 @@ from pipeline.presentation.translate_presentation import PresentationTranslation
 from pipeline.translation.cost_control import PricingModel
 from pipeline.word.translate_document import TranslationStats as WordTranslationStats
 from ui.analysis import analyze_request
+from ui.image_job import ImageBatchJobResult, ImageBatchStats, run_image_batch_job
 from ui.models import AnalysisResult, TranslationRequest
 from ui.pdf_job import PdfJobResult, run_pdf_job
 from ui.pptx_job import PresentationJobResult, run_presentation_job
@@ -281,4 +282,92 @@ def _copy_pdf_stats(stats: PdfTranslationStats) -> PdfTranslationStats:
     return PdfTranslationStats(
         stats.translated, stats.skipped, stats.failed, stats.chars_sent,
         stats.overflow_blocks, stats.cancelled, list(stats.errors), list(stats.blocks),
+    )
+
+
+class ImageTranslationWorker(QRunnable):
+    """Runs one eigenständige-Bildübersetzung batch on a background
+    thread (RoadMap.md Phase 3). Mirrors PdfTranslationWorker/
+    PresentationTranslationWorker/WordTranslationWorker's shape (same
+    TranslationSignals, same cooperative-cancellation contract) - the one
+    structural difference is that this worker takes MULTIPLE `sources`
+    and a single `output_dir` rather than one `source`/`destination`
+    pair, since TranslationMode.IMAGES is the only mode whose
+    TranslationRequest allows more than one selected source file at once
+    (see TranslationRequest.validation_errors()). Calls
+    run_image_batch_job() (see ui/image_job.py), not run_image_job()
+    directly.
+
+    ``ocr_engine_name``/``inpainting_backend_name`` (defaults
+    "tesseract"/"box_overlay") select which
+    pipeline.images.ocr.OcrEngine/pipeline.images.inpainting.InpaintingBackend
+    to use - see ui/document_job_common.py's factories.
+    """
+
+    def __init__(
+        self,
+        sources: list[Path],
+        output_dir: Path,
+        provider_name: str,
+        pricing: PricingModel,
+        target_lang: str,
+        source_lang: str | None,
+        protected_terms: list[str],
+        max_chars_per_run: int,
+        ocr_engine_name: str = "tesseract",
+        inpainting_backend_name: str = "box_overlay",
+    ) -> None:
+        super().__init__()
+        self.sources = sources
+        self.output_dir = output_dir
+        self.provider_name = provider_name
+        self.pricing = pricing
+        self.target_lang = target_lang
+        self.source_lang = source_lang
+        self.protected_terms = protected_terms
+        self.max_chars_per_run = max_chars_per_run
+        self.ocr_engine_name = ocr_engine_name
+        self.inpainting_backend_name = inpainting_backend_name
+        self.signals = TranslationSignals()
+        self._cancel_event = threading.Event()
+
+    def request_cancel(self) -> None:
+        self._cancel_event.set()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result: ImageBatchJobResult = run_image_batch_job(
+                self.sources,
+                self.output_dir,
+                self.provider_name,
+                self.pricing,
+                self.target_lang,
+                self.source_lang,
+                self.protected_terms,
+                self.max_chars_per_run,
+                ocr_engine_name=self.ocr_engine_name,
+                inpainting_backend_name=self.inpainting_backend_name,
+                progress_callback=self.signals.progress.emit,
+                stats_callback=lambda stats: self.signals.stats.emit(_copy_image_batch_stats(stats)),
+                should_cancel=self._cancel_event.is_set,
+                total_callback=self.signals.total.emit,
+            )
+        except Exception as exc:
+            self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
+        else:
+            self.signals.finished.emit(result)
+
+
+def _copy_image_batch_stats(stats: ImageBatchStats) -> ImageBatchStats:
+    """Image-batch counterpart of _copy_pdf_stats() above - same reason
+    (snapshot before crossing the Qt signal/thread boundary). `results`
+    is shallow-copied (list(...)) - each individual ImageJobResult inside
+    is immutable in practice (never mutated after construction, see
+    ui/image_job.py), so a shallow copy is enough, same as
+    _copy_pdf_stats() only shallow-copying `blocks`.
+    """
+    return ImageBatchStats(
+        stats.translated, stats.skipped, stats.failed, stats.chars_sent,
+        stats.cancelled, stats.files_processed, stats.files_total, list(stats.results),
     )

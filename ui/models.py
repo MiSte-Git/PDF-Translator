@@ -53,6 +53,16 @@ class TranslationRequest:
     whatever repeating header/footer it finds - a real user's live run
     against a real document had its header translated along with the
     body before this existed."""
+    ocr_engine: str = "tesseract"
+    inpainting_backend: str = "box_overlay"
+    """IMAGES-only dropdowns (ui/app.py, RoadMap.md Phase 3): which
+    pipeline.images.ocr.OcrEngine/pipeline.images.inpainting.InpaintingBackend
+    ui/image_job.py::run_image_batch_job() should use - see
+    ui/document_job_common.py's OCR_ENGINE_FACTORIES/
+    INPAINTING_BACKEND_FACTORIES for the valid keys. Kept as plain strings
+    here (not the class/Protocol itself) so TranslationRequest stays a
+    Qt-independent, trivially comparable/hashable dataclass, exactly like
+    every other field on it."""
 
     def validation_errors(self) -> list[str]:
         errors: list[str] = []

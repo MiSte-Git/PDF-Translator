@@ -18,15 +18,23 @@ from pipeline.presentation.translate_presentation import PresentationTranslation
 from pipeline.translation.cost_control import DEFAULT_MAX_CHARS_PER_RUN
 from pipeline.word.translate_document import TranslationStats as WordTranslationStats
 from ui.analysis import PRICING
+from ui.document_job_common import (
+    INPAINTING_BACKEND_FACTORIES,
+    OCR_ENGINE_FACTORIES,
+    ocr_engine_available,
+    safe_destination,
+)
 from ui.i18n import LOCALES, LanguageManager
+from ui.image_job import ImageBatchJobResult, ImageBatchStats
 from ui.models import AnalysisResult, EmbeddedImageMode, TranslationMode, TranslationRequest
 from ui.pdf_job import PdfJobResult
-from ui.pptx_job import PresentationJobResult, safe_destination
+from ui.pptx_job import PresentationJobResult
 from ui.settings import credential_status, save_credential
 from ui.theme import palette_colors
 from ui.word_job import WordJobResult
 from ui.workers import (
     AnalysisWorker,
+    ImageTranslationWorker,
     PdfTranslationWorker,
     PresentationTranslationWorker,
     WordTranslationWorker,
@@ -41,14 +49,21 @@ MODE_KEYS = {
     TranslationMode.IMAGES: "mode.images",
 }
 
-# PPTX (RoadMap.md Phase 1), DOCX (Phase 2/Word) and now the direct PDF path
-# (Phase 2/PDF) are all connected to the start button. PDF's prerequisite
-# quality issue (the redact/insert duplicate-text bug) is fixed and
-# regression-tested (see tests/test_pdf_redact_insert_collision.py); a
-# number of other, narrower PDF quality items remain open and are
-# catalogued in every PDF job's QA report instead of being silently
-# ignored - see ui/pdf_job.py.
-_EXECUTABLE_MODES = {TranslationMode.PRESENTATION, TranslationMode.WORD, TranslationMode.PDF}
+# PPTX (RoadMap.md Phase 1), DOCX (Phase 2/Word), the direct PDF path
+# (Phase 2/PDF) and now the eigenständige Bildübersetzung (Phase 3/
+# TranslationMode.IMAGES, RoadMap.md) are all connected to the start
+# button. PDF's prerequisite quality issue (the redact/insert
+# duplicate-text bug) is fixed and regression-tested (see
+# tests/test_pdf_redact_insert_collision.py); a number of other, narrower
+# PDF quality items remain open and are catalogued in every PDF job's QA
+# report instead of being silently ignored - see ui/pdf_job.py. IMAGES
+# mode's own open items (no embedding into PDF/Word/PPTX yet, no manual
+# correction dialog, only Tesseract/Box-Overlay/CPU-Inpainting so far) are
+# catalogued the same way in ui/image_job.py's QA report and in
+# RoadMap.md Phase 3.
+_EXECUTABLE_MODES = {
+    TranslationMode.PRESENTATION, TranslationMode.WORD, TranslationMode.PDF, TranslationMode.IMAGES,
+}
 
 
 class SettingsDialog(QDialog):
@@ -163,6 +178,12 @@ class MainWindow(QMainWindow):
         self._job_total_paragraphs = 0
         self._job_last_location = ""
         self._job_last_stats: PresentationTranslationStats | None = None
+        # Which i18n key _update_job_status() uses for the "X von Y ..."
+        # line - "job.progress_count" (paragraphs/pages/slides) for every
+        # mode except IMAGES, which counts whole files instead (see
+        # _start()'s is_images branch, which overwrites this before each
+        # run).
+        self._job_progress_unit_key = "job.progress_count"
 
         self.mode = QComboBox()
         for mode in MODE_KEYS:
@@ -212,9 +233,28 @@ class MainWindow(QMainWindow):
         # pipeline.pdf.template.detect_header_footer_zones().
         self.exclude_header = QCheckBox()
         self.exclude_footer = QCheckBox()
+        # IMAGES-only pair (RoadMap.md Phase 3): which OCR engine/
+        # inpainting backend run_image_batch_job() should use for this run -
+        # see ui/document_job_common.py's OCR_ENGINE_FACTORIES/
+        # INPAINTING_BACKEND_FACTORIES for the keys these combo boxes carry
+        # as itemData. ocr_engine_hint mirrors provider_hint's pattern: an
+        # availability check (ocr_engine_available()) surfaced right next to
+        # the field instead of only failing deep inside a run - see
+        # _update_ocr_engine_hint().
+        self.ocr_engine = QComboBox()
+        for key in OCR_ENGINE_FACTORIES:
+            self.ocr_engine.addItem("", key)
+        self.ocr_engine.currentIndexChanged.connect(self._ocr_engine_changed)
+        self.ocr_engine_hint = QLabel()
+        self.ocr_engine_hint.setWordWrap(True)
+        self.ocr_engine_hint.setStyleSheet("font-weight: bold; padding-left: 2px;")
+        self.inpainting_backend = QComboBox()
+        for key in INPAINTING_BACKEND_FACTORIES:
+            self.inpainting_backend.addItem("", key)
+        self.inpainting_backend.currentIndexChanged.connect(self._invalidate_analysis)
 
         self.form = QFormLayout()
-        self.form_labels = [QLabel() for _ in range(10)]
+        self.form_labels = [QLabel() for _ in range(12)]
         self.form.addRow(self.form_labels[0], self.mode)
         source_row = QHBoxLayout(); source_row.addWidget(self.source_label, 1); source_row.addWidget(self.choose)
         self.form.addRow(self.form_labels[1], source_row)
@@ -226,6 +266,9 @@ class MainWindow(QMainWindow):
         self.form.addRow(self.form_labels[7], self.ico_mode)
         self.form.addRow(self.form_labels[8], self.exclude_header)
         self.form.addRow(self.form_labels[9], self.exclude_footer)
+        self.form.addRow(self.form_labels[10], self.ocr_engine)
+        self.form.addRow("", self.ocr_engine_hint)
+        self.form.addRow(self.form_labels[11], self.inpainting_backend)
 
         self.analyze = QPushButton()
         self.analyze.clicked.connect(self._analyze)
@@ -312,8 +355,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(t("app.title"))
         for index, mode in enumerate(MODE_KEYS): self.mode.setItemText(index, t(MODE_KEYS[mode]))
         for index, key in enumerate(("image.none", "image.selected", "image.all")): self.image_mode.setItemText(index, t(key))
-        for label, key in zip(self.form_labels, ("field.mode", "field.source", "field.images", "field.provider", "field.source_language", "field.target_language", "field.protected_terms", "field.ico_mode", "field.exclude_header", "field.exclude_footer")):
+        for label, key in zip(self.form_labels, ("field.mode", "field.source", "field.images", "field.provider", "field.source_language", "field.target_language", "field.protected_terms", "field.ico_mode", "field.exclude_header", "field.exclude_footer", "field.ocr_engine", "field.inpainting_backend")):
             label.setText(t(key))
+        for index, key in enumerate(OCR_ENGINE_FACTORIES):
+            self.ocr_engine.setItemText(index, t(f"ocr_engine.{key}"))
+        for index, key in enumerate(INPAINTING_BACKEND_FACTORIES):
+            self.inpainting_backend.setItemText(index, t(f"inpainting_backend.{key}"))
         if not self.paths: self.source_label.setText(t("source.none"))
         self.choose.setText(t("source.choose"))
         self.source_lang.setPlaceholderText(t("source_language.placeholder"))
@@ -341,6 +388,7 @@ class MainWindow(QMainWindow):
         elif self._job_result is not None:
             self._show_job_result(self._job_result)
         self._update_provider_credential_hint()
+        self._update_ocr_engine_hint()
         self._update_start_state()
 
     def _update_provider_credential_hint(self) -> None:
@@ -388,7 +436,30 @@ class MainWindow(QMainWindow):
         if not is_pdf:
             self.exclude_header.setChecked(False)
             self.exclude_footer.setChecked(False)
+        # ocr_engine/inpainting_backend are IMAGES-only (see their
+        # construction above) - same hide-the-row treatment, no reset needed
+        # since both combo boxes keep a harmless default (index 0) that is
+        # simply unused for every other mode.
+        self.form.setRowVisible(self.ocr_engine, is_images)
+        self.form.setRowVisible(self.inpainting_backend, is_images)
+        self._update_ocr_engine_hint()
         self._invalidate_analysis()
+
+    def _ocr_engine_changed(self) -> None:
+        self._update_ocr_engine_hint()
+        self._invalidate_analysis()
+
+    def _update_ocr_engine_hint(self) -> None:
+        # Mirrors _update_provider_credential_hint(): checked proactively so
+        # an unavailable engine (e.g. Tesseract not installed) shows up here
+        # instead of only as a wall of per-file failures at the end of a run
+        # - see ui/document_job_common.py::ocr_engine_available() and the
+        # matching fail-fast check in _start().
+        is_images = self.mode.currentData() == TranslationMode.IMAGES
+        engine = self.ocr_engine.currentData()
+        available = engine is None or ocr_engine_available(engine)
+        self.ocr_engine_hint.setText("" if available else self.language.text("ocr_engine.unavailable"))
+        self.ocr_engine_hint.setVisible(is_images and not available)
 
     def _choose_sources(self) -> None:
         mode = self.mode.currentData()
@@ -420,6 +491,8 @@ class MainWindow(QMainWindow):
             target_language=self.target_lang.text().strip(), embedded_images=EmbeddedImageMode(self.image_mode.currentData()),
             protected_terms=terms, ico_mode=self.ico_mode.isChecked(),
             exclude_header=self.exclude_header.isChecked(), exclude_footer=self.exclude_footer.isChecked(),
+            ocr_engine=self.ocr_engine.currentData() or "tesseract",
+            inpainting_backend=self.inpainting_backend.currentData() or "box_overlay",
         )
 
     def _analyze(self) -> None:
@@ -517,20 +590,42 @@ class MainWindow(QMainWindow):
             self._warn_missing_credential(request.provider)
             return
 
+        is_images = request.mode == TranslationMode.IMAGES
+        if is_images and not ocr_engine_available(request.ocr_engine):
+            # Same fail-fast principle as the missing-credential check above
+            # (and the same check _update_ocr_engine_hint() already shows
+            # proactively next to the dropdown) - without this, an
+            # unavailable OCR engine (e.g. Tesseract not installed) would
+            # only ever surface as a wall of per-file failures at the end of
+            # a full run.
+            QMessageBox.warning(
+                self, self.language.text("dialog.check_input"), self.language.text("ocr_engine.unavailable"),
+            )
+            return
+
         directory = QFileDialog.getExistingDirectory(self, self.language.text("dialog.choose_output_dir"))
         if not directory:
             return
         source = request.source_paths[0]
-        destination = safe_destination(source, request.target_language, Path(directory))
+        output_dir = Path(directory)
+        # IMAGES mode treats the chosen directory as the output directory
+        # itself (one destination file per source, computed later inside
+        # run_image_batch_job() via safe_destination() - see its docstring);
+        # every other mode still computes one single destination file here.
+        destination = output_dir if is_images else safe_destination(source, request.target_language, output_dir)
 
         cost = self.last_result.cost
-        proceed = QMessageBox.question(
-            self, self.language.text("dialog.confirm_run"),
-            self.language.text(
+        if is_images:
+            summary = self.language.text(
+                "start.confirm_summary_images", characters=cost.characters, provider=request.provider,
+                cost=cost.estimated_cost_usd, count=len(request.source_paths), folder=str(output_dir),
+            )
+        else:
+            summary = self.language.text(
                 "start.confirm_summary", characters=cost.characters, provider=request.provider,
                 cost=cost.estimated_cost_usd, destination=str(destination),
-            ),
-        )
+            )
+        proceed = QMessageBox.question(self, self.language.text("dialog.confirm_run"), summary)
         if proceed != QMessageBox.Yes:
             return
 
@@ -543,10 +638,17 @@ class MainWindow(QMainWindow):
         # docstring) and the exact same header/footer exclusion the run
         # used, so a correction re-render reproduces the identical
         # DocumentTemplate/block list (see run_pdf_correction_job()'s
-        # docstring for why this matters).
+        # docstring for why this matters). Harmlessly set (but never read)
+        # for IMAGES mode too, since _open_correction_dialog() only acts on
+        # a PdfJobResult.
         self._job_source_path = source
         self._job_exclude_header = request.exclude_header
         self._job_exclude_footer = request.exclude_footer
+        # Mode-aware progress wording (see _update_job_status()): every
+        # other mode counts paragraphs/pages/slides, IMAGES counts whole
+        # files instead - "X von Y Absätzen" would be nonsensical for a
+        # batch of image files.
+        self._job_progress_unit_key = "job.progress_count_files" if is_images else "job.progress_count"
         self.open_folder_button.setVisible(False)
         self.open_report_button.setVisible(False)
         self.correct_translation_button.setVisible(False)
@@ -560,40 +662,55 @@ class MainWindow(QMainWindow):
         self.cancel_button.setEnabled(True)
         self._set_running(True)
 
-        # All three worker classes share the exact same constructor
-        # signature and TranslationSignals (see ui/workers.py) - only the
-        # job function they call underneath differs (run_presentation_job()/
-        # run_word_job()/run_pdf_job()), so the rest of this method (signal
-        # wiring, progress/cancel/result handling below) is identical for
-        # all three modes. A dict lookup (rather than an if/elif chain) so
-        # adding a mode to _EXECUTABLE_MODES without adding it here raises a
-        # clear KeyError instead of silently falling through to the wrong
-        # worker, the way the old two-way "else" did before PDF was added.
-        worker_cls = {
-            TranslationMode.PRESENTATION: PresentationTranslationWorker,
-            TranslationMode.WORD: WordTranslationWorker,
-            TranslationMode.PDF: PdfTranslationWorker,
-        }[request.mode]
-        # ico_mode exists on both WordTranslationWorker and
-        # PdfTranslationWorker (see their docstrings); exclude_header/
-        # exclude_footer only on PdfTranslationWorker. Each is passed as an
-        # extra kwarg only for the mode(s) that support it rather than
-        # added to every constructor just to keep the call below uniform.
-        if request.mode == TranslationMode.WORD:
-            extra_kwargs = {"ico_mode": request.ico_mode}
-        elif request.mode == TranslationMode.PDF:
-            extra_kwargs = {
-                "exclude_header": request.exclude_header, "exclude_footer": request.exclude_footer,
-                "ico_mode": request.ico_mode,
-            }
+        if is_images:
+            # ImageTranslationWorker's shape differs deliberately from the
+            # other three worker classes (multiple `sources` + one
+            # `output_dir` rather than one `source`/`destination` pair - see
+            # its own docstring in ui/workers.py), so it's built directly
+            # here rather than folded into the worker_cls dict lookup below.
+            worker = ImageTranslationWorker(
+                list(request.source_paths), output_dir, request.provider, PRICING[request.provider],
+                request.target_language, request.source_language, list(request.protected_terms),
+                int(self.settings.value("max_chars", DEFAULT_MAX_CHARS_PER_RUN)),
+                ocr_engine_name=request.ocr_engine, inpainting_backend_name=request.inpainting_backend,
+            )
         else:
-            extra_kwargs = {}
-        worker = worker_cls(
-            source, destination, request.provider, PRICING[request.provider],
-            request.target_language, request.source_language, list(request.protected_terms),
-            int(self.settings.value("max_chars", DEFAULT_MAX_CHARS_PER_RUN)),
-            **extra_kwargs,
-        )
+            # The other three worker classes share the exact same
+            # constructor signature and TranslationSignals (see
+            # ui/workers.py) - only the job function they call underneath
+            # differs (run_presentation_job()/run_word_job()/run_pdf_job()),
+            # so the rest of this method (signal wiring, progress/cancel/
+            # result handling below) is identical for all of them. A dict
+            # lookup (rather than an if/elif chain) so adding a mode to
+            # _EXECUTABLE_MODES without adding it here raises a clear
+            # KeyError instead of silently falling through to the wrong
+            # worker, the way the old two-way "else" did before PDF was added.
+            worker_cls = {
+                TranslationMode.PRESENTATION: PresentationTranslationWorker,
+                TranslationMode.WORD: WordTranslationWorker,
+                TranslationMode.PDF: PdfTranslationWorker,
+            }[request.mode]
+            # ico_mode exists on both WordTranslationWorker and
+            # PdfTranslationWorker (see their docstrings); exclude_header/
+            # exclude_footer only on PdfTranslationWorker. Each is passed as
+            # an extra kwarg only for the mode(s) that support it rather
+            # than added to every constructor just to keep the call below
+            # uniform.
+            if request.mode == TranslationMode.WORD:
+                extra_kwargs = {"ico_mode": request.ico_mode}
+            elif request.mode == TranslationMode.PDF:
+                extra_kwargs = {
+                    "exclude_header": request.exclude_header, "exclude_footer": request.exclude_footer,
+                    "ico_mode": request.ico_mode,
+                }
+            else:
+                extra_kwargs = {}
+            worker = worker_cls(
+                source, destination, request.provider, PRICING[request.provider],
+                request.target_language, request.source_language, list(request.protected_terms),
+                int(self.settings.value("max_chars", DEFAULT_MAX_CHARS_PER_RUN)),
+                **extra_kwargs,
+            )
         worker.signals.progress.connect(self._job_progress)
         worker.signals.stats.connect(self._job_stats)
         worker.signals.total.connect(self._job_total)
@@ -623,15 +740,17 @@ class MainWindow(QMainWindow):
         self._update_job_status()
 
     def _job_stats(
-        self, stats: PresentationTranslationStats | WordTranslationStats | PdfTranslationStats
+        self,
+        stats: PresentationTranslationStats | WordTranslationStats | PdfTranslationStats | ImageBatchStats,
     ) -> None:
         # .processed/.translated/.skipped/.failed are format-agnostic
-        # aliases/fields present on all three stats types (see
+        # aliases/fields present on all four stats types (see
         # PresentationTranslationStats,
-        # pipeline.word.translate_document.TranslationStats, and
-        # pipeline.pdf.translate_pdf.PdfTranslationStats) - lets this
-        # method (and _update_job_status()/_show_job_result() below) stay
-        # identical for the PPTX, DOCX and PDF jobs instead of branching on type.
+        # pipeline.word.translate_document.TranslationStats,
+        # pipeline.pdf.translate_pdf.PdfTranslationStats, and
+        # ui.image_job.ImageBatchStats) - lets this method (and
+        # _update_job_status()/_show_job_result() below) stay identical for
+        # the PPTX, DOCX, PDF and IMAGES jobs instead of branching on type.
         self._job_last_stats = stats
         self.job_progress.setValue(min(stats.processed, self.job_progress.maximum()))
         self._update_job_status()
@@ -644,7 +763,10 @@ class MainWindow(QMainWindow):
         stats = self._job_last_stats
         if stats is not None:
             total = max(self._job_total_paragraphs, stats.processed, 1)
-            lines.append(t("job.progress_count", processed=stats.processed, total=total))
+            # _job_progress_unit_key is set in _start() per run - "job.
+            # progress_count" (paragraphs/pages/slides) for every mode
+            # except IMAGES ("job.progress_count_files", whole files).
+            lines.append(t(self._job_progress_unit_key, processed=stats.processed, total=total))
             lines.append(t(
                 "job.stats_summary", translated=stats.translated,
                 skipped=stats.skipped, failed=stats.failed, chars=stats.chars_sent,
@@ -652,19 +774,33 @@ class MainWindow(QMainWindow):
         if lines:
             self.job_status.setText("\n".join(lines))
 
-    def _job_finished(self, result: PresentationJobResult | WordJobResult | PdfJobResult) -> None:
+    def _job_finished(
+        self, result: PresentationJobResult | WordJobResult | PdfJobResult | ImageBatchJobResult
+    ) -> None:
         self._job_result = result
         self._set_running(False)
         self._show_job_result(result)
 
-    def _show_job_result(self, result: PresentationJobResult | WordJobResult | PdfJobResult) -> None:
+    def _show_job_result(
+        self, result: PresentationJobResult | WordJobResult | PdfJobResult | ImageBatchJobResult
+    ) -> None:
         t = self.language.text
         stats = result.stats
-        text = t(
-            "job.result_summary", translated=stats.translated, skipped=stats.skipped,
-            failed=stats.failed, chars=stats.chars_sent, output=str(result.output_path),
-            report=str(result.qa_report_path),
-        )
+        if isinstance(result, ImageBatchJobResult):
+            # ImageBatchJobResult has no single output_path/qa_report_path
+            # (one output file + one QA report PER image, all inside
+            # output_dir - see run_image_batch_job()'s docstring), so it
+            # gets its own summary string instead of "job.result_summary".
+            text = t(
+                "job.result_summary_images", files=stats.files_processed, translated=stats.translated,
+                failed=stats.failed, chars=stats.chars_sent, output_dir=str(result.output_dir),
+            )
+        else:
+            text = t(
+                "job.result_summary", translated=stats.translated, skipped=stats.skipped,
+                failed=stats.failed, chars=stats.chars_sent, output=str(result.output_path),
+                report=str(result.qa_report_path),
+            )
         if stats.cancelled:
             text += t("job.result_cancelled_suffix")
         if isinstance(result, PresentationJobResult):
@@ -691,7 +827,12 @@ class MainWindow(QMainWindow):
         self.job_progress.setVisible(False)
         self.cancel_button.setVisible(False)
         self.open_folder_button.setVisible(True)
-        self.open_report_button.setVisible(True)
+        # ImageBatchJobResult has no single QA report file to open (one per
+        # image, inside output_dir instead - see run_image_batch_job()'s
+        # docstring) - "open folder" already gets the user there, so the
+        # button that would open one specific report file is hidden for
+        # this type.
+        self.open_report_button.setVisible(not isinstance(result, ImageBatchJobResult))
         # Only for PDF runs that actually produced correctable blocks
         # (empty for e.g. an all-skipped or fully-cancelled run) - see
         # PdfTranslationStats.blocks' docstring.
@@ -741,16 +882,32 @@ class MainWindow(QMainWindow):
     def _set_running(self, running: bool) -> None:
         if not running:
             self._worker = None
-        for widget in (self.mode, self.choose, self.analyze, self.confirm, self.settings_button, self.provider, self.ico_mode):
+        for widget in (
+            self.mode, self.choose, self.analyze, self.confirm, self.settings_button, self.provider,
+            self.ico_mode, self.ocr_engine, self.inpainting_backend,
+        ):
             widget.setEnabled(not running)
         self._update_start_state()
 
     def _open_output_folder(self) -> None:
         if self._job_result is not None:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._job_result.output_path.parent)))
+            # ImageBatchJobResult has an output_dir directly (no single
+            # output_path to take .parent of - see its docstring in
+            # ui/image_job.py); every other result type still has one
+            # output_path whose parent folder is opened.
+            path = (
+                self._job_result.output_dir if isinstance(self._job_result, ImageBatchJobResult)
+                else self._job_result.output_path.parent
+            )
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _open_qa_report(self) -> None:
-        if self._job_result is not None:
+        # ImageBatchJobResult has no single qa_report_path (one per image
+        # instead - see run_image_batch_job()'s docstring); the button that
+        # calls this is already hidden for that type in _show_job_result(),
+        # this guard just avoids an AttributeError if it's ever invoked
+        # anyway (e.g. a stray keyboard shortcut).
+        if self._job_result is not None and not isinstance(self._job_result, ImageBatchJobResult):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._job_result.qa_report_path)))
 
     def _warn_missing_credential(self, provider: str) -> None:

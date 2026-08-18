@@ -1981,3 +1981,200 @@
   Wiederherstellung, danach Gesamtsuite erneut grün). Gesamter Testlauf
   am Ende: 160 passed, 1 skipped (vorher 151 passed, 1 skipped - 9 neue
   Tests, davon 8 in einer neuen Datei).
+
+- **Bildübersetzung/OCR - Pipeline-Fundament (18.08.2026):** Erster
+  Umsetzungsblock von RoadMap.md Phase 3, auf ausdrücklichen Nutzerwunsch
+  ("Wie wollen wir die Bild Übersetzung angehen?"). UI-Anbindung folgt
+  als eigener, noch offener Punkt - siehe RoadMap.md.
+
+  **Architektur:** Zwei neue Backend-Abstraktionen nach dem Vorbild von
+  `pipeline/translation/base.py::TranslationProvider`:
+  - `pipeline/images/ocr.py`: `OcrEngine`-Protocol (`recognize(image_path,
+    language) -> list[OcrTextRegion]`), `OcrTextRegion`
+    (text/x/y/width/height/confidence, Pixelkoordinaten wie
+    Pillow/OpenCV/PyMuPDF sie ohnehin verwenden), `TesseractOcrEngine`
+    (pytesseract, lazy import) und `tesseract_available()`
+    (`shutil.which("tesseract")`, analog zu
+    `ui/settings.py::credential_status()`).
+    `_group_words_into_lines()`: `pytesseract.image_to_data()` liefert
+    eine Zeile PRO WORT, gruppiert nach `(block_num, par_num, line_num)`
+    - direkt experimentell bestätigt, dass die Einfügereihenfolge des
+    dict schon der Lesereihenfolge entspricht (kein zusätzliches
+    Sortieren nötig), weil `image_to_data()` selbst block-/zeilenweise
+    iteriert.
+  - `pipeline/images/inpainting.py`: `InpaintingBackend`-Protocol
+    (`apply(image_path, replacements, output_path)`), `TextReplacement`
+    (Region + übersetzter Text). Zwei Implementierungen:
+    `BoxOverlayBackend` (Fläche mit einer aus einem Ring AUSSERHALB der
+    Box gemittelten Umgebungsfarbe übermalen - bewusst kein einzelner
+    Randpixel, da der sonst versehentlich einen Buchstaben-Rest treffen
+    kann; Kontrastfarbe für den neuen Text per ITU-R-BT.601-
+    Luminanzformel) und `CvInpaintingBackend` (`cv2.inpaint()`, Telea-
+    Algorithmus, klassisch ohne KI-Modell - Hintergrundfarbe für den
+    neuen Text wird hier aus dem bereits REKONSTRUIERTEN Bereich selbst
+    gemittelt, nicht aus einem Außenring, da die Fläche nach dem
+    Inpainting selbst schon ein gültiger Hintergrund ist). Ein
+    Gradienten-Test bestätigt den konkreten Unterschied zwischen beiden:
+    nach `CvInpaintingBackend` unterscheiden sich linker und rechter Rand
+    der ersetzten Fläche noch messbar (Farbverlauf wird fortgesetzt),
+    während eine reine Box-Overlay-Füllung beide Ränder auf dieselbe
+    Flächenfarbe abbilden würde.
+  - `pipeline/images/translate_image.py::translate_image()`: kompletter
+    Durchlauf (OCR einmal vorab -> pro Region übersetzen -> alle
+    Ersetzungen am Ende in EINEM `InpaintingBackend.apply()`-Aufruf
+    zurückschreiben), spiegelt `translate_pdf()`/`translate_document()`
+    (Fortschritts-/Abbruch-/Stats-Callbacks, ein fehlschlagender Block
+    bricht nicht den ganzen Lauf ab). Strukturunterschied zu den anderen
+    drei Formaten: es gibt kein einzelnes, in-place mutierbares
+    Dokumentobjekt zum Redact/Insert - deshalb schreibt ein Abbruch
+    trotzdem eine Ausgabedatei (mit allem bis zum Abbruchpunkt
+    Übersetzten), statt wie bei PDF/Word/PPTX ein sauberes Teilergebnis
+    mitten im Dokument zu hinterlassen.
+  - `ui/image_job.py::run_image_job()`: Job-Ablauf analog zu
+    `run_pdf_job()` (Zieldatei-Konfliktprüfung, `TranslationBudgetGuard`-
+    Einbindung, QA-Bericht). Verarbeitet genau EIN Bild pro Aufruf - ein
+    Mehrdatei-Batch (von `TranslationMode.IMAGES` ausdrücklich erlaubt)
+    wäre mehrere `run_image_job()`-Aufrufe; diese Schleife existiert im
+    UI noch nicht (siehe RoadMap.md, "Noch offen").
+  - `ui/document_job_common.py`: `OCR_ENGINE_FACTORIES`/
+    `INPAINTING_BACKEND_FACTORIES` (aktuell `{"tesseract": ...}` bzw.
+    `{"box_overlay": ..., "cv_inpainting": ...}`) plus
+    `build_ocr_engine()`/`build_inpainting_backend()`/
+    `ocr_engine_available()`, exakt nach dem Muster von
+    `PROVIDER_FACTORIES`/`build_provider()`. Bewusst hier statt in
+    `pipeline/images/` platziert, damit die geplante Einbettung derselben
+    Auswahl in PDF/Word/PPTX (RoadMap.md, noch offen) dieselbe,
+    bereits geteilte Stelle importieren kann statt in `ui/image_job.py`
+    nachzuschlagen.
+  - `requirements-ocr.txt` um `opencv-python-headless` erweitert
+    (headless: keine GUI-Abhängigkeiten nötig, PySide6 bringt die
+    Desktop-UI bereits über einen eigenen Weg mit).
+
+  **Testfixture-Besonderheit:** Alle synthetischen Test-Bilder (OCR-,
+  Inpainting- und Job-Tests) werden mit einem echten TrueType-Font
+  (DejaVuSans) statt Pillows eingebautem Bitmap-Default-Font gezeichnet -
+  direkt experimentell bestätigt, dass der Default-Font "Hello World" zu
+  einem einzigen, von Tesseract nicht mehr trennbaren "Helloworld"
+  zusammenzieht (zu klein/eng für echten Zeichenabstand), während
+  DejaVuSans bei normaler Textgröße beide Wörter zuverlässig mit hoher
+  Konfidenz einzeln erkennt.
+
+  **Testabdeckung:** 38 neue Tests über sechs neue Dateien -
+  `tests/test_image_ocr.py` (5, inkl. Zeilen-Gruppierung end-to-end
+  gegen echtes Tesseract), `tests/test_image_inpainting.py` (8, Box-
+  Overlay inkl. Hintergrundfarbe-Sampling-Unittest und einem echten
+  OCR-Rundlauf gegen die Ausgabedatei), `tests/test_image_cv_inpainting.py`
+  (6, inkl. des Gradienten-Vergleichstests oben), `tests/test_translate_image.py`
+  (6, Fehlerbehandlung pro Region, Abbruchverhalten, geschützte Begriffe),
+  `tests/test_document_job_common.py` (7, Factories/Verfügbarkeitsprüfung),
+  `tests/test_image_job.py` (6, Zieldatei-Konflikte, QA-Bericht-Inhalt,
+  Backend-Auswahl). Jede Kernmechanik einzeln per Revert-Probe verifiziert
+  (siehe Architektur-Absätze oben für welche) - jeweils gezielt auf den
+  fehlerhaften/fehlenden Zustand zurückgebaut, erwarteter Testfehler
+  bestätigt, aus Backup wiederhergestellt, `diff` bestätigt byte-genaue
+  Wiederherstellung, danach Gesamtsuite erneut grün. Gesamter Testlauf am
+  Ende: 198 passed, 1 skipped (vorher 160 passed, 1 skipped).
+
+- **Bildübersetzung/OCR - Mehrdatei-Batch und UI-Anbindung (18.08.2026):**
+  Zweiter Umsetzungsblock von RoadMap.md Phase 3, direkt auf das
+  Pipeline-Fundament (siehe Eintrag oben) aufbauend. Klärt beide dort als
+  "Noch offen" markierten Punkte: die Mehrdatei-Verarbeitung (Nutzer
+  entschied sich für "Nacheinander, alle automatisch") und die echte
+  UI-Anbindung in `ui/app.py`.
+
+  **Mehrdatei-Batch:**
+  - `ui/image_job.py::run_image_batch_job()`: Schleife über alle
+    ausgewählten Dateien, ruft `run_image_job()` pro Datei auf (eigene
+    Zieldatei via `safe_destination()`, kollisionssicher auch gegen
+    bereits in diesem Lauf geschriebene Dateien desselben Batches).
+    Abbruch wird ZWISCHEN Dateien geprüft (nie mitten in einer Datei -
+    das übernimmt weiterhin `translate_image()`s eigene, feinere
+    Abbruchprüfung pro Textregion) - beide Abbruchpunkte sind im
+    Docstring bewusst als zwei unterschiedliche Ebenen dokumentiert.
+    Bekannte, dokumentierte Vereinfachung: `max_chars_per_run` gilt PRO
+    DATEI (jeder `run_image_job()`-Aufruf baut einen frischen
+    `TranslationBudgetGuard`), nicht gemeinsam über den ganzen Batch wie
+    bei einem mehrseitigen PDF - eine Umstellung darauf würde eine
+    Änderung an `run_image_job()`s Signatur brauchen (bereits
+    umschlossenen Provider annehmen statt selbst neu zu umschließen),
+    hier bewusst als Vereinfachung für den ersten Wurf zurückgestellt.
+  - `ImageBatchStats`/`ImageBatchJobResult`: duck-typen dieselben
+    `.processed`/`.translated`/`.skipped`/`.failed`/`.chars_sent`/
+    `.cancelled`-Felder wie `PresentationTranslationStats`/
+    `WordTranslationStats`/`PdfTranslationStats`, damit `ui/app.py`s
+    `_job_stats()`/`_update_job_status()` ohne Modus-Verzweigung
+    funktionieren. `processed`/`files_total` zählen Dateien, nicht
+    Textregionen - der Fortschrittsbalken bewegt sich pro fertiger
+    Datei, während `progress_callback` weiterhin die Detailzeile pro
+    Region innerhalb der aktuellen Datei zeigt.
+  - `ui/workers.py::ImageTranslationWorker`: einziger Worker mit
+    strukturell anderer Signatur als die übrigen drei (`sources: list[
+    Path]` + ein `output_dir` statt `source`/`destination`), da
+    `TranslationMode.IMAGES` der einzige Modus ist, dessen
+    `TranslationRequest` mehrere Quelldateien gleichzeitig erlaubt.
+
+  **UI-Anbindung (`ui/app.py`):**
+  - Zwei neue, nur für `TranslationMode.IMAGES` sichtbare Dropdowns
+    (OCR-Engine, Rückschreibe-Backend), gespeist direkt aus
+    `OCR_ENGINE_FACTORIES`/`INPAINTING_BACKEND_FACTORIES` statt
+    hartkodierter Listen - ein künftiges drittes Backend (Cloud-OCR,
+    GPU-/Cloud-Inpainting) erscheint automatisch im Dropdown, sobald es
+    dort registriert ist. `_update_ocr_engine_hint()` spiegelt
+    `_update_provider_credential_hint()`s Muster: die
+    Verfügbarkeitsprüfung (`ocr_engine_available()`) läuft proaktiv bei
+    jeder Auswahl/jedem Moduswechsel, nicht erst beim Start.
+  - `_start()`: fail-fast-Warnung, falls die gewählte OCR-Engine nicht
+    verfügbar ist (analog zur bestehenden Prüfung auf fehlende
+    Zugangsdaten) - vor jeder Ordnerauswahl, nicht erst nach einem
+    halben, fehlgeschlagenen Lauf. Für IMAGES-Modus wird jetzt EIN
+    `ImageTranslationWorker` mit ALLEN ausgewählten Quelldateien gebaut
+    (`list(request.source_paths)`), nicht mehr nur `source_paths[0]` -
+    das war die im Pipeline-Fundament-Eintrag oben dokumentierte,
+    bewusst offen gelassene Lücke. Der gewählte Zielordner wird für
+    IMAGES direkt als `output_dir` verwendet statt über
+    `safe_destination()` in eine einzelne Zieldatei aufgelöst zu werden.
+  - `_show_job_result()`/`_open_output_folder()`/`_open_qa_report()`:
+    neue `isinstance(result, ImageBatchJobResult)`-Zweige, da dieser
+    Ergebnistyp einen `output_dir` statt eines einzelnen
+    `output_path`/`qa_report_path` hat (ein QA-Bericht PRO Bild, alle im
+    selben Ordner) - der "QA-Bericht öffnen"-Button wird für diesen Typ
+    ausgeblendet statt eine beliebige der mehreren Berichtsdateien zu
+    öffnen.
+  - `ui/analysis.py`: der bisherige IMAGES-Platzhalter (immer 0 Zeichen,
+    nur eine Warnung) wurde durch einen echten Tesseract-OCR-Lauf über
+    alle ausgewählten Dateien ersetzt (gated durch
+    `ocr_engine_available()`, mit Fallback auf dieselbe Warnung bei
+    nicht verfügbarer Engine oder einem einzelnen nicht dekodierbaren
+    Bild). Grund: sobald der IMAGES-Modus über den Start-Button
+    tatsächlich lauffähig wurde, hätte eine stets $0.00 zeigende
+    Kostenschätzung RoadMap.mds Leitprinzip "Vor jedem kostenpflichtigen
+    Lauf erfolgen Analyse, Kostenschätzung und ausdrückliche
+    Bestätigung" verletzt.
+  - `ui/i18n.py`: neue Schlüssel `field.ocr_engine`,
+    `ocr_engine.tesseract`, `ocr_engine.unavailable`,
+    `field.inpainting_backend`, `inpainting_backend.box_overlay`,
+    `inpainting_backend.cv_inpainting`, `start.confirm_summary_images`,
+    `job.progress_count_files`, `job.result_summary_images` - jeweils in
+    DE und EN, DE/EN-Schlüsselparität durch den bestehenden
+    `test_ui_i18n.py`-Test abgesichert.
+
+  **Testabdeckung:** `tests/test_image_batch_job.py` (6 Tests für
+  `run_image_batch_job()`: jede Datei verarbeitet, Dateinamenkollisionen
+  vermieden, Abbruch zwischen Dateien, kumulative Stats, funktioniert
+  auch für genau eine Datei) plus `tests/test_ui_images_mode.py` (7
+  Tests, spiegelt `tests/test_ui_word_mode.py`s Muster: Modus nicht mehr
+  blockiert, Zeilen-Sichtbarkeit der neuen Dropdowns, `_request()` trägt
+  die neuen Felder, Worker-Dispatch mit ALLEN Quelldateien statt nur der
+  ersten, Fail-fast-Warnung bei fehlender OCR-Engine, dateibasierte
+  Fortschrittsformulierung, Ergebnisdarstellung ohne QA-Bericht-Button).
+  Kern-Mechanik (Batch-Dispatch: ein Worker für den ganzen Batch statt
+  nur `source_paths[0]`) per Revert-Probe verifiziert: gezielt auf
+  `[request.source_paths[0]]` zurückgebaut, erwarteter Testfehler
+  bestätigt (Assertion zeigt nur 1 statt 3 erwarteter Quelldateien), aus
+  Backup wiederhergestellt, `diff` bestätigt byte-genaue
+  Wiederherstellung, danach Gesamtsuite erneut grün. Zusätzlich per
+  eigenständigem Offscreen-Qt-Smoketest (`QT_QPA_PLATFORM=offscreen`)
+  verifiziert, dass die neuen Formularzeilen bei Moduswechsel korrekt
+  ein-/ausgeblendet werden und `_request()` die Dropdown-Auswahl korrekt
+  überträgt. Gesamter Testlauf am Ende: 212 passed, 1 skipped (vorher
+  198 passed, 1 skipped).

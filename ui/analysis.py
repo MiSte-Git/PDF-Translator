@@ -148,9 +148,40 @@ def analyze_request(
         units, label = len(paragraphs), "unit.paragraphs"
         images = _zip_media_count(request.source_paths[0], "word/media/")
     else:
+        # TranslationMode.IMAGES - the only mode with multiple source_paths
+        # (see TranslationRequest.validation_errors()). "images" here means
+        # the number of source FILES themselves (pre-existing reuse of this
+        # field), not embedded images inside a document - there is no
+        # separate embedded-image concept for a standalone image file.
         units, label = len(request.source_paths), "unit.images"
         images = units
-        warnings.append("warning.image_cost_unknown")
+        # ocr_engine must match what the actual run will use (see
+        # ui/document_job_common.py::build_ocr_engine()/ocr_engine_available() -
+        # mirrors the ico_mode-consistency comments in the PDF/WORD branches
+        # above) - otherwise this cost estimate would silently show $0.00
+        # even though a real run will send real characters, breaking the
+        # "Analyse, Kostenschätzung und ausdrückliche Bestätigung vor jedem
+        # kostenpflichtigen Lauf"-Leitprinzip in RoadMap.md.
+        from ui.document_job_common import ocr_engine_available
+
+        if ocr_engine_available(request.ocr_engine):
+            from pipeline.images.ocr import TesseractOcrEngine
+
+            # Only "tesseract" has a real implementation today (see
+            # ui.document_job_common.OCR_ENGINE_FACTORIES) - a future cloud
+            # OCR backend would need its own (likely network-based, cost-
+            # relevant in its own right) estimation path here instead of
+            # this direct TesseractOcrEngine() call.
+            engine = TesseractOcrEngine()
+            for path in request.source_paths:
+                try:
+                    regions = engine.recognize(str(path))
+                except Exception:
+                    warnings.append("warning.image_cost_unknown")
+                    continue
+                text_chars += sum(len(region.text) for region in regions)
+        else:
+            warnings.append("warning.image_cost_unknown")
 
     selected = images if request.embedded_images == EmbeddedImageMode.ALL else 0
     if request.embedded_images == EmbeddedImageMode.SELECTED:

@@ -562,6 +562,153 @@ Formulierung war hier nicht mehr aktuell.
 
 ## Phase 3 – Bildübersetzung und OCR
 
+- [x] Architektur abgestimmt (18.08.2026, Nutzerentscheidung nach Rücksprache):
+      OCR und Rückschreibung werden je als eigene, austauschbare
+      Backend-Abstraktion gebaut - genau nach dem Muster, das
+      `pipeline/translation/base.py::TranslationProvider` für DeepL/Google/
+      OpenAI/Grok schon vorgibt (`OcrEngine`- bzw.
+      `InpaintingBackend`-Protokoll, mehrere Implementierungen dahinter,
+      Verfügbarkeit wird vor dem Start geprüft und im UI angezeigt statt
+      erst beim Lauf selbst zu scheitern).
+
+      **OCR:** Tesseract lokal (bereits als Binary vorhanden, kostenlos,
+      keine Bilddaten verlassen den Rechner) als erstes Backend, mit
+      Verfügbarkeitsprüfung (`shutil.which("tesseract")`, analog zu
+      `credential_status()` für die Übersetzungs-Provider). Cloud-OCR als
+      zweites, auswählbares Backend vorgesehen (konkreter Anbieter noch
+      offen) - Beweggrund: eine mögliche spätere Standalone-Version der App
+      soll auch bei Nutzern ohne installiertes Tesseract und ohne
+      ausreichend starke Hardware funktionieren.
+
+      **Rückschreibung (vier Backends, alle hinter derselben Abstraktion):**
+      1. Box-Overlay - Textregion wird mit einer Fläche übermalt (Prinzip
+         wie beim bestehenden PDF-Redact/Insert), übersetzter Text wird
+         eingefügt. Keine neue Abhängigkeit, funktioniert überall, aber bei
+         fotografischen/strukturierten Hintergründen als "Flicken"
+         erkennbar.
+      2. Klassisches CPU-Inpainting (OpenCV `cv2.inpaint`, Bibliothek ist
+         bereits installiert) - rekonstruiert den Hintergrund unter dem
+         Originaltext ohne KI-Modell, läuft auf jeder CPU.
+      3. KI-Inpainting lokal (GPU) - Modell: LaMa (etabliert genau für
+         Objekt-/Text-Entfernung mit Hintergrund-Rekonstruktion, deutlich
+         leichter als ein volles Stable-Diffusion-Modell). Braucht PyTorch
+         plus heruntergeladene Modellgewichte (spürbare neue Abhängigkeit,
+         mehrere hundert MB bis wenige GB) und im Idealfall eine
+         ausreichend starke GPU. Eine Fähigkeitsprüfung (GPU vorhanden?
+         genug Grafikspeicher für das Modell?) läuft vor dem Start in der
+         Analyse-Phase (zusammen mit der Kostenschätzung); reicht die GPU
+         nicht, wird die Cloud-Variante vorgeschlagen - keine automatische
+         Umschaltung ohne Zustimmung.
+      4. KI-Inpainting Cloud - OpenAI zuerst (Images-Edit-Endpunkt
+         unterstützt maskenbasiertes Inpainting laut Dokumentation, und der
+         API-Key ist über `get_openai_api_key()` bereits im OS-Keyring
+         hinterlegt - kein neuer Zugangsdaten-Typ nötig). Google/Vertex AI
+         (Imagen) unterstützt maskenbasiertes Inpainting ebenfalls, ist
+         aber ein anderes Produkt als die bestehende Cloud-Translation-v2-
+         Anbindung (`GoogleTranslateProvider`) und würde einen neuen
+         Service-Account-Zugangsdaten-Typ statt des bisherigen einfachen
+         API-Keys brauchen (Grund, warum `GoogleTranslateProvider` bewusst
+         nicht das volle Google-SDK nutzt, siehe dessen Docstring) - als
+         zweites Cloud-Backend vorgemerkt, in dieser Runde nicht umgesetzt.
+         Grok (xAI) unterstützt laut Dokumentation nur allgemeine
+         Bildbearbeitung per Textprompt, keine maskenbasierte
+         Regionsbearbeitung - für diesen Anwendungsfall ungeeignet. DeepL
+         hat keine Bild-API. Beide damit keine Kandidaten für dieses
+         Feature.
+
+      **Umsetzungsreihenfolge:** zuerst Box-Overlay und klassisches
+      CPU-Inpainting (sofort lauffähig, keine neuen schweren
+      Abhängigkeiten) zusammen mit der eigenständigen Bildübersetzung
+      (einzelne Bilddateien, `TranslationMode.IMAGES`) als Fundament;
+      danach GPU-Inpainting (LaMa) und Cloud-Inpainting (OpenAI); danach
+      Einbettung in PDF/Word/PPTX, Auswahl-UI und Korrektur-Dialog (siehe
+      restliche Punkte unten). Das GPU-Backend kann in der Cloud-Sandbox
+      dieser Entwicklungsumgebung nur in seiner Logik/über einen
+      CPU-Fallback getestet werden (keine GPU hier vorhanden) - die echte
+      GPU-Ausführung muss wie bei anderen Features durch einen realen Lauf
+      auf der Nutzer-Maschine verifiziert werden.
+- [x] Pipeline-Fundament implementiert und getestet (18.08.2026, Stand
+      dieser Session - UI-Anbindung fehlt noch, siehe unten): OCR-Backend-
+      Abstraktion (`pipeline/images/ocr.py::OcrEngine`-Protocol,
+      `TesseractOcrEngine`, `tesseract_available()`), Rückschreibe-
+      Abstraktion (`pipeline/images/inpainting.py::InpaintingBackend`-
+      Protocol, `BoxOverlayBackend`, `CvInpaintingBackend`), der komplette
+      OCR-Übersetzung-Rückschreibung-Durchlauf
+      (`pipeline/images/translate_image.py::translate_image()`, spiegelt
+      `translate_pdf()`/`translate_document()`) sowie der Job-Ablauf
+      (`ui/image_job.py::run_image_job()`, spiegelt `run_pdf_job()`, inkl.
+      QA-Bericht). `ui/document_job_common.py` um
+      `OCR_ENGINE_FACTORIES`/`INPAINTING_BACKEND_FACTORIES` und
+      `build_ocr_engine()`/`build_inpainting_backend()`/
+      `ocr_engine_available()` ergänzt - bewusst dort statt in
+      `pipeline/images/`, damit die spätere Einbettung in PDF/Word/PPTX
+      (siehe unten) dieselbe Auswahl direkt wiederverwenden kann. 38 neue
+      Tests über sechs neue Testdateien
+      (`tests/test_image_ocr.py`, `tests/test_image_inpainting.py`,
+      `tests/test_image_cv_inpainting.py`, `tests/test_translate_image.py`,
+      `tests/test_document_job_common.py`, `tests/test_image_job.py`),
+      jede Kernmechanik per Revert-Probe verifiziert (Zeilen-Gruppierung
+      der OCR-Erkennung, Hintergrundfarbe-Sampling/Kontrastfarbe bei
+      Box-Overlay, `cv2.inpaint()`-Aufruf, Fehlerbehandlung pro Textregion
+      in `translate_image()`, Verfügbarkeitsprüfung in
+      `ocr_engine_available()`, Zieldatei-Existenzprüfung in
+      `run_image_job()`). Gesamter Testlauf am Ende: 198 passed, 1
+      skipped (vorher 160 passed, 1 skipped).
+
+      Noch offen, bevor dieser Punkt vollständig abgeschlossen ist: echte
+      UI-Anbindung (Start-Button-Dispatch für `TranslationMode.IMAGES`,
+      OCR-Engine-/Rückschreibe-Backend-Auswahl im Formular,
+      `ui/analysis.py`s IMAGES-Zweig nutzt noch keine echte OCR-
+      Zeichenschätzung). Dabei außerdem eine bisher unadressierte Lücke
+      entdeckt: `ui/app.py::_start()` verarbeitet unabhängig vom Modus nur
+      `request.source_paths[0]` - für IMAGES-Modus, der laut
+      `TranslationRequest.validation_errors()` bewusst MEHRERE Dateien
+      gleichzeitig erlaubt (siehe `ui/models.py`), fehlt noch die
+      Mehrdatei-Verarbeitung (mehrere `run_image_job()`-Aufrufe
+      nacheinander, ein Ausgabebild + QA-Bericht pro Datei) - als
+      eigener, noch nicht umgesetzter Teil dieses Punkts festgehalten,
+      nicht stillschweigend übergangen.
+- [x] Mehrdatei-Verarbeitung entschieden und umgesetzt (18.08.2026,
+      Nutzerentscheidung: „Nacheinander, alle automatisch“): eine
+      IMAGES-Auswahl mit mehreren Dateien wird sequenziell abgearbeitet,
+      ein Ausgabebild + eine QA-Bericht-Datei pro Bild, EIN gemeinsamer
+      Fortschrittsbalken über den ganzen Batch (`ui/image_job.py::
+      run_image_batch_job()`, ruft `run_image_job()` pro Datei auf;
+      `ImageBatchStats`/`ImageBatchJobResult` duck-typen dieselben
+      `.processed`/`.translated`/… Felder wie
+      `PresentationTranslationStats`/`WordTranslationStats`/
+      `PdfTranslationStats`, damit `ui/app.py` sie ohne Sonderfall lesen
+      kann). Bekannte, dokumentierte Vereinfachung: das
+      Zeichen-Lauflimit (`max_chars_per_run`) gilt PRO DATEI (jede
+      `run_image_job()`-Aufruf baut einen eigenen
+      `TranslationBudgetGuard`), nicht gemeinsam über den ganzen Batch
+      wie bei einem mehrseitigen PDF.
+- [x] Echte UI-Anbindung fertiggestellt und verifiziert (18.08.2026):
+      `ui/app.py` zeigt für `TranslationMode.IMAGES` zwei neue Dropdowns
+      (OCR-Engine, Rückschreibe-Backend, gespeist aus
+      `OCR_ENGINE_FACTORIES`/`INPAINTING_BACKEND_FACTORIES`) inkl. eines
+      proaktiven Verfügbarkeitshinweises (`_update_ocr_engine_hint()`,
+      spiegelt `_update_provider_credential_hint()`), Start-Button
+      dispatcht jetzt EINEN `ImageTranslationWorker` für die gesamte
+      Dateiauswahl (`ui/workers.py`) statt nur `source_paths[0]`, mit
+      eigenem Bestätigungstext/eigener Fortschritts-/Ergebnisdarstellung
+      (`start.confirm_summary_images`, `job.progress_count_files`,
+      `job.result_summary_images` in `ui/i18n.py`, DE/EN-Parität durch
+      bestehenden Test abgesichert). `ui/analysis.py`s IMAGES-Zweig
+      führt jetzt echte Tesseract-OCR während der Analyse aus (statt
+      immer 0 Zeichen zu melden), gated durch `ocr_engine_available()` -
+      sonst hätte eine Kostenschätzung von $0.00 das Leitprinzip „Vor
+      jedem kostenpflichtigen Lauf erfolgen Analyse, Kostenschätzung und
+      ausdrückliche Bestätigung“ verletzt, sobald der IMAGES-Modus
+      tatsächlich lauffähig wurde. 7 neue UI-Tests
+      (`tests/test_ui_images_mode.py`, spiegelt
+      `tests/test_ui_word_mode.py`s Muster: Worker-Dispatch,
+      Zeilen-Sichtbarkeit, `_request()`-Felder, Fail-fast bei fehlender
+      OCR-Engine, Fortschrittstext, Ergebnisdarstellung ohne
+      QA-Bericht-Button). Kern-Mechanik (Batch-Dispatch: ein Worker für
+      alle Dateien statt nur die erste) per Revert-Probe verifiziert.
+      Gesamter Testlauf am Ende: 212 passed, 1 skipped (vorher 205
+      passed, 1 skipped).
 - [ ] Gemeinsames Bildmodell für PDF, DOCX, PPTX und einzelne Bilddateien
       definieren.
 - [ ] OCR-Engine auswählen, kapseln und Sprachpakete verwalten.
@@ -569,7 +716,7 @@ Formulierung war hier nicht mehr aktuell.
 - [ ] Optionalen Pfad für eingebettete Bilder klar vom Dokumenttext trennen.
 - [ ] Auswahl „keine“, „einzelne“ oder „alle Bilder“ um Vorschauen und
       Mehrfachauswahl ergänzen.
-- [ ] Eigenständige Übersetzung einer oder mehrerer Bilddateien implementieren.
+- [x] Eigenständige Übersetzung einer oder mehrerer Bilddateien implementieren.
 - [ ] Textregionen, Leserichtung, Schrift, Farbe und Hintergrund erfassen.
 - [ ] Übersetzten Text mit Inpainting/Maskierung sicher zurückschreiben.
 - [ ] Logos, dekorative Bilder und Hintergründe standardmäßig ausschließen.

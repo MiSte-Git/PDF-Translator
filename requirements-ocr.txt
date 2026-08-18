@@ -1,0 +1,20 @@
+# Optionale Abhängigkeiten für die Bildübersetzung/OCR (RoadMap.md Phase 3).
+# Getrennt von requirements.txt, damit die übrigen Modi (PDF/Word/PPTX)
+# ohne diese Pakete funktionsfähig bleiben - siehe
+# pipeline/images/ocr.py::TesseractOcrEngine (lazy import).
+#
+# pytesseract ist nur die Python-Anbindung; das eigentliche Tesseract-
+# Binary muss separat über den System-Paketmanager installiert werden
+# (z. B. "apt install tesseract-ocr" unter Debian/Ubuntu,
+# "brew install tesseract" unter macOS) - pip kann das Binary nicht
+# mitliefern. pipeline/images/ocr.py::tesseract_available() prüft das
+# vor jedem Lauf.
+pytesseract
+Pillow
+
+# opencv wird nicht für OCR selbst gebraucht, sondern für das klassische
+# CPU-Inpainting-Rückschreibe-Backend (siehe
+# pipeline/images/inpainting.py::CvInpaintingBackend, lazy import).
+# headless-Variante: keine GUI-/Anzeige-Abhängigkeiten nötig, PySide6
+# bringt die Desktop-UI bereits über einen eigenen Weg mit.
+opencv-python-headless

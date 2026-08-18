@@ -68,6 +68,16 @@ DE = {
         "Wie bei der Kopfzeile, nur für wiederkehrenden Text nahe unten auf "
         "der Seite (z. B. Copyright-Zeile, Seitenzahl)."
     ),
+    "field.ocr_engine": "OCR-Engine",
+    "ocr_engine.tesseract": "Tesseract (lokal)",
+    "ocr_engine.unavailable": (
+        "Tesseract wurde auf diesem System nicht gefunden. Bitte installieren "
+        "(siehe README.md) - ohne installiertes Tesseract kann kein Text in "
+        "Bildern erkannt werden."
+    ),
+    "field.inpainting_backend": "Rückschreibe-Methode",
+    "inpainting_backend.box_overlay": "Box-Overlay (Fläche überdecken)",
+    "inpainting_backend.cv_inpainting": "Klassisches CPU-Inpainting (Hintergrund rekonstruieren)",
     "source_language.placeholder": "optional / automatisch",
     "protected.placeholder": "Ein geschützter Begriff pro Zeile",
     "analysis.group": "Analyse und Kostenkontrolle",
@@ -97,15 +107,18 @@ DE = {
     "dialog.choose_output_dir": "Zielordner wählen",
     "dialog.confirm_run": "Übersetzung starten",
     "start.confirm_summary": "Es werden schätzungsweise {characters:,} Zeichen an {provider} gesendet (geschätzte Kosten ${cost:.2f}).\nZieldatei: {destination}\n\nJetzt starten?",
+    "start.confirm_summary_images": "Es werden schätzungsweise {characters:,} Zeichen an {provider} gesendet (geschätzte Kosten ${cost:.2f}) für {count} Bild(er).\nZielordner: {folder}\n\nJetzt starten?",
     "job.group": "Lauf und Ergebnis",
     "job.idle": "Noch kein Lauf gestartet.",
     "job.running": "Übersetzung läuft …",
     "job.progress_prefix": "Verarbeite: {location}",
     "job.progress_count": "{processed} von {total} Absätzen verarbeitet",
+    "job.progress_count_files": "{processed} von {total} Bildern verarbeitet",
     "job.stats_summary": "{translated} übersetzt · {skipped} übersprungen · {failed} fehlgeschlagen · {chars:,} Zeichen gesendet",
     "job.cancel": "Abbrechen",
     "job.cancel_requested": "Abbruch angefordert – wird nach dem laufenden API-Aufruf gestoppt …",
     "job.result_summary": "Fertig: {translated} übersetzt, {skipped} übersprungen, {failed} fehlgeschlagen, {chars:,} Zeichen gesendet.\nAusgabedatei: {output}\nQA-Bericht: {report}",
+    "job.result_summary_images": "Fertig: {files} Bild(er) verarbeitet, {translated} Textregionen übersetzt, {failed} fehlgeschlagen, {chars:,} Zeichen gesendet.\nAusgabeordner: {output_dir}\nJe Bild liegt eine eigene QA-Bericht-Datei im Ausgabeordner.",
     "job.result_cancelled_suffix": "\nHinweis: Lauf wurde abgebrochen – dies ist ein Teilergebnis, bereits übersetzte Inhalte wurden gespeichert.",
     "job.overflow_none": "Keine neuen Überlaufrisiken gefunden.",
     "job.overflow_count": "{count} Überlaufhinweis(e) im QA-Bericht – bitte manuell in PowerPoint/Impress prüfen.",
@@ -199,6 +212,16 @@ EN = {
         "Same as the header option, for text that repeats near the bottom "
         "of the page (e.g. a copyright line, page number)."
     ),
+    "field.ocr_engine": "OCR engine",
+    "ocr_engine.tesseract": "Tesseract (local)",
+    "ocr_engine.unavailable": (
+        "Tesseract was not found on this system. Please install it (see "
+        "README.md) - text in images cannot be recognized without an "
+        "installed Tesseract."
+    ),
+    "field.inpainting_backend": "Rewrite method",
+    "inpainting_backend.box_overlay": "Box overlay (cover the area)",
+    "inpainting_backend.cv_inpainting": "Classic CPU inpainting (reconstruct background)",
     "source_language.placeholder": "optional / automatic",
     "protected.placeholder": "One protected term per line",
     "analysis.group": "Analysis and cost control",
@@ -228,15 +251,18 @@ EN = {
     "dialog.choose_output_dir": "Choose output folder",
     "dialog.confirm_run": "Start translation",
     "start.confirm_summary": "About to send an estimated {characters:,} characters to {provider} (estimated cost ${cost:.2f}).\nOutput file: {destination}\n\nStart now?",
+    "start.confirm_summary_images": "About to send an estimated {characters:,} characters to {provider} (estimated cost ${cost:.2f}) for {count} image(s).\nOutput folder: {folder}\n\nStart now?",
     "job.group": "Run and result",
     "job.idle": "No run started yet.",
     "job.running": "Translation running …",
     "job.progress_prefix": "Processing: {location}",
     "job.progress_count": "{processed} of {total} paragraphs processed",
+    "job.progress_count_files": "{processed} of {total} images processed",
     "job.stats_summary": "{translated} translated · {skipped} skipped · {failed} failed · {chars:,} characters sent",
     "job.cancel": "Cancel",
     "job.cancel_requested": "Cancellation requested – will stop after the current API call …",
     "job.result_summary": "Done: {translated} translated, {skipped} skipped, {failed} failed, {chars:,} characters sent.\nOutput file: {output}\nQA report: {report}",
+    "job.result_summary_images": "Done: {files} image(s) processed, {translated} text regions translated, {failed} failed, {chars:,} characters sent.\nOutput folder: {output_dir}\nEach image has its own QA report file in the output folder.",
     "job.result_cancelled_suffix": "\nNote: the run was cancelled – this is a partial result, already-translated content was saved.",
     "job.overflow_none": "No new overflow risks found.",
     "job.overflow_count": "{count} overflow note(s) in the QA report – please review manually in PowerPoint/Impress.",
