@@ -27,7 +27,11 @@ from pathlib import Path
 from typing import Callable
 
 from pipeline.images.inpainting import TextReplacement
-from pipeline.images.translate_image import ImageTranslationStats, translate_image
+from pipeline.images.translate_image import (
+    DEFAULT_MIN_OCR_CONFIDENCE,
+    ImageTranslationStats,
+    translate_image,
+)
 from pipeline.translation.base import TranslationProvider
 from pipeline.translation.cost_control import PricingModel, TranslationBudgetGuard
 from ui.document_job_common import (
@@ -68,6 +72,7 @@ def run_image_job(
     ocr_engine_name: str = "tesseract",
     inpainting_backend_name: str = "box_overlay",
     ocr_language: str | None = None,
+    min_confidence: float = DEFAULT_MIN_OCR_CONFIDENCE,
     progress_callback: Callable[[str], None] | None = None,
     stats_callback: Callable[[ImageTranslationStats], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
@@ -89,6 +94,12 @@ def run_image_job(
     itself does not re-check availability, mirroring how build_provider()
     doesn't re-check credentials either (both fail naturally, with a clear
     error, the first time they're actually used if skipped).
+
+    ``min_confidence`` is forwarded to translate_image() as-is - see
+    pipeline.images.translate_image.DEFAULT_MIN_OCR_CONFIDENCE's docstring.
+    Not yet exposed as a UI setting (see RoadMap.md/Backlog.md 18.08.2026);
+    a caller (or a test) that needs a different threshold passes it here
+    directly.
     """
     source = Path(source)
     destination = Path(destination)
@@ -115,6 +126,7 @@ def run_image_job(
         target_lang,
         source_lang,
         ocr_language=ocr_language,
+        min_confidence=min_confidence,
         progress_callback=progress_callback,
         stats_callback=stats_callback,
         should_cancel=should_cancel,
@@ -235,6 +247,7 @@ def _build_qa_report(
         "Ergebnis",
         f"  Erkannte Textregionen: {len(stats.regions)}",
         f"  Regionen übersetzt: {stats.translated}",
+        f"  Regionen übersprungen (niedrige OCR-Konfidenz): {stats.skipped}",
         f"  Regionen fehlgeschlagen: {stats.failed}",
         f"  Gesendete Zeichen: {stats.chars_sent}",
     ]
@@ -257,10 +270,13 @@ def _build_qa_report(
     lines.append("")
     lines.append(
         "Bekannte, noch nicht automatisiert geprüfte Einschränkungen (siehe RoadMap.md "
-        "Phase 3): keine manuelle Korrekturmöglichkeit für einzelne Regionen (geplant, "
-        "analog zum PDF-Korrektur-Dialog), keine Erkennung/Ausnahme für Logos oder rein "
-        "dekorative Bildbereiche, keine Deduplizierung mehrfach identischer Bilder. Bitte "
-        "das Ergebnis stichprobenartig prüfen."
+        "Phase 3): keine Erkennung/Ausnahme für Logos oder rein dekorative Bildbereiche, "
+        "keine Deduplizierung mehrfach identischer Bilder, Konfidenz-Filter fängt nur "
+        "die eindeutigsten OCR-Fehllesungen ab (siehe 'Regionen übersprungen' oben - "
+        "einzelne fragwürdige Regionen können trotzdem durchrutschen). Bitte das "
+        "Ergebnis stichprobenartig prüfen; eine falsch übersetzte oder übersprungene "
+        "Region lässt sich über den Korrektur-Dialog (Button unter dem Ergebnis) "
+        "nachträglich anpassen."
     )
     return "\n".join(lines) + "\n"
 
@@ -272,11 +288,14 @@ class ImageBatchStats:
     WordTranslationStats/PdfTranslationStats' .processed/.translated/
     .skipped/.failed/.chars_sent/.cancelled contract (see
     ui/app.py::_job_stats()/_update_job_status(), which reads these
-    fields identically regardless of format). `skipped` has no real
-    meaning for images - every OCR region is either translated or
-    failed, never structurally skipped the way a PDF link/header block
-    is - kept at a permanent 0 anyway so the existing UI progress code
-    needs no per-mode branching for that one field.
+    fields identically regardless of format). `skipped` sums every file's
+    ImageTranslationStats.skipped (regions never translated because their
+    OCR confidence was below min_confidence - see that field's docstring
+    and DEFAULT_MIN_OCR_CONFIDENCE, added 18.08.2026) - structurally the
+    same "excluded, not an error" meaning PdfTranslationStats.skipped has
+    for a PDF link/header block, so the existing UI progress code (see
+    ui/app.py::_job_stats()/_update_job_status()) needs no per-mode
+    branching for this field.
 
     `processed`/`files_total` operate at FILE granularity (one unit per
     completed file), not region granularity - see run_image_batch_job()'s
@@ -326,6 +345,7 @@ def run_image_batch_job(
     ocr_engine_name: str = "tesseract",
     inpainting_backend_name: str = "box_overlay",
     ocr_language: str | None = None,
+    min_confidence: float = DEFAULT_MIN_OCR_CONFIDENCE,
     progress_callback: Callable[[str], None] | None = None,
     stats_callback: Callable[[ImageBatchStats], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
@@ -392,13 +412,14 @@ def run_image_batch_job(
             source, destination, provider_name, pricing, target_lang, source_lang,
             protected_terms, max_chars_per_run,
             ocr_engine_name=ocr_engine_name, inpainting_backend_name=inpainting_backend_name,
-            ocr_language=ocr_language,
+            ocr_language=ocr_language, min_confidence=min_confidence,
             progress_callback=progress_callback,
             should_cancel=should_cancel,
             provider=provider,
         )
         stats.results.append(result)
         stats.translated += result.stats.translated
+        stats.skipped += result.stats.skipped
         stats.failed += result.stats.failed
         stats.chars_sent += result.stats.chars_sent
         stats.files_processed += 1

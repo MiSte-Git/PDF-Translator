@@ -852,6 +852,59 @@ Formulierung war hier nicht mehr aktuell.
         mehreren Kandidaten). Kern-Mechanik (`_flush_active_row()`s
         Dirty-Guard) per Revert-Probe verifiziert. Gesamter Testlauf am
         Ende: 242 passed, 2 skipped.
+- [x] Textüberlauf/-verunstaltung beim Zurückschreiben behoben (18.08.2026):
+      Michael meldete anhand zweier echter Screenshots (Chat-App, Zoom-
+      Anleitung), dass übersetzter Text über seine Box hinaus lief, Boxen
+      sich überlappten und an falscher Stelle saßen. Ursachenanalyse mit
+      echten Tesseract-Läufen auf den gemeldeten Bildern (nicht geraten)
+      ergab ZWEI unabhängige Ursachen:
+      1. Alle drei Rückschreibe-Backends zeichneten den kompletten
+         übersetzten Text bisher IMMER auf einer einzigen, nicht
+         umgebrochenen Zeile (`draw.text(...)`), unabhängig von
+         `region.width` - Deutsch ist typischerweise 20-40 % länger als
+         Englisch, lief also fast garantiert über die ursprüngliche
+         Zeilenbreite hinaus in benachbarten Text hinein. Behoben durch
+         eine neue geteilte Rendering-Funktion (`_fit_text()`/
+         `_draw_fitted_text()` in `pipeline/images/inpainting.py`,
+         genutzt von allen drei Backends): Text wird jetzt per Greedy-
+         Wortumbruch auf `region.width` umgebrochen, die Schriftgröße bei
+         Bedarf schrittweise verkleinert (bis zu einer lesbaren
+         Mindestgröße), damit der umgebrochene Block innerhalb von
+         `region.height` bleibt - bewusst SCHRUMPFEN statt die Box zu
+         VERGRÖSSERN, da ein Wachstum der Box in eng gesetzten
+         Screenshots (bestätigt an beiden gemeldeten Bildern) in den
+         nächsten, unbeteiligten Textblock hineinlaufen würde. Zusätzlich
+         eine feste Obergrenze für die Start-Schriftgröße
+         (`_MAX_FONT_SIZE`, unabhängig von `region.height`) - Ursache für
+         einen der auffälligsten gemeldeten Fehler (metergroße Schrift):
+         eine OCR-Zeile hatte durch ein benachbartes Icon/Pfeil-
+         Grafikelement eine fehlerhaft überhöhte Bounding-Box bekommen.
+      2. Mehrere der schlimmsten "verunstalteten" Textstellen waren gar
+         keine echten Übersetzungen, sondern von Tesseract falsch
+         gelesene UI-Icons/Grafiken (z. B. eine Mute/Video-Symbolleiste
+         als "a & 0"/"Papats Cut" erkannt, ein Pfeil-Icon als zusätzliche
+         "4" in eine echte Textzeile hineingemischt, ein Anti-Aliasing-
+         Halo um eine fette Überschrift als komplett unsinnige zweite,
+         überlappende Geister-Zeile erkannt) - jeweils mit auffällig
+         niedriger Tesseract-Konfidenz (20er-40er Werte) verglichen mit
+         echtem Text (80er-90er) im SELBEN Bild. Behoben über einen neuen
+         Mindest-Konfidenz-Filter (`DEFAULT_MIN_OCR_CONFIDENCE = 40.0`,
+         `translate_image(..., min_confidence=...)` in
+         `pipeline/images/translate_image.py`): eine Region unterhalb der
+         Schwelle wird gar nicht erst übersetzt, sondern unverändert
+         gelassen (neues `ImageTranslationStats.skipped`-Feld, im
+         QA-Bericht sichtbar) - ausdrücklich als Heuristik dokumentiert,
+         nicht als vollständige Lösung: mittelmäßig-konfidente
+         Icon-Fehllesungen rutschen noch durch (siehe Backlog.md für die
+         konkreten Restfälle).
+      Beide Fixes gemeinsam an den ECHTEN, vom Nutzer gemeldeten Bildern
+      über die tatsächliche `translate_image()`-Pipeline verifiziert
+      (nicht nur an synthetischen Tests) - deutliche Verbesserung
+      bestätigt, siehe Backlog.md für die Vorher/Nachher-Beobachtung.
+      Kern-Mechanik (Schrumpf-Schleife in `_fit_text()`, Konfidenz-Skip in
+      `translate_image()`) je per Revert-Probe verifiziert. Neue Tests in
+      `tests/test_image_inpainting.py`/`tests/test_translate_image.py`.
+      Gesamter Testlauf am Ende: 251 passed, 2 skipped.
 - [ ] Gemeinsames Bildmodell für PDF, DOCX, PPTX und einzelne Bilddateien
       definieren.
 - [ ] OCR-Engine auswählen, kapseln und Sprachpakete verwalten.
@@ -860,8 +913,15 @@ Formulierung war hier nicht mehr aktuell.
 - [ ] Auswahl „keine“, „einzelne“ oder „alle Bilder“ um Vorschauen und
       Mehrfachauswahl ergänzen.
 - [x] Eigenständige Übersetzung einer oder mehrerer Bilddateien implementieren.
-- [ ] Textregionen, Leserichtung, Schrift, Farbe und Hintergrund erfassen.
-- [ ] Übersetzten Text mit Inpainting/Maskierung sicher zurückschreiben.
+- [ ] Textregionen, Leserichtung, Schrift, Farbe und Hintergrund erfassen -
+      Textregionen/Farbe/Hintergrund werden bereits erfasst, Leserichtung/
+      echte Schrifterkennung (Font-Matching) weiterhin offen.
+- [x] Übersetzten Text mit Inpainting/Maskierung sicher zurückschreiben -
+      Grundmechanik seit den drei Backends vorhanden, Überlauf-/Größen-
+      Probleme siehe obiger Eintrag; verbleibende OCR-Fehllesungen bei
+      komplexen Mehrspalten-/Infografik-Layouts (siehe Backlog.md) sind
+      ein bekanntes, noch offenes Restrisiko, kein vollständig gelöstes
+      Problem.
 - [ ] Logos, dekorative Bilder und Hintergründe standardmäßig ausschließen.
 - [ ] Identische, mehrfach eingebettete Bilder deduplizieren, um API- und
       OCR-Kosten nicht mehrfach zu berechnen.

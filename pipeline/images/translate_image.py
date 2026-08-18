@@ -33,14 +33,39 @@ from pipeline.images.ocr import OcrEngine, OcrTextRegion
 from pipeline.translation.base import TranslationError, TranslationProvider
 from pipeline.translation.protected_terms import protect_terms, restore_terms
 
+# Default minimum Tesseract word-confidence (0-100, see OcrTextRegion.confidence's
+# docstring) a region must have to be translated/replaced at all - added
+# after a real user found garbled, overlapping output on a chat-app
+# screenshot (RoadMap.md/Backlog.md, 18.08.2026): several of the worst
+# artifacts turned out to be UI icons/graphics (a mute-icon row, a
+# down-arrow, anti-aliasing halos around bold headings) that Tesseract
+# misread as text, each with a conspicuously low confidence score
+# (20s-40s) compared to genuine text lines (80s-90s) in the SAME image.
+# 40.0 is deliberately conservative - chosen from that one real sample,
+# not a broadly validated cutoff - so it only screens out the clearest
+# noise; a region this unsure about being real text at all is skipped
+# entirely (left untouched, see ImageTranslationStats.skipped below)
+# rather than translated into equally nonsensical target-language text
+# and drawn on top of whatever it actually was. This is a heuristic, not
+# a fix for the underlying OCR misread - some medium-confidence noise
+# (see Backlog.md's documented residual cases) still gets through.
+DEFAULT_MIN_OCR_CONFIDENCE = 40.0
+
 
 @dataclass
 class ImageTranslationStats:
-    """translate_image()'s result. Flat (translated/failed), like
+    """translate_image()'s result. Flat (translated/skipped/failed), like
     PdfTranslationStats - an image has no header/footer-style structural
     split either."""
 
     translated: int = 0
+    skipped: int = 0
+    """Regions recognized by OCR but never even sent for translation
+    because their confidence was below `min_confidence` (see
+    translate_image()'s docstring and DEFAULT_MIN_OCR_CONFIDENCE above) -
+    distinct from `failed` (a region that WAS attempted but the provider
+    call itself raised). Mirrors PdfTranslationStats.skipped's role
+    (a structurally-excluded block, not an error)."""
     failed: int = 0
     chars_sent: int = 0
     cancelled: bool = False
@@ -50,7 +75,8 @@ class ImageTranslationStats:
     never includes credentials."""
     regions: list[OcrTextRegion] = field(default_factory=list)
     """Every region OCR actually recognized, in reading order -
-    independent of translated/failed outcome. Kept for the QA report."""
+    independent of translated/skipped/failed outcome. Kept for the QA
+    report."""
     replacements: list[TextReplacement] = field(default_factory=list)
     """Every SUCCESSFULLY translated region, paired with its translated
     text - mirrors PdfTranslationStats.blocks' role for the manual
@@ -68,7 +94,7 @@ class ImageTranslationStats:
 
     @property
     def processed(self) -> int:
-        return self.translated + self.failed
+        return self.translated + self.skipped + self.failed
 
 
 def build_corrected_replacements(
@@ -119,6 +145,7 @@ def translate_image(
     target_lang: str,
     source_lang: str | None = None,
     ocr_language: str | None = None,
+    min_confidence: float = DEFAULT_MIN_OCR_CONFIDENCE,
     progress_callback: Callable[[str], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
     stats_callback: Callable[[ImageTranslationStats], None] | None = None,
@@ -132,6 +159,12 @@ def translate_image(
     propagates straight to the caller (ui/image_job.py, whose worker already
     wraps the whole job call - mirrors ui/workers.py::PdfTranslationWorker.run()).
 
+    A region whose `region.confidence` is below `min_confidence` (see
+    DEFAULT_MIN_OCR_CONFIDENCE's docstring) is never sent to the provider
+    at all - counted in `stats.skipped`, left completely untouched in the
+    output (no translation, no box drawn over it), same "don't guess"
+    principle as everything else in this pipeline that fails closed.
+
     `should_cancel`, if given, is polled before each region's translation
     call (between API calls, never mid-call). Once it returns True,
     stats.cancelled is set and translation of further regions stops -
@@ -144,7 +177,7 @@ def translate_image(
     in its original (untranslated) state.
 
     `stats_callback`, if given, is called after every region reaches a
-    final outcome (translated/failed) with the current cumulative
+    final outcome (translated/skipped/failed) with the current cumulative
     `stats`, mirroring the other three formats' live progress support.
     """
     stats = ImageTranslationStats()
@@ -167,6 +200,15 @@ def translate_image(
         if _cancelled():
             stats.cancelled = True
             break
+
+        if region.confidence < min_confidence:
+            _notify(
+                f"Textregion {index + 1}/{len(regions)}: uebersprungen "
+                f"(niedrige OCR-Konfidenz {region.confidence:.0f})"
+            )
+            stats.skipped += 1
+            _report()
+            continue
 
         _notify(f"Textregion {index + 1}/{len(regions)}...")
         try:

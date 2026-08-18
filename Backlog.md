@@ -97,6 +97,20 @@
   stabilen gemeinsamen Auftragsmodell bewerten.
 - Automatische Layoutänderungen nur als separate, explizit aktivierte Phase mit
   Vorher-/Nachher-QA untersuchen.
+- Deployment-Lösung (18.08.2026, Michael): installierbare/Standalone-Version
+  für Linux/Windows/macOS gewünscht, dazu eine Tablet-taugliche Version für
+  iPadOS - explizit erst als Diskussion, keine Umsetzung. Zentrale Spannung:
+  gewünschte Größe "keine hunderte MB, erst recht keine GB" steht im
+  Widerspruch zu GPU-Inpainting (PyTorch, mehrere hundert MB bis GB) und dem
+  Tesseract-Sprachpaket-Bedarf; iPadOS hat keinen realistischen nativen Pfad
+  für den aktuellen PySide6/Tesseract-Stack. Noch offen/ungeklärt: Web-App
+  (Python-Pipeline bleibt, neues dünnes Frontend, würde iPad "gratis"
+  mitlösen und die Größenfrage clientseitig auflösen, braucht aber Hosting/
+  andere Zugangsdaten-Architektur) vs. native Installer (PyInstaller/
+  Briefcase o. ä., überschaubarer Aufwand, aber iPad bleibt ungelöst und
+  GPU-Backend muss aus dem Basis-Paket ausgeschlossen werden) vs. Hybrid.
+  Keine Entscheidung getroffen - siehe Konversation vom 18.08.2026 für die
+  ausführliche Abwägung.
 
 ## Zu verifizieren
 - [ ] Word-Pfad: PAGE-Feld in footer1.xml sollte sich bei Neuberechnung automatisch aktualisieren, auch wenn das übersetzte Dokument länger wird als das Original - noch nicht an einem tatsächlich länger werdenden Dokument verifiziert (Word aktualisiert Felder nicht immer automatisch beim programmatischen Schreiben, ggf. muss ein Feld-Update erzwungen werden)
@@ -2461,3 +2475,155 @@
   Wiederherstellung, danach Gesamtsuite erneut grün. Gesamter Testlauf am
   Ende: 242 passed, 2 skipped (vorher 229 passed, 2 skipped in dieser
   Sandbox - genau die 13 neu hinzugekommenen Tests aus diesem Eintrag).
+
+- **Bildübersetzung/OCR - Textüberlauf und OCR-Fehllesungen behoben
+  (18.08.2026):** Michael meldete anhand zweier eigener Testbilder ("4.
+  August Stellar Russia.jpg" - ein Chat-App-Screenshot mit zwei
+  Sprechblasen-Spalten, und "Zoom Live Transcription.jpg" - eine
+  6-Kachel-Infografik-Anleitung), beide im Projekt-Root abgelegt und
+  über die App in `tests/output/` übersetzt: "Es gibt schon noch durch
+  die Übersetzung Text Verunstaltungen. Auch wenn etwas umrahmt ist,
+  stimmt es nicht ganz. Oder Boxen überlappen oder sind an falscher
+  Stelle." Beide Ergebnisdateien plus ihre QA-Berichte wurden über die
+  Geräte-Bridge geholt und visuell geprüft - QA-Berichte zeigten, dass
+  das Problem bei GPU-Inpainting UND Box-Overlay gleichermaßen auftrat
+  (ein starker Hinweis, dass die Ursache im gemeinsamen Zeichen-Code am
+  Ende aller Backends liegen musste, nicht in einem einzelnen Backend).
+
+  **Diagnose mit echten Tesseract-Läufen** (nicht geraten) auf beiden
+  gemeldeten Bildern direkt in dieser Sandbox (Tesseract war hier
+  installiert) legte zwei unabhängige Ursachen offen:
+
+  1. **Kein Zeilenumbruch/keine Schriftverkleinerung beim
+     Zurückschreiben.** Alle drei Backends (Box-Overlay, CV-Inpainting,
+     GPU-Inpainting) endeten in derselben einen Zeile Code:
+     `draw.text((region.x, region.y), translated_text, ...)` - IMMER
+     eine einzige, nicht umgebrochene Zeile, komplett unabhängig von
+     `region.width`. Auf dem Chat-Screenshot füllten die meisten
+     erkannten englischen Zeilen bereits fast die volle Spaltenbreite
+     aus (z. B. Breite 527px bei ~600px Spaltenbreite) - da Deutsch
+     typischerweise 20-40 % länger ist, lief praktisch JEDE übersetzte
+     Zeile über ihre Box hinaus in benachbarten Text hinein, exakt was
+     Michael als "Boxen überlappen" beschrieb. Auf dem Zoom-Bild kam ein
+     zweiter Effekt hinzu: eine einzelne OCR-Zeile ("click the "CC"
+     button.") bekam durch ein danebenliegendes Pfeil-Icon eine
+     fehlerhaft überhöhte Bounding-Box (Höhe 46px statt der um sie herum
+     üblichen 16px) - da die Schriftgröße bis dahin ungedeckelt direkt
+     aus `region.height * 0.8` berechnet wurde, führte das zu
+     übergroßer, seitenfüllender Schrift.
+
+     Behoben durch eine neue, von allen drei Backends geteilte
+     Rendering-Funktion in `pipeline/images/inpainting.py`:
+     `_wrap_text_to_width()` (Greedy-Wortumbruch, gemessen über
+     `draw.textlength()` - bewusst diese seit Pillow 8.0 stabile API
+     statt einer neueren, siehe die `get_flattened_data()`-Lehre aus dem
+     GPU-Inpainting-Eintrag oben) plus `_fit_text()` (probiert
+     absteigende Schriftgrößen, bis der umgebrochene Textblock innerhalb
+     von `region.height` passt oder eine lesbare Mindestgröße
+     `_MIN_FONT_SIZE = 9` erreicht ist) plus `_draw_fitted_text()`
+     (zeichnet die umgebrochenen Zeilen). Bewusst eine SCHRUMPF-, keine
+     WACHS-Strategie: die Box wird nie höher als `region.height`
+     gemacht, auch wenn der umgebrochene Text mehr Platz bräuchte - an
+     beiden gemeldeten Bildern sitzen Zeilen eng gestaffelt (in der
+     Zoom-Anleitung z. B. nur ~29-33px Zeilenabstand), ein Wachstum der
+     Box hätte also mit hoher Wahrscheinlichkeit in die nächste,
+     unbeteiligte Zeile hineingezeichnet - ein neues, potenziell
+     schlimmeres Problem statt einer Lösung. Zusätzlich eine feste
+     Obergrenze `_MAX_FONT_SIZE = 48` für die START-Schriftgröße,
+     unabhängig von `region.height` - fängt genau den oben beschriebenen
+     Icon-Bounding-Box-Fehler ab, ohne echte große Überschriften
+     (bestätigt bis zu Originalgröße ~34px in den Testbildern) zu
+     beschneiden.
+
+  2. **OCR-Fehllesungen von UI-Icons/Grafiken als Text.** Ein direkter
+     Dump aller von Tesseract erkannten Regionen (Text, Position,
+     Konfidenz) auf dem Zoom-Bild zeigte mehrere klare Fehllesungen,
+     jeweils mit auffällig niedriger Konfidenz verglichen mit echtem
+     Text im selben Bild:
+     ```
+     y=209 w=19  h=9  conf=48.0 text='03'
+     y=210 w=72  h=18 conf=22.0 text='&' Oo'
+     y=219 w=145 h=33 conf=40.2 text='Stop Video Papats Cut'
+     y=430 w=383 h=14 conf=23.7 text='-ONEICIIRE VOLE "TTINC?'  (Geister-
+       Duplikat direkt über der ECHTEN, korrekt erkannten Überschrift
+       'CONFIGURE YOUR SETTINGS' bei conf=96.0 - vermutlich ein Anti-
+       Aliasing-Halo um die fette Schrift, den Tesseract fälschlich als
+       eigene zweite Textzeile erkannte)
+     ```
+     verglichen mit echten Textzeilen im selben Bild bei conf=80-96.
+     Dasselbe Muster auf dem Chat-Bild (z. B. `.¢ 2762)` bei conf=29.0,
+     ein reines `&` bei conf=28.0 - beides UI-Chrome/Icons, keine echten
+     Wörter). Diese Fehllesungen wurden bisher wie jede andere Zeile
+     übersetzt und über das Bild gezeichnet - Kauderwelsch rein,
+     Kauderwelsch raus, exakt Michaels "Text Verunstaltungen".
+
+     Behoben über einen neuen Mindest-Konfidenz-Filter:
+     `DEFAULT_MIN_OCR_CONFIDENCE = 40.0` (neue Konstante in
+     `pipeline/images/translate_image.py`), `translate_image(...,
+     min_confidence=...)` - eine Region unterhalb der Schwelle wird gar
+     nicht erst an den Übersetzungs-Provider geschickt (spart auch
+     unnötige API-Kosten für reinen Icon-Kauderwelsch) und bleibt im
+     Ergebnisbild komplett unverändert. Neues Feld
+     `ImageTranslationStats.skipped` (analog zu
+     `PdfTranslationStats.skipped` - strukturell ausgeschlossen, kein
+     Fehler), im QA-Bericht als eigene Zeile sichtbar
+     ("Regionen übersprungen (niedrige OCR-Konfidenz): N"). 40.0 ist
+     AUSDRÜCKLICH als konservativer, nur an diesen zwei realen Bildern
+     kalibrierter Schwellwert dokumentiert, nicht als validierter
+     Universalwert - fängt die eindeutigsten Fälle (20er-30er Konfidenz)
+     zuverlässig ab, lässt aber mittelmäßig-konfidente Fehllesungen
+     durch (z. B. 'a & 0' bei conf=65.7, 'Stop Video Partc' bei
+     conf=72.7 - beides ebenfalls Icon-Fehllesungen, aber zu hoch für
+     die aktuelle Schwelle). Dieser Rest ist ein bekanntes, bewusst
+     nicht in diesem Fix adressiertes Problem (siehe "Offene Punkte"
+     unten).
+
+  **Verifikation an den ECHTEN gemeldeten Bildern, nicht nur an
+  synthetischen Tests:** die tatsächliche `translate_image()`-Pipeline
+  wurde direkt (mit echtem Tesseract, einem Fake-Provider, der
+  realistisch-längere deutsche Texte simuliert) gegen beide Originalbilder
+  laufen lassen und das Ergebnis visuell geprüft - kein Textüberlauf mehr,
+  keine überlappenden Boxen mehr, die vom Nutzer selbst ins Bild gezeichneten
+  pinken Hervorhebungsrahmen im Chat-Bild umschließen den übersetzten Text
+  jetzt wieder korrekt (vorher liefen sie durch den Überlauf ins Leere).
+
+  Kern-Mechanik je per Revert-Probe verifiziert: die Schrumpf-Abbruchbedingung
+  in `_fit_text()` gezielt auf "immer beim ersten Versuch zurückgeben"
+  zurückgebaut, erwarteter Testfehler bestätigt
+  (`test_fit_text_shrinks_font_when_wrapped_block_exceeds_region_height`
+  schlägt fehl), wiederhergestellt, `diff` bestätigt byte-genau. Ebenso die
+  Konfidenz-Prüfung in `translate_image()` gezielt deaktiviert (`if False
+  and region.confidence < min_confidence`), erwarteter Testfehler bestätigt
+  (`test_translate_image_skips_region_below_min_confidence` schlägt fehl),
+  wiederhergestellt, `diff` bestätigt byte-genau. Neue Tests in
+  `tests/test_image_inpainting.py` (`_wrap_text_to_width()`/`_fit_text()`
+  Unit-Tests plus ein Pixel-Sonden-Test, der bestätigt, dass nach dem Fix
+  keine Textpixel mehr rechts der ursprünglichen Box auftauchen) und
+  `tests/test_translate_image.py` (Konfidenz-Skip-Tests mit einem
+  deterministischen Stub-OCR-Engine statt echtem Tesseract, damit die
+  erwarteten Konfidenzwerte nicht von Tesseracts tatsächlicher Erkennung
+  abhängen). Gesamter Testlauf am Ende: 251 passed, 2 skipped (9 neue
+  Tests).
+
+  **Offene Punkte, bewusst NICHT in diesem Fix gelöst** (für RoadMap.md/
+  künftige Iterationen):
+  - Mittelmäßig-konfidente OCR-Fehllesungen von Icons/Grafiken (65-75er
+    Konfidenz) rutschen weiterhin durch den Filter und werden als
+    (unsinnige) Übersetzung gezeichnet - allerdings jetzt wenigstens
+    innerhalb ihrer Box umgebrochen statt überlappend, also weniger
+    störend als vorher.
+  - Cross-Spalten-Vermischung bei komplexen Mehrspalten-/Infografik-
+    Layouts (Tesserects automatische Seitensegmentierung, PSM 3, ist für
+    ein einzelnes, fließendes Dokument optimiert, nicht für ein 6-Kachel-
+    Raster wie im Zoom-Testbild) ist NICHT behoben - das Geister-Duplikat
+    über "CONFIGURE YOUR SETTINGS" wurde nur durch die Konfidenz-Schwelle
+    zufällig mit abgefangen, nicht durch eine gezielte Lösung für dieses
+    Muster. Eine echte Lösung bräuchte vermutlich Experimente mit
+    Tesseracts `--psm`-Parameter (z. B. PSM 11 "sparse text" statt des
+    Standards PSM 3) oder ein Cloud-OCR-Backend mit besserem
+    Layout-Verständnis - beides noch nicht umgesetzt/getestet.
+  - Der 40.0-Schwellwert ist nur an zwei Bildern kalibriert, nicht
+    breit validiert; nicht als UI-Einstellung exponiert (nur als
+    Funktionsparameter) - falls sich in weiteren Nutzertests zeigt, dass
+    er zu aggressiv oder zu lasch ist, sollte er anpassbar gemacht
+    werden.

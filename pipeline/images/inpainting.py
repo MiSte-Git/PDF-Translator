@@ -49,6 +49,23 @@ _FALLBACK_FONT_PATHS = (
 # Hintergrundfarbe geschätzt wird (siehe _sample_background_color()).
 _BACKGROUND_SAMPLE_MARGIN = 4
 
+# Obere/untere Schranke für die beim Zurückschreiben verwendete
+# Schriftgröße (siehe _fit_text() unten) - hinzugefügt nach einem
+# realen Fund (RoadMap.md/Backlog.md, 18.08.2026): eine einzelne
+# OCR-Zeile bekam durch einen fehlerhaft erkannten Bounding-Box eine
+# absurd große Höhe (ein danebenliegendes Icon/Pfeil-Grafikelement
+# wurde mit in die Zeile hineingerechnet), was ohne Obergrenze zu
+# meterhohem Text geführt hätte. _MIN_FONT_SIZE ist die Grenze, ab der
+# weiteres Schrumpfen (siehe _fit_text()) nicht mehr sinnvoll lesbar
+# wäre - ab da wird lieber ein leichtes Überlaufen über die Box hinaus
+# in Kauf genommen als unleserlich kleiner Text.
+_MAX_FONT_SIZE = 48
+_MIN_FONT_SIZE = 9
+# Zeilenabstand als Vielfaches der Schriftgröße - ein gängiger Wert für
+# gut lesbaren Fließtext (etwas mehr als reine Glyphenhöhe, damit sich
+# Ober-/Unterlängen aufeinanderfolgender Zeilen nicht berühren).
+_LINE_SPACING = 1.15
+
 
 class InpaintingError(Exception):
     """Raised when a backend fails to produce the replacement image -
@@ -83,16 +100,109 @@ class InpaintingBackend(Protocol):
         ...
 
 
-def _load_font(pixel_height: int):
+def _load_font(size: int):
+    """Load a font at the given PIXEL SIZE directly (not a region height
+    to derive a size from - see _fit_text() below for that step, done
+    once by the caller instead of inside this function, so a caller
+    trying several candidate sizes doesn't repeat the *0.8 conversion
+    every time)."""
     from PIL import ImageFont
 
-    size = max(8, int(pixel_height * 0.8))
+    size = max(1, size)
     for path in _FALLBACK_FONT_PATHS:
         try:
             return ImageFont.truetype(path, size)
         except OSError:
             continue
     return ImageFont.load_default()
+
+
+def _wrap_text_to_width(draw, text: str, font, max_width: int) -> list[str]:
+    """Greedy word-wrap: fits as many whitespace-separated words per line
+    as stay within `max_width`, measured via draw.textlength() (stable
+    across Pillow versions - see this project's own "don't rely on very
+    new/uncommon Pillow APIs in test/rendering code" lesson, RoadMap.md/
+    Backlog.md 18.08.2026). A single word wider than `max_width` on its
+    own still gets its own line rather than being split mid-word -
+    overflowing that one line is preferable to breaking a word apart.
+    `max_width` <= 0 (a degenerate/zero-width OCR region) still returns
+    at least one line rather than looping forever.
+    """
+    words = text.split()
+    if not words:
+        return [""]
+    lines: list[str] = []
+    current = words[0]
+    for word in words[1:]:
+        candidate = f"{current} {word}"
+        if max_width <= 0 or draw.textlength(candidate, font=font) <= max_width:
+            current = candidate
+        else:
+            lines.append(current)
+            current = word
+    lines.append(current)
+    return lines
+
+
+def _fit_text(draw, text: str, region: OcrTextRegion) -> tuple[list[str], object, int]:
+    """Pick the largest font size - starting from the same region-height-
+    derived size the old single-line code always used, but capped at
+    _MAX_FONT_SIZE regardless of region.height (see that constant's
+    docstring) - that, once `text` is word-wrapped to region.width,
+    fits within region.height without shrinking past _MIN_FONT_SIZE.
+
+    This is a SHRINK-to-fit strategy, deliberately never a GROW-the-box
+    one: growing region.height to fit more wrapped lines would risk the
+    box encroaching on whatever sits just below it (a real risk in
+    tightly line-spaced screenshots - see the Backlog.md 18.08.2026 fund
+    that motivated this function), overwriting content that was never
+    part of this replacement. At _MIN_FONT_SIZE the wrapped block may
+    still exceed region.height - that overflow is accepted rather than
+    shrinking further into illegibility, mirroring the PDF pipeline's
+    own insert_text() "always make it fit somewhere" policy (see
+    pipeline/pdf/pymupdf_engine.py).
+
+    Returns (lines, font, line_height) - the caller draws each line at
+    `region.y + i * line_height`, same x for every line.
+    """
+    start_size = min(max(_MIN_FONT_SIZE, int(region.height * 0.8)), _MAX_FONT_SIZE)
+    size = start_size
+    while True:
+        font = _load_font(size)
+        lines = _wrap_text_to_width(draw, text, font, max(region.width, 1))
+        line_height = max(1, int(size * _LINE_SPACING))
+        total_height = line_height * len(lines)
+        if total_height <= region.height or size <= _MIN_FONT_SIZE:
+            return lines, font, line_height
+        size = max(_MIN_FONT_SIZE, size - 2)
+
+
+def _draw_fitted_text(
+    draw, region: OcrTextRegion, text: str, color: tuple[int, int, int], image_height: int
+) -> None:
+    """Shared final drawing step for all three InpaintingBackend
+    implementations below - wraps and shrinks `text` to fit inside
+    `region` (see _fit_text()) instead of the old single
+    draw.text((region.x, region.y), text, ...) call, which drew the
+    ENTIRE translated text on one unwrapped line regardless of
+    region.width - the real cause (confirmed against actual user-
+    reported output, see Backlog.md 18.08.2026) of translated text
+    overflowing past its box into neighboring text once German (or any
+    longer-than-English target language) no longer fit the original
+    line's width.
+
+    `image_height` clips line drawing at the image's own bottom edge -
+    relevant only for the rare _MIN_FONT_SIZE-and-still-overflowing case
+    described in _fit_text()'s docstring, so an extreme case can't draw
+    lines past the image entirely.
+    """
+    lines, font, line_height = _fit_text(draw, text, region)
+    y = region.y
+    for line in lines:
+        if y >= image_height:
+            break
+        draw.text((region.x, y), line, fill=color, font=font)
+        y += line_height
 
 
 def _sample_background_color(image, x: int, y: int, width: int, height: int) -> tuple[int, int, int]:
@@ -174,9 +284,8 @@ class BoxOverlayBackend:
                 [region.x, region.y, region.x + region.width, region.y + region.height],
                 fill=background,
             )
-            font = _load_font(region.height)
             text_color = _contrasting_text_color(background)
-            draw.text((region.x, region.y), replacement.translated_text, fill=text_color, font=font)
+            _draw_fitted_text(draw, region, replacement.translated_text, text_color, image.height)
 
         try:
             image.save(output_path)
@@ -246,9 +355,8 @@ class CvInpaintingBackend:
             # would still be correct here too but is a needless detour
             # now that the interior itself is meaningful.
             background = _average_region_color(result, region.x, region.y, region.width, region.height)
-            font = _load_font(region.height)
             text_color = _contrasting_text_color(background)
-            draw.text((region.x, region.y), replacement.translated_text, fill=text_color, font=font)
+            _draw_fitted_text(draw, region, replacement.translated_text, text_color, result.height)
 
         try:
             result.save(output_path)
@@ -416,9 +524,8 @@ class GpuInpaintingBackend:
             # above) - sampled directly rather than BoxOverlayBackend's
             # outside-ring approach.
             background = _average_region_color(image, region.x, region.y, region.width, region.height)
-            font = _load_font(region.height)
             text_color = _contrasting_text_color(background)
-            draw.text((region.x, region.y), replacement.translated_text, fill=text_color, font=font)
+            _draw_fitted_text(draw, region, replacement.translated_text, text_color, image.height)
 
         try:
             image.save(output_path)

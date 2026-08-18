@@ -60,6 +60,35 @@ class _StubFailingOcrEngine:
         raise OcrError("Tesseract-Binary wurde nicht gefunden")
 
 
+class _StubOcrEngine:
+    """Returns a FIXED list of regions regardless of the image, with
+    caller-controlled confidence values - lets the min_confidence
+    skipping tests below assert exact behavior without depending on
+    whatever confidence real Tesseract happens to assign (see
+    Backlog.md 18.08.2026: real Tesseract runs on actual screenshots
+    motivated this feature, but the unit tests here need deterministic
+    inputs, not a real OCR pass)."""
+
+    def __init__(self, regions: list[OcrTextRegion]) -> None:
+        self._regions = regions
+
+    def recognize(self, image_path: str, language: str | None = None) -> list[OcrTextRegion]:
+        return self._regions
+
+
+class _CountingProvider:
+    """Records every text it was actually asked to translate - lets a
+    test assert that a skipped (low-confidence) region never reaches the
+    provider at all, not just that it's absent from the final stats."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def translate(self, text: str, target_lang: str, source_lang: str | None = None) -> TranslationResult:
+        self.calls.append(text)
+        return TranslationResult(f"{text} [DE]", source_lang or "", target_lang, "fake")
+
+
 def test_translate_image_translates_all_regions_end_to_end(tmp_path: Path) -> None:
     source = tmp_path / "source.png"
     _build_two_line_image(source)
@@ -121,6 +150,60 @@ def test_translate_image_replacements_only_include_successful_regions(tmp_path: 
     # identity check would be too strict across a hypothetical future
     # refactor, so compare by content instead.
     assert len(stats.replacements) == stats.translated
+
+
+# --- min_confidence skipping (RoadMap.md/Backlog.md 18.08.2026: real
+# user found garbled, overlapping output caused in part by UI icons/
+# graphics Tesseract misread as text, each with a conspicuously low
+# confidence score - see DEFAULT_MIN_OCR_CONFIDENCE's docstring) --------
+
+
+def test_translate_image_skips_region_below_min_confidence(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+
+    regions = [
+        OcrTextRegion(text="Real Text", x=20, y=20, width=150, height=24, confidence=90.0),
+        OcrTextRegion(text="0 & Oo", x=20, y=70, width=60, height=18, confidence=22.0),
+    ]
+    provider = _CountingProvider()
+
+    stats = translate_image(
+        str(source), str(destination), _StubOcrEngine(regions), BoxOverlayBackend(),
+        provider, [], target_lang="de", min_confidence=40.0,
+    )
+
+    assert stats.translated == 1
+    assert stats.skipped == 1
+    assert stats.failed == 0
+    assert stats.processed == 2
+    # The low-confidence region's text must never even reach the provider
+    # - not just excluded from the final replacements.
+    assert provider.calls == ["Real Text"]
+    assert len(stats.replacements) == 1
+    assert stats.replacements[0].region.text == "Real Text"
+
+
+def test_translate_image_min_confidence_is_configurable(tmp_path: Path) -> None:
+    """A caller that explicitly lowers min_confidence gets the borderline
+    region translated instead of skipped - confirms the threshold is a
+    real parameter, not a hardcoded cutoff."""
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+
+    regions = [OcrTextRegion(text="Borderline", x=20, y=20, width=150, height=24, confidence=22.0)]
+    provider = _CountingProvider()
+
+    stats = translate_image(
+        str(source), str(destination), _StubOcrEngine(regions), BoxOverlayBackend(),
+        provider, [], target_lang="de", min_confidence=0.0,
+    )
+
+    assert stats.translated == 1
+    assert stats.skipped == 0
+    assert provider.calls == ["Borderline"]
 
 
 def _make_replacement(text: str, translated_text: str) -> TextReplacement:
