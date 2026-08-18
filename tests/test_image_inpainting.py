@@ -104,7 +104,10 @@ def test_apply_leaves_untouched_regions_pixel_identical(tmp_path: Path) -> None:
     # Crop a region well below the first line, covering the untouched
     # second line plus surrounding whitespace, and compare byte-for-byte.
     box = (0, 60, 400, 150)
-    assert list(original.crop(box).get_flattened_data()) == list(result.crop(box).get_flattened_data())
+    # .tobytes() (not .getdata()/.get_flattened_data() - see
+    # tests/test_image_cv_inpainting.py's identical comment): stable raw-
+    # pixel comparison across every Pillow version.
+    assert original.crop(box).tobytes() == result.crop(box).tobytes()
 
 
 @pytest.mark.skipif(not tesseract_available(), reason="Tesseract binary not installed")

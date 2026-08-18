@@ -6,20 +6,87 @@
 # GpuInpaintingBackend/gpu_inpainting_available() (lazy import, vor jedem
 # Lauf geprüft, kein automatischer CPU-Fallback bei unzureichender GPU).
 #
-# torch: WICHTIG - die generische PyPI-Version ist häufig die reine
-# CPU-Variante. Für echte GPU-Nutzung die zur eigenen CUDA-Treiberversion
-# passende Variante über die offizielle Installationsanleitung
-# installieren (https://pytorch.org/get-started/locally/), z. B.
-#   pip install torch --index-url https://download.pytorch.org/whl/cu121
-# statt eines einfachen "pip install torch".
+# WICHTIG - ZWEI GETRENNTE DOWNLOADS, NICHT VERWECHSELN:
+#   1. Die Python-PAKETE unten - musst DU einmalig per pip installieren,
+#      auf DEINER eigenen Maschine. Fehlt das, kommt genau die
+#      Fehlermeldung "No module named 'simple_lama_inpainting'".
+#   2. Die eigentlichen LaMa-MODELLGEWICHTE (mehrere hundert MB) - lädt
+#      simple-lama-inpainting selbst automatisch von GitHub Releases
+#      herunter, aber erst BEIM ERSTEN ECHTEN LAUF von GpuInpaintingBackend
+#      (nicht bei "pip install"!) - dafür ist nichts weiter nötig.
+#
+# WICHTIG - NICHT EINFACH "pip install -r requirements-gpu.txt":
+# simple-lama-inpainting deklariert eigene, recht enge Abhängigkeiten
+# (u. a. numpy<2.0.0, pillow<10.0.0 und - besonders problematisch - das
+# GUI-Paket "opencv-python", nicht die "opencv-python-headless"-Variante,
+# die requirements-ocr.txt für unser eigenes CvInpaintingBackend
+# verwendet). Ein normaler "pip install -r requirements-gpu.txt" in einer
+# nicht isolierten/geteilten Python-Umgebung installiert dadurch NEBEN
+# opencv-python-headless zusätzlich opencv-python (beide stellen dasselbe
+# "cv2"-Modul bereit - zwei davon gleichzeitig installiert ist ein
+# bekanntes, von den opencv-python-Maintainern selbst als problematisch
+# beschriebenes Setup) UND zieht numpy/pillow auf ältere Versionen
+# herunter, was mit anderen bereits installierten Paketen kollidieren
+# kann (z. B. opencv-python-headless selbst, das numpy>=2 braucht, oder
+# andere, projektfremde Pakete in einer geteilten Umgebung).
+#
+# Installation (in der Kommandozeile, im selben Python/venv wie die App -
+# in dieser Reihenfolge):
+#
+#   1) torch + torchvision - WICHTIG: die generische PyPI-Version ist
+#      häufig die reine CPU-Variante. Für echte GPU-Nutzung die zur
+#      eigenen CUDA-Treiberversion passende Variante über die offizielle
+#      Installationsanleitung installieren
+#      (https://pytorch.org/get-started/locally/), z. B. für CUDA 12.1:
+#        pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#
+#   2) requirements.txt und requirements-ocr.txt müssen bereits
+#      installiert sein (liefern numpy, Pillow, opencv-python-headless -
+#      alles, was simple-lama-inpainting zur Laufzeit tatsächlich
+#      braucht, siehe Quellcode-Prüfung unten).
+#
+#   3) simple-lama-inpainting OHNE seine eigenen (zu engen)
+#      Abhängigkeitsangaben installieren, damit es die bereits
+#      vorhandenen numpy/Pillow/opencv-python-headless einfach
+#      weiterverwendet statt sie zu überschreiben:
+#        pip install --no-deps simple-lama-inpainting
+#      Per Quellcode-Prüfung (github.com/enesmsahin/simple-lama-
+#      inpainting) verifiziert: das Paket importiert nur torch, numpy,
+#      PIL und cv2 (für reine Array-/Resize-Operationen, keine
+#      GUI-Funktionen) - opencv-python-headless deckt das vollständig ab.
+#      Die von simple-lama-inpainting sonst mitinstallierten "fire"/
+#      "six"/"termcolor" gehören nur zu seinem CLI-Tool (simple_lama auf
+#      der Kommandozeile) - wir rufen ausschließlich die Python-Klasse
+#      SimpleLama direkt auf, das CLI-Tool wird nie benutzt.
+#
+# "pip install -r requirements-gpu.txt" (ohne --no-deps) bleibt als Zeile
+# unten technisch install-fähig (z. B. in einer frischen, isolierten
+# virtuellen Umgebung, wo der Konflikt harmlos ist) - für eine bereits
+# bestehende/geteilte Python-Umgebung wird aber ausdrücklich der
+# --no-deps-Weg oben empfohlen.
 torch
-
-# Leichte Wrapper-Bibliothek um das vortrainierte LaMa-Modell
-# (Large-Mask-Inpainting, https://github.com/advimman/lama) - lädt die
-# Modellgewichte (mehrere hundert MB) beim ersten Lauf automatisch von
-# GitHub Releases herunter und cached sie lokal (siehe
-# GpuInpaintingBackend/_get_lama_model() im selben Modul). Für eine
-# spätere Standalone-Version ohne Internetzugriff zur Laufzeit können die
-# Gewichte vorab heruntergeladen und über die Umgebungsvariable
-# LAMA_MODEL auf den lokalen Pfad verwiesen werden.
+torchvision
 simple-lama-inpainting
+
+# Troubleshooting:
+#
+# "No module named 'simple_lama_inpainting'" -> Schritt 3 oben wurde noch
+#   nicht (oder in der falschen Python-Umgebung) ausgeführt.
+#
+# "No module named 'torch'" -> Schritt 1 wurde noch nicht ausgeführt.
+#
+# pip meldet nach der Installation Konflikte wie
+#   "opencv-python-headless ... requires numpy<2.3.0,>=2 ... but you
+#   have numpy 1.26.4 which is incompatible"
+#   und/oder installiert zusätzlich ein "opencv-python" (ohne
+#   "-headless") neben dem bereits vorhandenen "opencv-python-headless"
+#   -> das ist genau der oben beschriebene Fall: "pip install -r
+#   requirements-gpu.txt" wurde ohne --no-deps ausgeführt. Beheben:
+#     pip uninstall opencv-python -y
+#     pip install "numpy>=2,<2.3.0"
+#   und danach prüfen, dass alles zusammen importierbar bleibt:
+#     python -c "import cv2, numpy, simple_lama_inpainting; print('ok')"
+#   sowie die Test-Suite einmal laufen lassen (python -m pytest -q), um
+#   sicherzugehen, dass die eigentliche App (insbesondere das bestehende,
+#   CPU-basierte CvInpaintingBackend) durch die Versionsänderungen nicht
+#   beeinträchtigt wurde.

@@ -74,7 +74,13 @@ def test_apply_with_no_replacements_leaves_image_unchanged(tmp_path: Path) -> No
 
     original = Image.open(source).convert("RGB")
     result = Image.open(output).convert("RGB")
-    assert list(original.get_flattened_data()) == list(result.get_flattened_data())
+    # .tobytes() (not .getdata()/.get_flattened_data()): the former is
+    # deprecated as of newer Pillow releases, the latter only exists on
+    # very recent ones - .tobytes() is the one raw-pixel-comparison API
+    # that's been stable across every Pillow version, including older
+    # ones some environments are still pinned to (see requirements-gpu.txt's
+    # note on simple-lama-inpainting forcing an older Pillow).
+    assert original.tobytes() == result.tobytes()
 
 
 def test_apply_leaves_untouched_regions_pixel_identical(tmp_path: Path) -> None:
@@ -91,7 +97,7 @@ def test_apply_leaves_untouched_regions_pixel_identical(tmp_path: Path) -> None:
     original = Image.open(source).convert("RGB")
     result = Image.open(output).convert("RGB")
     box = (0, 60, 400, 150)
-    assert list(original.crop(box).get_flattened_data()) == list(result.crop(box).get_flattened_data())
+    assert original.crop(box).tobytes() == result.crop(box).tobytes()
 
 
 @pytest.mark.skipif(not tesseract_available(), reason="Tesseract binary not installed")

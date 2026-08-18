@@ -30,6 +30,7 @@ tools/output/
 *_vergleich.md
 *_vergleich.docx
 *.pptx
+*.jpg
 
 # Local translation-cost usage log (per-machine, not shared state)
 pipeline/translation/.usage_log.json
