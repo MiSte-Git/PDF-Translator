@@ -31,7 +31,13 @@ from typing import Callable
 
 from pipeline.pdf.pymupdf_engine import PyMuPdfEngine
 from pipeline.pdf.template import DocumentTemplate, detect_header_footer_zones
-from pipeline.pdf.translate_pdf import PdfTranslationStats, total_block_count, translate_pdf
+from pipeline.pdf.translate_pdf import (
+    PdfTranslationStats,
+    TranslatedBlockRecord,
+    apply_pdf_corrections,
+    total_block_count,
+    translate_pdf,
+)
 from pipeline.translation.base import TranslationProvider
 from pipeline.translation.cost_control import PricingModel, TranslationBudgetGuard
 from ui.document_job_common import DestinationConflictError, build_provider
@@ -219,5 +225,106 @@ def _build_qa_report(
         "Lücken bei Überschrift+Bullet-Blöcken - siehe "
         "tests/manual_diagnose_text_duplication.py). Bitte das Ergebnis stichprobenartig "
         "prüfen."
+    )
+    return "\n".join(lines) + "\n"
+
+
+def run_pdf_correction_job(
+    source: Path,
+    destination: Path,
+    records: list[TranslatedBlockRecord],
+    exclude_header: bool = False,
+    exclude_footer: bool = False,
+) -> PdfJobResult:
+    """Re-render a PDF translation from a corrected list of
+    TranslatedBlockRecord (see pipeline.pdf.translate_pdf's
+    apply_pdf_corrections()/build_corrected_records()) - the "Anwenden"
+    step of the correction table opened from PdfJobResult.stats.blocks
+    (RoadMap.md Phase 2/PDF's "PDF-Übersetzung korrigieren" item, added
+    after a real user found a genuine mistranslation - a proper name
+    rendered as an unrelated German word - in a live run).
+
+    Unlike run_pdf_job(), `destination` is allowed - expected - to
+    already exist: the user explicitly chose "overwrite the existing
+    translation" over "always write a new file" for this workflow (see
+    ui/app.py's correction-dialog wiring), so there is deliberately no
+    DestinationConflictError-on-exists check here, only the
+    identical-to-source guard every job function has.
+
+    `source` must be the SAME pristine source PDF the original
+    translate_pdf() run used - never `destination` itself, and never an
+    already-translated file - see apply_pdf_corrections()'s docstring
+    for why: reusing an already-translated document as the "source" for
+    a second redact/insert pass can leave stray remnants of the first
+    translation behind for any block that grew past its original box.
+
+    `exclude_header`/`exclude_footer` must match whatever the ORIGINAL
+    run used (the caller is expected to have those from the same
+    TranslationRequest/PdfTranslationWorker call that produced `records`
+    in the first place) - reconstructs the identical DocumentTemplate so
+    engine.extract_blocks() returns the same block list/order the
+    records' page_index/block_index indices were captured against.
+
+    No provider, no cost/budget guard, no progress callback: unlike
+    run_pdf_job(), this makes no translation-provider/network calls at
+    all (every record already carries its final translated_html) - see
+    ui/app.py for why that lets the correction dialog call this directly
+    on the UI thread instead of via a background QThreadPool worker.
+    """
+    source = Path(source)
+    destination = Path(destination)
+    if destination.resolve() == source.resolve():
+        raise DestinationConflictError(
+            "Zieldatei darf technisch nicht mit der Quelldatei identisch sein."
+        )
+
+    template: DocumentTemplate | None = None
+    if exclude_header or exclude_footer:
+        detection_engine = PyMuPdfEngine()
+        detection_engine.open(str(source))
+        detected_header, detected_footer = detect_header_footer_zones(detection_engine)
+        template = DocumentTemplate(
+            name=source.stem,
+            header_bbox=detected_header if exclude_header else None,
+            footer_bbox=detected_footer if exclude_footer else None,
+        )
+
+    engine = PyMuPdfEngine(template=template)
+    engine.open(str(source))
+    stats = apply_pdf_corrections(engine, records)
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    engine.save(str(destination))
+
+    qa_report_path = destination.with_name(f"{destination.stem}_qa_report.txt")
+    qa_report_path.write_text(
+        _build_correction_qa_report(source, destination, stats), encoding="utf-8"
+    )
+    return PdfJobResult(destination, qa_report_path, stats)
+
+
+def _build_correction_qa_report(source: Path, destination: Path, stats: PdfTranslationStats) -> str:
+    lines = [
+        "PDF-Übersetzung - QA-Bericht (nach manueller Korrektur)",
+        f"Erstellt: {datetime.now().isoformat(timespec='seconds')}",
+        f"Quelle: {source}",
+        f"Ziel: {destination}",
+        "",
+        "Ergebnis",
+        f"  Blöcke neu eingefügt: {stats.translated}",
+    ]
+    if stats.overflow_blocks:
+        lines.append(
+            f"  Blöcke mit Wachstum/Schrumpfung beim Einfügen: {stats.overflow_blocks} "
+            "(kein Fehler für sich genommen, aber diese Stellen lohnen eine kurze "
+            "visuelle Prüfung)."
+        )
+    else:
+        lines.append("  Kein Block musste beim Einfügen wachsen oder schrumpfen.")
+    lines.append("")
+    lines.append(
+        "Diese Datei wurde durch eine manuelle Korrektur-Runde ersetzt (siehe "
+        "RoadMap.md Phase 2/PDF, 'PDF-Übersetzung korrigieren'). Der ursprüngliche "
+        "QA-Bericht des ersten Übersetzungslaufs wurde durch diesen ersetzt."
     )
     return "\n".join(lines) + "\n"

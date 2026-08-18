@@ -274,5 +274,5 @@ def _copy_pdf_stats(stats: PdfTranslationStats) -> PdfTranslationStats:
     """
     return PdfTranslationStats(
         stats.translated, stats.skipped, stats.failed, stats.chars_sent,
-        stats.overflow_blocks, stats.cancelled, list(stats.errors),
+        stats.overflow_blocks, stats.cancelled, list(stats.errors), list(stats.blocks),
     )

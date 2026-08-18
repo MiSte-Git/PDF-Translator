@@ -56,11 +56,70 @@ _FONT_STEP = 0.5
 # a real paragraph break still reads as a paragraph break.
 _PARAGRAPH_GAP_RATIO = 0.8
 
+# CSS generic font-family used by _insert_html_css() when block.font_name
+# doesn't match a known serif/monospace name pattern - see
+# _resolve_css_font_family(). Was the unconditional, only value before
+# this heuristic existed, so an unrecognized font name keeps today's
+# established look rather than risking a wrong guess.
+_DEFAULT_CSS_FONT_FAMILY = "sans-serif"
 
-def _insert_html_css(fontsize: float) -> str:
+# Substring match (case-insensitive) against block.font_name to pick a CSS
+# generic font-family other than the sans-serif default - see
+# _resolve_css_font_family(). Not real font matching/embedding (see
+# Backlog.md's still-open "Einbettung ... von Originalfonts" question,
+# deliberately NOT attempted here: extracting and re-embedding the actual
+# font program is a separate, much larger undertaking) - just picking the
+# CLOSER of PyMuPDF's built-in generic families (serif/sans-serif/
+# monospace, each backed by a different built-in font) so a document with
+# a serif body/heading font (e.g. Times, Georgia, Garamond) or a
+# monospace font (e.g. Courier, Consolas) reads visually closer to the
+# original than always defaulting to sans-serif. Deliberately a small,
+# fixed list of common real-world font family names, not a general
+# font-classification algorithm - an unrecognized name safely falls back
+# to _DEFAULT_CSS_FONT_FAMILY, same as before this heuristic existed.
+_SERIF_FONT_NAME_KEYWORDS = (
+    "times", "georgia", "garamond", "cambria", "palatino", "minion",
+    "caslon", "baskerville", "constantia", "cochin", "didot", "plantin",
+    "bookman", "book antiqua", "century", "goudy", "sabon", "serif",
+)
+_MONOSPACE_FONT_NAME_KEYWORDS = (
+    "courier", "consolas", "menlo", "monaco", "mono", "typewriter",
+    "lucida console", "andale mono",
+)
+
+
+def _resolve_css_font_family(font_name: str) -> str:
+    """Map a TextBlock.font_name (e.g. "TimesNewRomanPSMT", "Georgia-Bold",
+    "CourierNewPSMT", "ArialMT") to a CSS generic font-family
+    ("serif"/"monospace"/_DEFAULT_CSS_FONT_FAMILY) for _insert_html_css().
+
+    Keyword match against _SERIF_FONT_NAME_KEYWORDS/
+    _MONOSPACE_FONT_NAME_KEYWORDS, serif checked first since a few
+    monospace-keyword substrings (none currently) could in principle
+    overlap; case-insensitive since embedded PDF font names are
+    inconsistently cased (seen both "ArialMT" and "Arial-BoldMT" in real
+    documents). Falls back to _DEFAULT_CSS_FONT_FAMILY - covering common
+    sans-serif names (Arial, Helvetica, Calibri, Verdana, Tahoma, Segoe,
+    Roboto) AND any unrecognized name - unchanged from this project's
+    behavior before this heuristic existed.
+    """
+    lowered = font_name.lower()
+    if any(keyword in lowered for keyword in _SERIF_FONT_NAME_KEYWORDS):
+        return "serif"
+    if any(keyword in lowered for keyword in _MONOSPACE_FONT_NAME_KEYWORDS):
+        return "monospace"
+    return _DEFAULT_CSS_FONT_FAMILY
+
+
+def _insert_html_css(fontsize: float, font_family: str = _DEFAULT_CSS_FONT_FAMILY) -> str:
     """CSS for page.insert_htmlbox() calls in _insert_html_text() (both the
     `fits()` fit-check and the final forced scale_low=0 insert - see that
     function's calls to this).
+
+    `font_family` - see _resolve_css_font_family() - lets a block whose
+    original font was recognizably serif or monospace render in that
+    generic family instead of always sans-serif; still just a coarse
+    family choice, not the original font itself (see Backlog.md).
 
     `p {margin:0; line-height:1;}` matters, not just cosmetics:
     spans_to_html() always wraps every paragraph in <p>...</p> (even a
@@ -93,7 +152,7 @@ def _insert_html_css(fontsize: float) -> str:
     detectable gap at all once the margin was fully zeroed unconditionally.
     """
     return (
-        f"body {{font-family: sans-serif; font-size: {fontsize}pt;}} "
+        f"body {{font-family: {font_family}; font-size: {fontsize}pt;}} "
         f"p {{margin: 0; line-height: 1;}} "
         f"p + p {{margin-top: {fontsize * _PARAGRAPH_GAP_RATIO:.2f}pt;}}"
     )
@@ -772,6 +831,53 @@ def spans_to_html(spans: list[TextSpan]) -> str:
     return "".join(f"<p>{paragraph}</p>" for paragraph in paragraphs if paragraph.strip())
 
 
+# Matches any HTML tag with no attributes (this project's own markup, and
+# what translation providers echo back for it - see spans_to_html()'s
+# docstring for the exact, fixed tag set: <p>, <br/>, <u>, <i>, <b>, all
+# nestable, none with attributes). Used by html_to_plain_text() as a
+# catch-all after the paragraph/line-break-specific handling below, so any
+# other tag (or an unexpected attribute-bearing variant) is still stripped
+# defensively rather than leaking into the display text as literal markup.
+_ANY_TAG_RE = re.compile(r"<[^>]+>")
+_PARAGRAPH_BOUNDARY_RE = re.compile(r"</p>\s*<p>", re.IGNORECASE)
+_BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
+_P_TAG_RE = re.compile(r"</?p>", re.IGNORECASE)
+
+
+def html_to_plain_text(content_html: str) -> str:
+    """Inverse of spans_to_html()/a translation provider's HTML response:
+    turns block-insertion HTML back into plain text a human can read and
+    edit (see PdfTranslationRecord/apply_pdf_corrections() in
+    pipeline/pdf/translate_pdf.py - this is the "Übersetzung" column shown
+    in the correction table, RoadMap.md Phase 2/PDF's "PDF-Übersetzung
+    korrigieren" item).
+
+    Paragraph boundaries (a "</p><p>" pair between two ACTUAL sibling
+    paragraphs - see _insert_html_css()'s matching p+p CSS rule) become a
+    blank line ("\\n\\n"), a <br/> becomes a single newline, and any
+    remaining <p>/<u>/<b>/<i> tag (including one with no matching sibling,
+    i.e. the common single-paragraph block) is simply removed - by design,
+    this loses the u/b/i formatting itself, not just its visual mark: the
+    plain-text projection is only for DISPLAY/EDITING, not for
+    re-insertion as-is. Callers that want the ORIGINAL html's exact
+    formatting preserved keep using the html string directly (see
+    apply_pdf_corrections()'s "unedited row" case); only a row the user
+    actually changes gets rebuilt from scratch (via
+    _plain_text_to_html()), which is where the formatting-loss trade-off
+    actually bites - see that function's caller for the full rationale.
+
+    Any HTML entity (e.g. "&amp;", introduced by spans_to_html()'s
+    html.escape()) is unescaped back to its literal character last, after
+    all tag stripping, so an entity's own "&"/"<"/">" can't accidentally
+    be mistaken for markup.
+    """
+    text = _PARAGRAPH_BOUNDARY_RE.sub("\n\n", content_html)
+    text = _BR_RE.sub("\n", text)
+    text = _P_TAG_RE.sub("", text)
+    text = _ANY_TAG_RE.sub("", text)
+    return html.unescape(text)
+
+
 def _regroup_paragraphs(text: str) -> list[str]:
     """Join each paragraph's wrapped lines into one reflowable line, but
     keep paragraphs separate wherever the source had a blank line - shared
@@ -837,6 +943,68 @@ def _max_rect_y1(page: fitz.Page, template: DocumentTemplate | None) -> float:
     return page.rect.height - _FOOTER_MARGIN
 
 
+# Unicode Private-Use-Area codepoint ranges (BMP + both supplementary
+# planes). Symbol/icon fonts such as Wingdings, Webdings, and "Symbol"
+# remap ordinary Latin codepoints or, more commonly, PUA codepoints (e.g.
+# a Wingdings bullet glyph at U+F086) to their own custom glyph outlines -
+# outside that specific font, the codepoint has no defined meaning at all.
+# insert_htmlbox()'s CSS `font-family: sans-serif` resolves to a generic
+# system font (confirmed: "NimbusSans-Regular" in this environment) that
+# was never going to have a matching glyph for a PUA codepoint - direct
+# reproduction confirmed the character is dropped to a NUL codepoint that
+# renders as nothing at all (not even a visible tofu box), silently
+# leaving a gap where the original symbol used to be. See
+# _replace_unsupported_glyphs() and
+# tests/test_pdf_symbol_glyph_placeholder.py.
+_PRIVATE_USE_AREA_RANGES = (
+    (0xE000, 0xF8FF),  # BMP Private Use Area (Wingdings/Webdings/Symbol land here)
+    (0xF0000, 0xFFFFD),  # Supplementary Private Use Area-A
+    (0x100000, 0x10FFFD),  # Supplementary Private Use Area-B
+)
+
+# Substituted for each Private-Use-Area codepoint found in content bound
+# for insert_htmlbox() - see _replace_unsupported_glyphs(). A plain,
+# visibly-a-placeholder glyph (not a bullet/checkmark guess, since the
+# actual symbol the codepoint represents is unknowable without the
+# original font - see Backlog.md's still-open font-embedding question)
+# that IS present in the generic sans-serif fallback font, confirmed by
+# direct reproduction (see this module's Private-Use-Area comment above).
+_UNSUPPORTED_GLYPH_PLACEHOLDER = "□"  # WHITE SQUARE ("□")
+
+
+def _is_private_use_char(ch: str) -> bool:
+    codepoint = ord(ch)
+    return any(lo <= codepoint <= hi for lo, hi in _PRIVATE_USE_AREA_RANGES)
+
+
+def _replace_unsupported_glyphs(content_html: str) -> tuple[str, int]:
+    """Replace every Private-Use-Area codepoint in `content_html` with
+    _UNSUPPORTED_GLYPH_PLACEHOLDER, so a symbol-font glyph the fallback
+    sans-serif font can't render becomes a visible, honest placeholder
+    instead of silently vanishing (see this module's Private-Use-Area
+    comment above). Safe to run over the whole HTML string, tags
+    included: this project's own markup (<p>, <br/>, <b>, <i>, <u>) is
+    pure ASCII, so it can never collide with a PUA codepoint.
+
+    Returns (content_html, replaced_count) - the caller logs
+    replaced_count via log_growth_anomaly() when it's nonzero, so a
+    symbol/icon-font document surfaces this in
+    tests/output/growth_anomalies.jsonl instead of only in the rendered
+    PDF, matching this project's other unsupported-content handling (see
+    RoadMap.md's "Nicht unterstützte Inhalte werden sichtbar
+    katalogisiert" principle).
+    """
+    replaced_count = 0
+    out_chars: list[str] = []
+    for ch in content_html:
+        if _is_private_use_char(ch):
+            out_chars.append(_UNSUPPORTED_GLYPH_PLACEHOLDER)
+            replaced_count += 1
+        else:
+            out_chars.append(ch)
+    return "".join(out_chars), replaced_count
+
+
 def _insert_html_text(
     page: fitz.Page,
     rect: fitz.Rect,
@@ -849,6 +1017,12 @@ def _insert_html_text(
     Uses `translated_html` (e.g. from GoogleTranslateProvider.translate_html())
     directly if given; otherwise builds untranslated HTML from block.spans
     via spans_to_html() (formatting-only fallback, same content as before).
+    Either way, any Private-Use-Area codepoint (symbol/icon-font glyph,
+    e.g. a Wingdings bullet) is then replaced with a visible placeholder
+    via _replace_unsupported_glyphs() - see that function's docstring and
+    this module's Private-Use-Area comment above _insert_html_text() for
+    why: the sans-serif fallback font below has no glyph for it and would
+    otherwise silently drop it without a trace.
 
     Growth (see try_grow() below) is tried FIRST, at the block's own
     original font size, before any shrinking - for EVERY block, not just
@@ -903,9 +1077,18 @@ def _insert_html_text(
     for anomaly logging.
     """
     content_html = translated_html if translated_html is not None else spans_to_html(block.spans)
+    content_html, unsupported_glyph_count = _replace_unsupported_glyphs(content_html)
+    if unsupported_glyph_count:
+        log_growth_anomaly(
+            block,
+            "unsupported_symbol_glyph",
+            {"replaced_glyph_count": unsupported_glyph_count},
+        )
+
+    font_family = _resolve_css_font_family(block.font_name)
 
     def fits(fontsize: float) -> bool:
-        css = _insert_html_css(fontsize)
+        css = _insert_html_css(fontsize, font_family)
         spare_height, _ = page.insert_htmlbox(rect, content_html, css=css, scale_low=1)
         return spare_height >= 0
 
@@ -948,7 +1131,7 @@ def _insert_html_text(
     # would silently drop the text - force a real write instead via
     # scale_low=0, which lets PyMuPDF auto-shrink the content as much as
     # needed to fit the capped rect.
-    css = _insert_html_css(size)
+    css = _insert_html_css(size, font_family)
     page.insert_htmlbox(rect, content_html, css=css, scale_low=0)
     return False, rect, size
 
@@ -1424,7 +1607,10 @@ class PyMuPdfEngine:
         become escaped text in nestable <b>/<i> tags per their bold/italic
         flags - this is the untranslated, formatting-only fallback (`text`
         is still ignored in this branch too). CSS uses block.font_size as
-        the starting size and a generic "sans-serif" font-family: MuPDF's
+        the starting size and a CSS generic font-family resolved from
+        block.font_name via _resolve_css_font_family() (serif/monospace/
+        sans-serif - a coarse family match, not the original font itself,
+        see Backlog.md's still-open font-embedding question): MuPDF's
         Story/CSS engine resolves generic families - and their bold/italic
         variants - internally, so unlike the plain-text path below no
         per-style Base-14 fontname lookup is needed.

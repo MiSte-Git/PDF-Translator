@@ -268,6 +268,13 @@ class MainWindow(QMainWindow):
         self.open_report_button = QPushButton()
         self.open_report_button.setVisible(False)
         self.open_report_button.clicked.connect(self._open_qa_report)
+        # PDF-only, only shown once a run actually produced correctable
+        # blocks (see _show_job_result()) - opens PdfCorrectionDialog
+        # (ui/correction_dialog.py), RoadMap.md Phase 2/PDF's "PDF-
+        # Übersetzung korrigieren" item.
+        self.correct_translation_button = QPushButton()
+        self.correct_translation_button.setVisible(False)
+        self.correct_translation_button.clicked.connect(self._open_correction_dialog)
 
         self.job_box = QGroupBox()
         job_layout = QVBoxLayout(self.job_box)
@@ -277,6 +284,7 @@ class MainWindow(QMainWindow):
         job_actions.addWidget(self.cancel_button)
         job_actions.addWidget(self.open_folder_button)
         job_actions.addWidget(self.open_report_button)
+        job_actions.addWidget(self.correct_translation_button)
         job_layout.addLayout(job_actions)
 
         self.settings_button = QPushButton()
@@ -322,6 +330,7 @@ class MainWindow(QMainWindow):
         self.cancel_button.setText(t("job.cancel"))
         self.open_folder_button.setText(t("job.open_folder"))
         self.open_report_button.setText(t("job.open_report"))
+        self.correct_translation_button.setText(t("job.correct_translation"))
         self.settings_button.setText(t("settings.button"))
         if self.last_result is None: self.result.setText(t("analysis.required"))
         else: self._show_analysis(self.last_result)
@@ -527,8 +536,18 @@ class MainWindow(QMainWindow):
         self._job_total_paragraphs = 0
         self._job_last_location = ""
         self._job_last_stats = None
+        # Needed later by _open_correction_dialog(), PDF-only: the source
+        # path (never touched by the run itself - see run_pdf_job()'s
+        # docstring) and the exact same header/footer exclusion the run
+        # used, so a correction re-render reproduces the identical
+        # DocumentTemplate/block list (see run_pdf_correction_job()'s
+        # docstring for why this matters).
+        self._job_source_path = source
+        self._job_exclude_header = request.exclude_header
+        self._job_exclude_footer = request.exclude_footer
         self.open_folder_button.setVisible(False)
         self.open_report_button.setVisible(False)
+        self.correct_translation_button.setVisible(False)
         self.job_progress.setVisible(True)
         # Indeterminate only for the brief moment before total_paragraph_count()
         # reports in (see _job_total) - no API call has happened yet at this
@@ -668,6 +687,43 @@ class MainWindow(QMainWindow):
         self.cancel_button.setVisible(False)
         self.open_folder_button.setVisible(True)
         self.open_report_button.setVisible(True)
+        # Only for PDF runs that actually produced correctable blocks
+        # (empty for e.g. an all-skipped or fully-cancelled run) - see
+        # PdfTranslationStats.blocks' docstring.
+        self.correct_translation_button.setVisible(
+            isinstance(result, PdfJobResult) and bool(stats.blocks)
+        )
+
+    def _open_correction_dialog(self) -> None:
+        if self._job_result is None or not isinstance(self._job_result, PdfJobResult):
+            return
+        from ui.correction_dialog import PdfCorrectionDialog
+
+        dialog = PdfCorrectionDialog(
+            self.language,
+            self._job_source_path,
+            self._job_result.output_path,
+            self._job_result.stats.blocks,
+            exclude_header=self._job_exclude_header,
+            exclude_footer=self._job_exclude_footer,
+            parent=self,
+        )
+        dialog.exec()
+        if dialog.last_result is not None and dialog.last_corrected_records is not None:
+            # A correction run overwrote the same output/QA-report paths
+            # (see run_pdf_correction_job()'s docstring) - refresh the job
+            # panel's result so open_report_button reflects the corrected
+            # file, not the stale pre-correction one. Deliberately reuse
+            # last_corrected_records (NOT dialog.last_result.stats.blocks,
+            # which apply_pdf_corrections() always leaves empty - see its
+            # docstring) as the new baseline for `blocks`, so reopening the
+            # correction dialog again starts from this round's edits
+            # instead of silently discarding them back to the original
+            # machine translation.
+            corrected_result = dialog.last_result
+            corrected_result.stats.blocks = dialog.last_corrected_records
+            self._job_result = corrected_result
+            self._show_job_result(corrected_result)
 
     def _job_failed(self, message: str) -> None:
         log.error("Übersetzungslauf fehlgeschlagen: %s", message)

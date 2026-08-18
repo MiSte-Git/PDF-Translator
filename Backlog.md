@@ -1493,3 +1493,391 @@
   - 4 neue Tests in 2 neuen Dateien:
   `tests/test_pdf_paragraph_css_reset.py` (2),
   `tests/test_pdf_highlight_background_persists.py` (2)).
+
+- **Symbol-/Private-Use-Font-Glyphen behoben (18.08.2026):** Löst den seit
+  Zeile 110 unten offenen Befund. Direkt reproduziert (ohne die echte
+  Datei, da hierfür kein extrahierter Wingdings-Font nötig ist - ein
+  manuell auf einen PUA-Codepoint gesetzter `TextSpan` genügt, um exakt
+  den produktiven `redact_block()`/`insert_text()`-Pfad zu treffen):
+  ein Symbol-Font-Zeichen (z. B. ein Wingdings-Bullet, Codepoint U+F086,
+  wie in der echten Datei auf Seite 5 gefunden) geht beim Wiedereinfügen
+  über `page.insert_htmlbox()` mit CSS `font-family: sans-serif`
+  vollständig verloren - nicht als sichtbare Tofu-Box, sondern komplett
+  unsichtbar: der extrahierte Output-Text enthielt an der Stelle einen
+  rohen NUL-Codepoint (`\x00`), und das gerenderte Bild zeigte an der
+  Position schlicht eine Lücke, kein Ersatzzeichen. Ursache: der
+  Sans-Serif-Fallback-Font (in dieser Umgebung "NimbusSans-Regular")
+  kennt naturgemäß kein Glyph für einen Font-spezifischen
+  Private-Use-Area-Codepoint - dieser hat außerhalb des exakten
+  Symbol-Fonts, der ihn definiert, keine Bedeutung. Fix in neuer
+  `_replace_unsupported_glyphs()`/`_is_private_use_char()`
+  (`pipeline/pdf/pymupdf_engine.py`): jedes Zeichen in den drei
+  Private-Use-Area-Bereichen (BMP U+E000-U+F8FF sowie die beiden
+  Supplementary-Bereiche) wird im finalen HTML-Inhalt - egal ob aus
+  `translated_html` (Provider-Antwort) oder aus dem unübersetzten
+  `spans_to_html()`-Fallback - durch ein sichtbares Platzhalterzeichen
+  ("□", WHITE SQUARE) ersetzt, das im Fallback-Font nachweislich
+  existiert (per Direkttest bestätigt: passendes Glyph vorhanden, kein
+  erneuter Tofu-Verlust). Bewusst KEIN Rateversuch auf ein spezifisches
+  Unicode-Äquivalent (z. B. "•" für "es ist wahrscheinlich ein Bullet") -
+  ohne den Original-Font einzubetten (siehe unten, weiterhin offene
+  Architekturfrage) lässt sich nicht zuverlässig bestimmen, welches
+  Symbol ein PUA-Codepoint tatsächlich darstellt, und ein falsch
+  geratenes Symbol wäre irreführender als ein ehrlicher, klar erkennbarer
+  Platzhalter. Jede Ersetzung wird zusätzlich per `log_growth_anomaly()`
+  protokolliert (neues Event `unsupported_symbol_glyph`,
+  `tests/output/growth_anomalies.jsonl`) - entspricht dem in der Roadmap
+  festgehaltenen Prinzip "Nicht unterstützte Inhalte werden sichtbar
+  katalogisiert". Beide Aufrufstellen in `_insert_html_text()` (Fit-
+  Prüfung und finaler erzwungener Insert) betroffen, da beide auf
+  demselben `content_html` operieren - ein einziger Ersetzungspunkt genau
+  dort deckt automatisch auch den Plain-Text-Backward-Compatibility-Pfad
+  ab, da `_plain_text_needs_unicode_fallback()` (Zeile 128 unten) jedes
+  Zeichen mit `ord(ch) > 255` - PUA-Codepoints eingeschlossen - ohnehin
+  schon über den HTML/Story-Pfad umleitet, bevor es dort ankommen könnte.
+  Regressionsabdeckung in `tests/test_pdf_symbol_glyph_placeholder.py`
+  (5 Tests: Codepoint-Bereichserkennung für alle drei PUA-Zonen,
+  Ersetzung inklusive Zählung, unveränderter gewöhnlicher Text, voller
+  Redact/Insert/Save-Rundlauf ohne NUL-Symptom UND mit protokolliertem
+  Anomalie-Eintrag, Kontrollfall ohne Symbol-Inhalt bleibt unprotokolliert
+  und unverändert) - der entscheidende Rundlauf-Test per Revert-Probe
+  bestätigt fehlschlagend (`\x00` weiterhin im Output), wenn die
+  Ersetzung aus `_insert_html_text()` entfernt wird. Gesamter Testlauf am
+  Ende: 116 passed, 1 skipped (vorher 111 passed, 1 skipped - 5 neue
+  Tests).
+
+- **Originalfont-Einbettung/-Wiederverwendung: kleine Verbesserung
+  umgesetzt (18.08.2026).** Löst den seit Zeile 128 oben offenen Befund
+  teilweise. Nutzer-Entscheidung (nach Abwägung der Alternativen -
+  vollständige Font-Einbettung wurde bewusst ALS ZU GROSS für einen
+  einzelnen Fix verworfen, siehe unten): statt echte Font-Einbettung
+  umzusetzen (Original-Font-Programm aus dem Quell-PDF extrahieren,
+  subsetten und einbetten - deutlich größeres Vorhaben mit Bold/Italic-
+  Varianten-Matching und Lizenzfragen, bleibt bewusst zurückgestellt und
+  weiterhin offene Architekturentscheidung), wird `block.font_name`
+  jetzt wenigstens grob auf eine CSS-Generic-Family abgebildet statt
+  immer unbedingt "sans-serif" zu verwenden. Neu in
+  `pipeline/pdf/pymupdf_engine.py`: `_resolve_css_font_family()` prüft
+  `block.font_name` (case-insensitiv) gegen zwei feste Keyword-Listen
+  (`_SERIF_FONT_NAME_KEYWORDS`: Times, Georgia, Garamond, Cambria,
+  Palatino, Minion, Caslon, Baskerville, Constantia, Cochin, Didot,
+  Plantin, Bookman, Book Antiqua, Century, Goudy, Sabon, "serif";
+  `_MONOSPACE_FONT_NAME_KEYWORDS`: Courier, Consolas, Menlo, Monaco,
+  "mono", Typewriter, Lucida Console, Andale Mono) und liefert "serif",
+  "monospace" oder unverändert "sans-serif" (`_DEFAULT_CSS_FONT_FAMILY`)
+  für jeden nicht erkannten Namen - inklusive Symbol-/Icon-Fonts wie
+  "Wingdings", die ohnehin keine Prosa-Schriftart sind. `_insert_html_css()`
+  nimmt jetzt einen `font_family`-Parameter (Default weiterhin
+  "sans-serif", damit bestehende Aufrufer ohne Angabe unverändert
+  funktionieren) statt den String hart zu kodieren; beide Aufrufstellen
+  in `_insert_html_text()` (Fit-Prüfung und finaler erzwungener Insert)
+  lösen `font_family` einmal zu Beginn über `_resolve_css_font_family(
+  block.font_name)` auf. Direkt reproduziert, dass die CSS-Generic-Family
+  tatsächlich einen ANDEREN, vom PyMuPDF Story-Renderer tatsächlich
+  gezeichneten Font ergibt, nicht nur eine angeforderte, aber ignorierte
+  Einstellung: in dieser Umgebung löst "serif" zu "CharisSIL" auf,
+  "monospace" zu "NimbusMonoPS-Regular", "sans-serif"/Default zu
+  "NimbusSans-Regular" - drei tatsächlich unterschiedliche Fonts.
+  Ausdrücklich KEINE echte Font-Wiedergabe - nur eine grobe, aber
+  deutlich näher am Original liegende Familienwahl. Regressionsabdeckung
+  in `tests/test_pdf_font_family_heuristic.py` (4 Tests:
+  Serif-Namenserkennung, Monospace-Namenserkennung, Sans-Serif-/
+  Default-Fallback inklusive Symbol-Font-Namen, voller Redact/Insert/
+  Save-Rundlauf, der bestätigt, dass ein als Serif markierter Block
+  tatsächlich einen ANDEREN gerenderten Font bekommt als ein
+  Default-Block auf derselben Pipeline - bewusst ohne den konkreten
+  Fontnamen hart zu kodieren, da das ein PyMuPDF-internes
+  Implementierungsdetail ist) - der entscheidende Rundlauf-Test per
+  Revert-Probe bestätigt fehlschlagend (beide Blöcke landen wieder beim
+  selben Font), wenn die `font_family`-Weitergabe aus
+  `_insert_html_text()` entfernt wird. Gesamter Testlauf am Ende: 120
+  passed, 1 skipped (vorher 116 passed, 1 skipped - 4 neue Tests).
+
+- **"PDF-Übersetzung korrigieren" - manuelle Nachbearbeitung im UI
+  (18.08.2026):** Auslöser: der Nutzer fand im Live-Lauf gegen "1526
+  VIRELICON.pdf" eine echte Fehlübersetzung - "Manuel" (Sprecher einer
+  Zitat-Zuschreibungszeile) kam als "Handbuch" zurück. Diskussion mit dem
+  Nutzer klärte zwei verworfene Alternativen, bevor die tatsächliche
+  Lösung feststand:
+  1. PDF grundsätzlich über ein Word-Zwischenformat übersetzen, damit der
+     Nutzer von Hand korrigieren und selbst als PDF exportieren kann.
+     Verworfen: ein PDF kennt nur Positionen/Glyphen, keine
+     Dokumentstruktur - eine PDF-zu-Word-Rekonstruktion (Layout, Spalten,
+     Markierungsboxen, Links, Kopf-/Fußzeilen) ist ein deutlich
+     schwierigeres, verlustträchtigeres Problem als das direkte
+     In-Place-Bearbeiten, das diese Engine bereits beherrscht - hätte
+     vermutlich neue Bugs eingeführt statt welche zu vermeiden. Für
+     Dokumente, die BEREITS als Word-Datei vorliegen (wie sich
+     herausstellte: bei "1526 VIRELICON.pdf" der Fall), existiert der
+     gewünschte Weg schon - die bestehende DOCX-Pipeline. Für PDFs ohne
+     Word-Original (der eigentliche Anwendungsfall dieses Tools) bleibt
+     der direkte PDF-Pfad nötig.
+  2. Geschützte Begriffe (`pipeline/translation/protected_terms.py`, seit
+     Projektbeginn vorhanden, `protect_terms()`/`restore_terms()`, per
+     Wortgrenzen-Regex case-insensitiv, bereits vollständig durch alle
+     drei Formate verdrahtet: PDF `translate_pdf.py`, Word, PPTX) hätte
+     "Manuel" pauschal von der Übersetzung ausschließen können. Nutzer
+     wies zurecht darauf hin, dass das ein globaler Holzhammer ist -
+     falsch für ein Wort, das mal Name, mal echtes Übersetzungswort sein
+     kann. Bleibt trotzdem die richtige Lösung für Begriffe, die IMMER
+     Namen sind (z. B. wiederkehrende Sprecher in dieser Datei).
+
+  Tatsächliche Lösung: eine gezielte Korrektur-Tabelle im UI, die
+  ausdrücklich KEIN neuer PDF-Editor ist, sondern dieselbe
+  redact_block()/insert_text()-Maschinerie wiederverwendet, die
+  translate_pdf() ohnehin schon für die Erstübersetzung nutzt. Zwei
+  Nutzer-Entscheidungen vorab per Rückfrage geklärt: (a) "Anwenden"
+  überschreibt die bestehende Übersetzungsdatei, statt immer eine neue
+  anzulegen - Charakter "Entwurf verfeinern", nicht "neue Quelle
+  schützen"; (b) die Tabelle öffnet sich über einen expliziten Knopf,
+  nicht automatisch nach jedem Lauf.
+
+  Architektur, Datei für Datei:
+  - `pipeline/pdf/pymupdf_engine.py`: neue `html_to_plain_text()` -
+    Inverse von `spans_to_html()`/einer Provider-HTML-Antwort: `</p><p>`
+    zwischen echten Geschwister-Absätzen wird zu einer Leerzeile,
+    `<br/>` zu einem einfachen Zeilenumbruch, jedes verbleibende
+    `<p>`/`<u>`/`<b>`/`<i>` wird entfernt (verliert die Formatierung
+    selbst, nicht nur ihre optische Markierung - bewusst, siehe unten),
+    HTML-Entities werden zuletzt entschärft. Direkt gegen mehrere Fälle
+    verifiziert (verschachtelte Tags, Absatzumbrüche, `&amp;`-Entities).
+  - `pipeline/pdf/translate_pdf.py`:
+    - Neue `TranslatedBlockRecord`-Dataclass (page_index, block_index,
+      original_text, translated_html) mit `display_text`-Property
+      (ruft `html_to_plain_text()` auf).
+    - `PdfTranslationStats` bekommt ein neues Feld `blocks: list[
+      TranslatedBlockRecord] = field(default_factory=list)` - rein
+      additiv (per Revert-Probe bestätigt: kein bestehender Test bricht,
+      weil keiner Positions- oder Exakt-Gleichheits-Vergleiche auf dem
+      gesamten Dataclass macht). `translate_pdf()`s Hauptschleife hängt
+      nach jedem erfolgreich übersetzten Block (nur der `block.spans`-
+      Zweig, siehe unten) einen Record an.
+    - Neue `apply_pdf_corrections(engine, records) -> PdfTranslationStats`:
+      spielt eine Record-Liste OHNE jeden Provider-/Netzwerkaufruf gegen
+      `engine` ein - `engine` MUSS frisch auf der unangetasteten
+      Quelldatei geöffnet sein, nie auf der bereits übersetzten (Docstring
+      erklärt ausführlich warum: ein zweiter `redact_block()`-Aufruf auf
+      der ursprünglichen `block.bbox` würde einen Bereich, den der ERSTE
+      Durchlauf über die Originalgröße hinaus gewachsen hat, nicht mehr
+      vollständig abdecken - Reste der ersten Übersetzung blieben stehen).
+      Records werden nach Seite gruppiert, `extract_blocks()` (cached pro
+      Seite) wird dadurch nur einmal pro Seite statt einmal pro Record
+      aufgerufen.
+    - Neue `build_corrected_records(records, edited_texts) -> list[
+      TranslatedBlockRecord]`: eine Zeile gilt als unbearbeitet - und
+      wird UNVERÄNDERT (identisches Objekt) durchgereicht -, wenn ihr
+      aktueller Text noch exakt `record.display_text` entspricht; nur
+      eine tatsächlich geänderte Zeile bekommt neues HTML über die
+      bereits bestehende `_plain_text_to_html()`. Bewusster Kompromiss:
+      eine bearbeitete Zeile verliert dadurch ihre Inline-Formatierung
+      (fett/kursiv/unterstrichen) - Korrektheit des Wortlauts wiegt
+      schwerer als Formatierungserhalt für eine Zeile, die der Nutzer
+      ohnehin von Hand fixen musste; eine UNBEARBEITETE Zeile behält ihr
+      Original-HTML und damit ihre Formatierung exakt.
+  - `ui/pdf_job.py`: neue `run_pdf_correction_job(source, destination,
+    records, exclude_header=False, exclude_footer=False)` - spiegelt
+    `run_pdf_job()`s Template-Rekonstruktion (`detect_header_footer_
+    zones()`) exakt, damit `extract_blocks()` bei der Korrektur
+    dieselbe Block-Liste/-Reihenfolge liefert wie beim Erstlauf (sonst
+    würden die `page_index`/`block_index`-Indizes ins Leere zeigen).
+    Anders als `run_pdf_job()` fehlt bewusst die
+    Existiert-bereits-Sperre für `destination` (Nutzer-Entscheidung
+    "überschreiben", siehe oben) - nur der Quelle-gleich-Ziel-Schutz
+    bleibt. Eigener, kompakter QA-Bericht (`_build_correction_qa_report()`)
+    ersetzt den ursprünglichen (gleicher Dateiname).
+  - `ui/workers.py`: `_copy_pdf_stats()` (Zwischenkopie für die
+    Qt-Thread-Grenze bei Live-Fortschritt) um `list(stats.blocks)`
+    ergänzt - sonst wäre das neue Feld auf dem Zwischenstand verloren
+    gegangen (wenngleich nur der FINALE, per `finished`-Signal
+    übertragene Stand für die Korrektur-Tabelle zählt).
+  - `ui/correction_dialog.py` (neu): `PdfCorrectionDialog` - `QTableWidget`
+    mit Spalten Seite/Original (read-only)/Übersetzung (editierbar),
+    "Anwenden und speichern"-Knopf. Läuft bewusst SYNCHRON auf dem
+    UI-Thread statt über `QThreadPool` wie die eigentlichen
+    Übersetzungs-Worker - hier gibt es keinerlei Netzwerkaufruf mehr
+    (jeder Record trägt sein finales `translated_html` schon in sich),
+    ein eigener Worker/Signals-Umweg wäre unnötiger Aufwand für eine
+    ohnehin schnelle, rein lokale Operation. Bei Erfolg werden sowohl
+    `last_result` (das `PdfJobResult`) als auch `last_corrected_records`
+    (die tatsächlich geschriebene Record-Liste) gesetzt - Letzteres
+    eigens deshalb, weil `apply_pdf_corrections()`s zurückgegebene
+    `PdfTranslationStats.blocks` per Vertrag LEER bleibt (siehe deren
+    Docstring) und daher NICHT als neue Grundlage für einen zweiten
+    Korrektur-Durchgang taugt.
+  - `ui/app.py`: neuer, standardmäßig unsichtbarer
+    `correct_translation_button` neben `open_folder_button`/
+    `open_report_button` - sichtbar nur nach einem PDF-Lauf mit
+    tatsächlich vorhandenen `stats.blocks` (per Revert-Probe bestätigt:
+    ohne die `isinstance(...)  and bool(stats.blocks)`-Bedingung bleibt
+    der Knopf in den entsprechenden Tests fälschlich sichtbar/unsichtbar).
+    `_start()` merkt sich zusätzlich `_job_source_path`/
+    `_job_exclude_header`/`_job_exclude_footer` für den späteren
+    Korrektur-Aufruf (die eigentliche Quelldatei wird von `translate_pdf()`
+    selbst nie verändert, bleibt also für einen zweiten Durchlauf
+    verfügbar). `_open_correction_dialog()` übernimmt nach einem
+    erfolgreichen "Anwenden" bewusst `dialog.last_corrected_records`
+    (nicht das leere `stats.blocks` des Korrektur-Ergebnisses) als neue
+    `blocks`-Grundlage - sonst würde ein erneutes Öffnen der Tabelle die
+    gerade gespeicherte Korrektur stillschweigend verwerfen und wieder
+    bei der ursprünglichen Maschinenübersetzung anfangen (per
+    Revert-Probe bestätigt).
+
+  Bekannte, dokumentierte Einschränkung: nur der `block.spans`-Pfad
+  (HTML/Story) wird als `TranslatedBlockRecord` erfasst - der einzige,
+  den echte Produktionsblöcke je durchlaufen (siehe `insert_text()`s
+  Docstring, mehrfach in dieser Datei bestätigt); der reine
+  Text-Fallback-Pfad (leere `block.spans`) ist nicht über diese Tabelle
+  korrigierbar, aber auch praktisch nicht erreichbar - keine echte
+  Einschränkung, nur der Vollständigkeit halber dokumentiert.
+
+  Regressionsabdeckung, drei neue Dateien:
+  `tests/test_pdf_translation_corrections.py` (6 Tests: `html_to_plain_
+  text()`-Fälle, `translate_pdf()` befüllt `stats.blocks` korrekt,
+  `build_corrected_records()` baut nur bearbeitete Zeilen neu,
+  ignoriert fehlende Keys, voller Korrektur-Rundlauf behebt den
+  bearbeiteten Block UND erhält die Fett-Formatierung des unbearbeiteten
+  - inklusive der `apply_pdf_corrections()`-eigenen Voraussetzung "frische
+  Engine auf der Quelle"); `tests/test_pdf_correction_job.py` (3 Tests:
+  `run_pdf_correction_job()` überschreibt die bestehende Ausgabedatei
+  tatsächlich mit dem korrigierten Text, verweigert Quelle=Ziel, hat
+  nachweislich keinen Provider-Parameter); `tests/test_ui_pdf_correction.py`
+  (5 Tests, Qt-Ebene mit `QT_QPA_PLATFORM=offscreen`: Korrektur-Knopf
+  sichtbar/unsichtbar je nach `stats.blocks`, unsichtbar für Nicht-PDF-
+  Ergebnisse, voller End-to-End-Durchlauf über die echte Dialog-Klasse
+  mit gemocktem `exec()` - simuliert Zelleneingabe + Anwenden-Klick statt
+  eine echte blockierende Modal-Schleife zu öffnen -, unbearbeitete Zeile
+  bleibt HTML-identisch). Alle drei entscheidenden Verhaltensänderungen
+  (Block-Erfassung in `translate_pdf()`, Knopf-Sichtbarkeit, Records-
+  Weitergabe bei erneutem Öffnen) per Revert-Probe bestätigt fehlschlagend
+  ohne den jeweiligen Fix. Gesamter Testlauf am Ende: 134 passed, 1
+  skipped (vorher 120 passed, 1 skipped - 14 neue Tests in 3 neuen
+  Dateien).
+
+  **Nachtrag - Rich-Text-Editor statt Klartext (18.08.2026):** Der obige
+  Kompromiss ("eine bearbeitete Zeile verliert ihre Inline-Formatierung")
+  wurde dem Nutzer erklärt, als er nachfragte, warum eine Korrektur die
+  Formatierung kostet. Seine Antwort war eindeutig: "Ein Rich-Text-Editor
+  ist wichtig für mich." Umgesetzt statt weiter dokumentiert:
+  - `ui/rich_text.py` (neu): das einzige Modul im Projekt, das
+    Qt-Rich-Text-Klassen (`QFont`, `QTextDocument`) importieren darf -
+    dieselbe Trennung wie `pymupdf_engine.py`s fitz-Exklusivität, damit
+    die Pipeline-Schicht UI-Framework-unabhängig bleibt.
+    `qt_document_to_project_html()` läuft ein `QTextDocument` Block für
+    Block (= Absatz) und Fragment für Fragment (= zusammenhängender
+    Formatierungslauf) ab und baut daraus dasselbe minimale
+    `<p>`/`<br/>`/`<u>`/`<i>`/`<b>`-Markup, das `spans_to_html()` schon
+    erzeugt (Fett über `fontWeight() >= QFont.Weight.Bold`, dieselbe
+    Zwei-Zustände-Logik wie der Fett-Knopf selbst setzt). Bewusst NICHT
+    `QTextDocument.toHtml()`/`toMarkdown()` verwendet - beide erzeugen ein
+    volles, verbose HTML-Dokument (Styles, Fonts, `<html><body>`-Hülle),
+    das mit dem schmalen Tag-Set nichts zu tun hat, das
+    `PyMuPdfEngine.insert_text()` erwartet. Die umgekehrte Richtung
+    (Laden) braucht keine eigene Konvertierung: `QTextEdit.setHtml()`
+    versteht das schmale Tag-Set direkt, da es eine strikte Teilmenge von
+    Qt's eigenem unterstützten HTML4-Dialekt ist.
+  - `pipeline/pdf/translate_pdf.py`: neue
+    `build_corrected_records_from_html(records, edited_html)` - Pendant
+    zu `build_corrected_records()`, nimmt aber bereits fertiges
+    Projekt-HTML entgegen (aus `qt_document_to_project_html()`) statt
+    Klartext, also ohne den verlustbehafteten `_plain_text_to_html()`-
+    Umweg. `edited_html` enthält NUR Zeilen, die der Dialog als
+    tatsächlich bearbeitet erkannt hat (siehe unten) - eine fehlende
+    (page_index, block_index)-Kombination wird unverändert (identisches
+    Objekt) durchgereicht, exakt wie beim Klartext-Pendant. Die alte
+    Funktion bleibt bestehen (eigene Tests, möglicher künftiger
+    Datei-/CLI-Korrekturweg), wird vom Dialog seitdem aber nicht mehr
+    aufgerufen - im Docstring vermerkt, damit das nicht wie eine
+    vergessene Altlast aussieht.
+  - `ui/correction_dialog.py`: von "Zelle direkt editierbar" auf
+    Master-Detail umgebaut. Die Tabelle zeigt Seite/Original/Übersetzung
+    nur noch als Nur-Lese-Vorschau (aktualisiert beim Zeilenwechsel/
+    Anwenden); die eigentliche Bearbeitung passiert in einem separaten
+    `QTextEdit` darunter mit drei Umschalt-Knöpfen (Fett/Kursiv/
+    Unterstrichen), die `QTextEdit.mergeCurrentCharFormat()` aufrufen -
+    laut Qt-Dokumentation wirkt das automatisch auf eine vorhandene
+    Selektion oder, ohne Selektion, auf ab jetzt neu getippten Text; ein
+    manuelles Cursor-`mergeCharFormat()` daneben ist dafür NICHT nötig
+    (erste Version hatte das überflüssigerweise, vereinfacht).
+    Zeilenwechsel-Tracking: `_row_html` (aktueller HTML-Stand je Zeile,
+    startet identisch mit dem Original), `_dirty` (Set der Zeilen, die
+    das `textChanged`-Signal WÄHREND echter Bearbeitung gesehen hat - ein
+    `_loading`-Guard blendet das programmatische `setHtml()` beim
+    Zeilenwechsel selbst aus). `_flush_active_row()` schreibt den
+    Editor-Inhalt nur für eine als dirty markierte Zeile zurück in
+    `_row_html`; `_apply()`s `_current_edits()` nimmt ohnehin nur dirty
+    Zeilen in `edited_html` auf - zwei unabhängige Sperren mit
+    überlappendem, aber nicht identischem Zweck (siehe Testabschnitt
+    unten für den Unterschied).
+  - i18n (`ui/i18n.py`): `correction.hint` umformuliert (Formatierung
+    geht bei einer Korrektur NICHT mehr verloren), plus drei neue Keys
+    `correction.editor_label`/`correction.bold`/`correction.italic`/
+    `correction.underline` (DE/EN-Parität weiterhin per Set-Vergleich
+    bestätigt).
+
+  Bewusst NICHT gebaut, um den Umfang beherrschbar zu halten: Tastatur-
+  kürzel (Strg+B/K/U) für die Formatierungs-Knöpfe - nur Klick auf die
+  Toolbar-Knöpfe. Bei Bedarf leicht nachrüstbar (`QShortcut` auf den
+  Editor), aber nicht Teil dieser Runde.
+
+  Regressionsabdeckung: `tests/test_pdf_rich_text_corrections.py` (neu,
+  12 Tests) - `qt_document_to_project_html()` gegen Klartext-Rundlauf,
+  Fett/Kursiv+Unterstrichen-Kombination (Tag-Verschachtelung exakt wie
+  `spans_to_html()`: `<u>` innen, `<i>` außen, `<b>` außerhalb davon),
+  Teilselektion (genau der reale "nur ein Wort fett machen"-Fall),
+  Mehrfach-Absätze, weicher Zeilenumbruch (Shift+Enter, U+2028) wird zu
+  `<br/>`, HTML-Sonderzeichen werden escaped, leerer Editor ergibt
+  Leerstring; `build_corrected_records_from_html()` mit fehlendem/
+  vorhandenem/nicht-passendem Key; ein End-to-End-Test durch den ECHTEN
+  `PdfCorrectionDialog` (nicht nur die Konvertierungsfunktion isoliert),
+  der "Manuel" korrigiert UND fett setzt, während ein unberührter fett
+  formatierter zweiter Block seine Formatierung behält - Prüfung direkt
+  an den im gespeicherten PDF tatsächlich verwendeten Font-Namen
+  (`"bold" in span["font"].lower()`), nicht nur am reinen Text.
+  `tests/test_ui_pdf_correction.py` erweitert (jetzt 6 Tests): der
+  bestehende End-to-End-Test bearbeitet jetzt den Editor statt eine
+  Tabellenzelle direkt zu setzen; ein neuer, gezielter Test prüft NUR
+  `_flush_active_row()`s eigene Dirty-Prüfung isoliert (Zeile 1 laden,
+  ohne Bearbeitung zu Zeile 2 wechseln, `_row_html[0] is original_html`
+  prüfen) - per Revert-Probe bestätigt fehlschlagend ohne diese Prüfung,
+  UND zugleich bestätigt, dass eine schwächere `==`-Prüfung auf dem
+  End-to-End-Ergebnis diese konkrete Regression NICHT gefangen hätte
+  (der Qt-Roundtrip erzeugt für unformatierten Text zufällig denselben
+  String - `_current_edits()`s eigene Dirty-Prüfung schützt das
+  Endergebnis unabhängig davon bereits vollständig; nur die
+  Objektidentitätsprüfung auf `_row_html` selbst deckt eine Regression in
+  `_flush_active_row()`s eigener Sperre auf). Gesamter Testlauf am Ende:
+  147 passed, 1 skipped (vorher 134 passed, 1 skipped - 13 neue Tests,
+  davon 12 in einer neuen Datei).
+
+  **Nachtrag 2 - Tastaturkürzel (18.08.2026):** Direkter Folgewunsch nach
+  dem Rich-Text-Editor: "GErne noch die Tastaturkürzel mit einbauen."
+  Ergänzt statt eines eigenen Kürzel-Schemas die Qt-Standardbindungen
+  `QKeySequence.StandardKey.Bold/Italic/Underline` (Strg+B/I/U auf
+  diesem Linux-Desktop, plattformgerecht z. B. Cmd auf macOS) - dieselbe
+  Bindung, die jeder andere Rich-Text-Editor (Word, LibreOffice, Qt's
+  eigenes Richtext-Beispiel) verwendet, statt etwas Eigenes zu erfinden.
+  - `ui/correction_dialog.py`: drei `QShortcut`-Instanzen auf
+    `self.editor` mit `Qt.ShortcutContext.WidgetShortcut` (feuern nur bei
+    Fokus im Editor, nicht global im ganzen Dialog). Ein `QShortcut` hat
+    selbst keinen Checked-Zustand wie ein `QPushButton` - die drei neuen
+    `_shortcut_toggle_bold/italic/underline()`-Handler flippen den
+    jeweiligen Toolbar-Knopf deshalb zuerst manuell und rufen danach
+    dieselbe bestehende `_toggle_*()`-Logik auf, exakt wie ein echter
+    Mausklick auf den Knopf. Zusätzlich Tooltips auf den drei Knöpfen
+    ("Fett (Strg+B)" usw.).
+  - `ui/i18n.py`: drei neue Tooltip-Keys (`correction.bold_tooltip` etc.,
+    DE/EN-Parität bestätigt), `correction.hint` erwähnt die Kürzel jetzt.
+  Regressionsabdeckung: vier neue Tests in
+  `tests/test_ui_pdf_correction.py` - Key-Binding-Check (die drei
+  `QShortcut`s sind tatsächlich an `QKeySequence.StandardKey.Bold/
+  Italic/Underline` gebunden, nicht an eine hart codierte, potenziell
+  plattformfalsche Tastenkombination), Bold-Handler inkl. Zurück-Toggle
+  bei zweitem Aufruf, Kursiv/Unterstrichen-Handler (mit Bestätigung, dass
+  der jeweils andere Knopf unberührt bleibt), End-to-End-Test bis ins
+  tatsächlich gespeicherte PDF (`<b>` im übernommenen `translated_html`).
+  Per Revert-Probe bestätigt: mit den drei `_shortcut_toggle_*()`-
+  Methoden auf No-Ops reduziert schlagen genau die drei
+  Verhaltens-Tests fehl, während der reine Key-Binding-Test korrekt grün
+  bleibt (er prüft nur die Bindung, nicht das Verhalten - erwartungs-
+  gemäß unberührt von dieser Änderung). Gesamter Testlauf am Ende: 151
+  passed, 1 skipped (vorher 147 passed, 1 skipped - 4 neue Tests).
