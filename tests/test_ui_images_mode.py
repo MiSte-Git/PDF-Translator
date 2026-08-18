@@ -186,6 +186,85 @@ def test_start_blocks_with_a_warning_when_ocr_engine_unavailable(
         window.close()
 
 
+def test_inpainting_backend_dropdown_offers_gpu_inpainting(qapp: QApplication) -> None:
+    window = MainWindow()
+    window.show()
+    try:
+        assert window.inpainting_backend.findData("gpu_inpainting") != -1
+    finally:
+        window.close()
+
+
+def test_inpainting_backend_hint_shown_only_when_selected_backend_unavailable(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mirrors _update_ocr_engine_hint()'s already-tested behaviour, for
+    the rewrite-backend dropdown - relevant in practice only for
+    "gpu_inpainting" today (Box-Overlay/CvInpaintingBackend are always
+    available, see inpainting_backend_available()'s docstring).
+    """
+    monkeypatch.setattr(app_module, "inpainting_backend_available", lambda name: False)
+    window = MainWindow()
+    window.show()
+    try:
+        window.mode.setCurrentIndex(list(TranslationMode).index(TranslationMode.IMAGES))
+        index = window.inpainting_backend.findData("gpu_inpainting")
+        window.inpainting_backend.setCurrentIndex(index)
+
+        assert window.inpainting_backend_hint.isVisible()
+
+        index = window.inpainting_backend.findData("box_overlay")
+        monkeypatch.setattr(app_module, "inpainting_backend_available", lambda name: True)
+        window.inpainting_backend.setCurrentIndex(index)
+
+        assert not window.inpainting_backend_hint.isVisible()
+    finally:
+        window.close()
+
+
+def test_start_blocks_with_a_warning_when_inpainting_backend_unavailable(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+    no_run_thread_pool: list[object],
+    tmp_path: Path,
+) -> None:
+    """Fail-fast guard mirroring test_start_blocks_with_a_warning_when_
+    ocr_engine_unavailable() above, for the rewrite-backend choice (e.g.
+    "gpu_inpainting" selected without a qualifying CUDA GPU).
+    """
+    monkeypatch.setattr(app_module, "credential_status", lambda provider: "credential.keyring")
+    monkeypatch.setattr(app_module, "inpainting_backend_available", lambda name: False)
+    warned: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda self, title, text, *a, **k: warned.append(text) or QMessageBox.Ok
+    )
+    directory_calls: list[object] = []
+    monkeypatch.setattr(
+        QFileDialog, "getExistingDirectory", lambda *a, **k: directory_calls.append(1) or str(tmp_path)
+    )
+
+    window = MainWindow()
+    window.show()
+    try:
+        sources = _image_sources(tmp_path, count=1)
+        # Select the backend BEFORE _prepare_confirmed_images_run(): the
+        # combo box's currentIndexChanged handler calls
+        # _invalidate_analysis() (see _inpainting_backend_changed()),
+        # which would otherwise reset the last_result/confirm state that
+        # call just finished setting up.
+        index = window.inpainting_backend.findData("gpu_inpainting")
+        window.inpainting_backend.setCurrentIndex(index)
+        _prepare_confirmed_images_run(window, sources)
+
+        window._start()
+
+        assert len(no_run_thread_pool) == 0
+        assert not directory_calls
+        assert warned
+    finally:
+        window.close()
+
+
 def test_job_progress_wording_is_file_based_for_images_mode(
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,

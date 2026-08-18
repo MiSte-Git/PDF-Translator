@@ -25,7 +25,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from pipeline.images.inpainting import BoxOverlayBackend, CvInpaintingBackend, InpaintingBackend
+from pipeline.images.inpainting import (
+    BoxOverlayBackend,
+    CvInpaintingBackend,
+    GpuInpaintingBackend,
+    InpaintingBackend,
+)
 from pipeline.images.ocr import OcrEngine, TesseractOcrEngine
 from pipeline.translation.base import TranslationProvider
 from pipeline.translation.deepl_provider import DeepLProvider
@@ -51,8 +56,9 @@ OCR_ENGINE_FACTORIES: dict[str, Callable[[], OcrEngine]] = {
 INPAINTING_BACKEND_FACTORIES: dict[str, Callable[[], InpaintingBackend]] = {
     "box_overlay": BoxOverlayBackend,
     "cv_inpainting": CvInpaintingBackend,
-    # GPU-Inpainting (lokal, LaMa) und Cloud-Inpainting (OpenAI) folgen als
-    # weitere Einträge - siehe RoadMap.md Phase 3.
+    "gpu_inpainting": GpuInpaintingBackend,
+    # Cloud-Inpainting (OpenAI) folgt als weiterer Eintrag - siehe
+    # RoadMap.md Phase 3.
 }
 
 
@@ -100,6 +106,27 @@ def ocr_engine_available(name: str) -> bool:
 
         return tesseract_available()
     return name in OCR_ENGINE_FACTORIES
+
+
+def inpainting_backend_available(name: str) -> bool:
+    """Whether the rückschreibe-backend `name` can actually be used right
+    now - checked BEFORE a job starts (ui/app.py's IMAGES-mode dropdown
+    hint and fail-fast check, mirrors ocr_engine_available() above).
+    Box-Overlay/CvInpaintingBackend have no real availability question
+    (both only need Pillow, resp. Pillow+OpenCV, which are hard
+    dependencies of running IMAGES mode at all - see
+    requirements-ocr.txt) so they're always reported available; only
+    "gpu_inpainting" has a real check today (CUDA GPU with enough VRAM,
+    see pipeline.images.inpainting.gpu_inpainting_available()) - a future
+    Cloud-Inpainting backend would check for a configured API key
+    instead, the same way build_provider()'s providers do lazily on
+    first use.
+    """
+    if name == "gpu_inpainting":
+        from pipeline.images.inpainting import gpu_inpainting_available
+
+        return gpu_inpainting_available()
+    return name in INPAINTING_BACKEND_FACTORIES
 
 
 def safe_destination(source: Path, target_lang: str, output_dir: Path | None = None) -> Path:

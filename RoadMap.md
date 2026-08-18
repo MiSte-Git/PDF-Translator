@@ -709,6 +709,58 @@ Formulierung war hier nicht mehr aktuell.
       alle Dateien statt nur die erste) per Revert-Probe verifiziert.
       Gesamter Testlauf am Ende: 212 passed, 1 skipped (vorher 205
       passed, 1 skipped).
+- [x] GPU-Inpainting-Backend (LaMa) implementiert und in Analyse/UI
+      angebunden (18.08.2026): `pipeline/images/inpainting.py::
+      GpuInpaintingBackend` nutzt das vortrainierte LaMa-Modell
+      (https://github.com/advimman/lama) über die leichtgewichtige
+      `simple-lama-inpainting`-Wrapper-Bibliothek (lazy import, neue
+      optionale `requirements-gpu.txt` - getrennt von
+      `requirements-ocr.txt`, da PyTorch eine deutlich größere,
+      GPU-spezifische Installation ist). `gpu_inpainting_available()`
+      prüft VOR jedem Lauf (mirrors `tesseract_available()`/
+      `credential_status()`): PyTorch importierbar? CUDA-Gerät
+      sichtbar? Mindestens `GPU_MIN_VRAM_GB` (4 GB, dokumentierter
+      Schwellwert) Grafikspeicher? Bewusst KEIN automatischer
+      CPU-Fallback bei unzureichender GPU (siehe Funktions-Docstring) -
+      stattdessen als nicht verfügbar gemeldet, damit der Nutzer manuell
+      auf Cloud-Inpainting wechseln kann, statt unbemerkt eine sehr
+      langsame CPU-Inferenz zu bekommen. In `ui/document_job_common.py`
+      neue `inpainting_backend_available()` (analog zu
+      `ocr_engine_available()`) sowie Registrierung als
+      `"gpu_inpainting"` in `INPAINTING_BACKEND_FACTORIES`. `ui/app.py`
+      bekommt ein drittes Rückschreibe-Dropdown-Element plus einen
+      proaktiven Verfügbarkeitshinweis
+      (`_update_inpainting_backend_hint()`, spiegelt
+      `_update_ocr_engine_hint()`) und einen Fail-fast-Check in
+      `_start()`. Modell-Gewichte (mehrere hundert MB) werden beim
+      ersten Lauf automatisch heruntergeladen und modul-weit gecached
+      (`_LAMA_MODEL_CACHE`), damit ein Mehrdatei-Batch sie nicht pro
+      Datei neu lädt; für eine spätere Standalone-Version ohne
+      Internetzugriff zur Laufzeit können sie über die Umgebungsvariable
+      `LAMA_MODEL` vorab lokal bereitgestellt werden.
+
+      Wie schon beim Pipeline-Fundament dokumentiert: diese Cloud-Sandbox
+      hat keine CUDA-GPU (siehe oben, "Umsetzungsreihenfolge") - getestet
+      wurde deshalb die Logik ohne echte Hardware/das schwere PyTorch-
+      Paket: `gpu_inpainting_available()`s komplette Verzweigung (PyTorch
+      fehlt, keine CUDA, zu wenig VRAM, Geräte-Abfrage wirft eine
+      Exception, ausreichend VRAM) über ein in `sys.modules` injiziertes
+      Fake-`torch`-Modul statt einer echten (500+ MB) Installation, die
+      reine Masken-Erzeugungslogik (`_build_inpainting_mask()`,
+      Padding/Clamping an Bildgrenzen) sowie der Fail-fast-Guard in
+      `GpuInpaintingBackend.apply()`. Ein echter Ende-zu-Ende-Testfall
+      existiert bereits im Code (`test_apply_end_to_end_on_a_real_gpu`),
+      wird hier aber automatisch übersprungen (via
+      `gpu_inpainting_available()`) und muss auf der eigenen
+      GPU-Maschine des Nutzers verifiziert werden - wie bei anderen
+      "braucht echte Hardware/einen Live-Account"-Funktionen in diesem
+      Projekt. 15 neue Tests über zwei Dateien
+      (`tests/test_image_gpu_inpainting.py`: 10, `tests/
+      test_document_job_common.py`: 5 zusätzliche) plus 3 neue UI-Tests
+      in `tests/test_ui_images_mode.py`. Kern-Mechanik (VRAM-
+      Schwellwertvergleich in `gpu_inpainting_available()`) per
+      Revert-Probe verifiziert. Gesamter Testlauf am Ende: 229 passed, 2
+      skipped (vorher 212 passed, 1 skipped).
 - [ ] Gemeinsames Bildmodell für PDF, DOCX, PPTX und einzelne Bilddateien
       definieren.
 - [ ] OCR-Engine auswählen, kapseln und Sprachpakete verwalten.

@@ -1,0 +1,25 @@
+# Optionale Abhängigkeit für das lokale KI-Inpainting-Rückschreibe-
+# Backend (GPU-Inpainting, LaMa - RoadMap.md Phase 3). Getrennt von
+# requirements.txt/requirements-ocr.txt: braucht eine deutlich größere,
+# GPU-spezifische Installation und ist nur für Nutzer mit ausreichend
+# starker GPU gedacht - siehe pipeline/images/inpainting.py::
+# GpuInpaintingBackend/gpu_inpainting_available() (lazy import, vor jedem
+# Lauf geprüft, kein automatischer CPU-Fallback bei unzureichender GPU).
+#
+# torch: WICHTIG - die generische PyPI-Version ist häufig die reine
+# CPU-Variante. Für echte GPU-Nutzung die zur eigenen CUDA-Treiberversion
+# passende Variante über die offizielle Installationsanleitung
+# installieren (https://pytorch.org/get-started/locally/), z. B.
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+# statt eines einfachen "pip install torch".
+torch
+
+# Leichte Wrapper-Bibliothek um das vortrainierte LaMa-Modell
+# (Large-Mask-Inpainting, https://github.com/advimman/lama) - lädt die
+# Modellgewichte (mehrere hundert MB) beim ersten Lauf automatisch von
+# GitHub Releases herunter und cached sie lokal (siehe
+# GpuInpaintingBackend/_get_lama_model() im selben Modul). Für eine
+# spätere Standalone-Version ohne Internetzugriff zur Laufzeit können die
+# Gewichte vorab heruntergeladen und über die Umgebungsvariable
+# LAMA_MODEL auf den lokalen Pfad verwiesen werden.
+simple-lama-inpainting

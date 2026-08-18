@@ -2,14 +2,15 @@
 
 Analog zu pipeline/images/ocr.py::OcrEngine: ein Protocol
 (`InpaintingBackend`), gegen das mehrere austauschbare Implementierungen
-laufen. Diese Datei enthält das erste, sofort lauffähige Backend
-(BoxOverlayBackend - keine neue Abhängigkeit über das im Projekt bereits
-vorhandene Pillow hinaus, das PDF-Redact/Insert-Prinzip von
-pipeline/pdf/pymupdf_engine.py auf Rasterbilder übertragen: Originalfläche
-überdecken, übersetzten Text einfügen). Weitere Backends (klassisches
-CPU-Inpainting über OpenCV, KI-Inpainting lokal/Cloud) folgen als eigene
-Klassen in eigenen Commits - siehe RoadMap.md Phase 3 für die komplette
-Backend-Liste und die Gründe für die Reihenfolge.
+laufen. Diese Datei enthält Box-Overlay (keine neue Abhängigkeit über das
+im Projekt bereits vorhandene Pillow hinaus, das PDF-Redact/Insert-Prinzip
+von pipeline/pdf/pymupdf_engine.py auf Rasterbilder übertragen:
+Originalfläche überdecken, übersetzten Text einfügen), klassisches
+CPU-Inpainting (OpenCV, kein trainiertes Modell) sowie lokales
+KI-Inpainting (GpuInpaintingBackend, LaMa via PyTorch/CUDA) - Cloud-
+Inpainting folgt als eigene Klasse in einem eigenen Commit. Siehe
+RoadMap.md Phase 3 für die komplette Backend-Liste und die Gründe für die
+Reihenfolge.
 """
 from __future__ import annotations
 
@@ -17,6 +18,21 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from pipeline.images.ocr import OcrTextRegion
+
+# Mindest-VRAM für GpuInpaintingBackend (siehe gpu_inpainting_available()
+# unten) - LaMa (big-lama-Gewichte) läuft auch mit weniger, aber mit
+# spürbarem Risiko für CUDA-Out-of-Memory bei größeren Bildern/vielen
+# Regionen gleichzeitig; 4 GB ist ein konservativer, dokumentierter
+# Schwellwert, kein hart validierter Benchmark-Wert.
+GPU_MIN_VRAM_GB = 4.0
+
+# Modul-weiter Cache für das geladene LaMa-Modell (siehe
+# _get_lama_model()) - überlebt über mehrere GpuInpaintingBackend()-
+# Instanzen hinweg (eine neue Instanz pro run_image_job()-Aufruf, siehe
+# ui/document_job_common.py::build_inpainting_backend()), damit ein
+# Mehrdatei-Batch (run_image_batch_job()) die mehrere-hundert-MB-Gewichte
+# nicht pro Datei neu lädt/herunterlädt.
+_LAMA_MODEL_CACHE: dict[str, object] = {}
 
 # Bewusst derselbe Font-Pfad wie in tests/test_image_ocr.py - auf diesem
 # System vorhanden, aber NICHT garantiert auf jeder Zielmaschine (siehe
@@ -254,3 +270,157 @@ def _average_region_color(image, x: int, y: int, width: int, height: int) -> tup
     g = sum(s[1] for s in samples) // len(samples)
     b = sum(s[2] for s in samples) // len(samples)
     return (r, g, b)
+
+
+def gpu_inpainting_available(min_vram_gb: float = GPU_MIN_VRAM_GB) -> bool:
+    """Whether GpuInpaintingBackend can actually run right now: PyTorch
+    must be importable, a CUDA device must be visible, and that device's
+    total memory must be at least `min_vram_gb` (see GPU_MIN_VRAM_GB).
+    Mirrors pipeline.images.ocr.tesseract_available() - never raises,
+    always returns a plain bool, checked BEFORE a job starts (see
+    ui/document_job_common.py::inpainting_backend_available()) rather
+    than failing deep inside a run.
+
+    Deliberately no CPU fallback here (see RoadMap.md Phase 3): CPU-only
+    LaMa inference would be dramatically slower than the point of
+    offering a GPU backend in the first place - a GPU that doesn't
+    qualify (or isn't present at all) is reported as unavailable so the
+    UI can steer the user toward Cloud-Inpainting instead (see
+    ui/app.py's inpainting-backend hint, mirrors
+    _update_ocr_engine_hint()'s pattern), not silently downgraded to a
+    slow local run the user never asked for.
+    """
+    try:
+        import torch
+    except ImportError:
+        return False
+    try:
+        if not torch.cuda.is_available():
+            return False
+        total_memory = torch.cuda.get_device_properties(0).total_memory
+    except Exception:
+        # Any other failure while probing the device (driver mismatch, no
+        # device index 0, ...) is treated the same as "not available" -
+        # this check must never itself crash the analysis/start flow.
+        return False
+    return total_memory >= min_vram_gb * (1024 ** 3)
+
+
+def _build_inpainting_mask(size: tuple[int, int], replacements: list[TextReplacement], padding: int = 4):
+    """Binary mask for the GPU model in the standard LaMa/simple-lama-
+    inpainting convention: white (255) marks the area to remove and
+    reconstruct, black (0) is left untouched. Each region is padded by
+    `padding` pixels on every side (clamped to the image bounds) so
+    anti-aliased glyph edges the OCR bounding box just barely missed are
+    still covered - an uncovered sliver of the original glyph would
+    otherwise show through underneath the new translated text.
+    """
+    from PIL import Image, ImageDraw
+
+    mask = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(mask)
+    width, height = size
+    for replacement in replacements:
+        region = replacement.region
+        left = max(region.x - padding, 0)
+        top = max(region.y - padding, 0)
+        right = min(region.x + region.width + padding, width)
+        bottom = min(region.y + region.height + padding, height)
+        draw.rectangle([left, top, right, bottom], fill=255)
+    return mask
+
+
+def _get_lama_model(torch_module, simple_lama_cls):
+    """Lazily construct (and cache - see _LAMA_MODEL_CACHE above) the
+    SimpleLama wrapper around the pretrained LaMa weights. `device` is
+    always explicitly "cuda" here (never simple-lama-inpainting's own
+    default of "cuda if available else cpu") because GpuInpaintingBackend.
+    apply() only ever reaches this point after gpu_inpainting_available()
+    already confirmed a qualifying CUDA device exists - see that
+    function's docstring for why there is no CPU fallback path to select
+    instead.
+    """
+    if "model" not in _LAMA_MODEL_CACHE:
+        _LAMA_MODEL_CACHE["model"] = simple_lama_cls(device=torch_module.device("cuda"))
+    return _LAMA_MODEL_CACHE["model"]
+
+
+class GpuInpaintingBackend:
+    """InpaintingBackend using the local GPU to run LaMa (Large Mask
+    inpainting - https://github.com/advimman/lama), a model purpose-built
+    for object/text removal with background reconstruction, via the
+    lightweight `simple-lama-inpainting` wrapper (lazy import, listed as
+    an optional dependency in requirements-gpu.txt - separate from
+    requirements-ocr.txt because it pulls in PyTorch, a much larger and
+    GPU-specific installation not every user needs).
+
+    Unlike BoxOverlayBackend/CvInpaintingBackend, this can plausibly
+    reconstruct genuinely complex/photographic backgrounds instead of
+    being bounded by a flat fill or a non-AI algorithm - the tradeoff is
+    the GPU/VRAM requirement checked by gpu_inpainting_available() (no
+    CPU fallback - see that function's docstring) and, on first use, a
+    multi-hundred-MB model download (cached afterwards - see
+    _LAMA_MODEL_CACHE and _get_lama_model(); `simple-lama-inpainting`
+    also honours a LAMA_MODEL environment variable pointing at a local
+    weights file, useful for a standalone deployment without runtime
+    internet access - see requirements-gpu.txt).
+
+    Text is drawn back on top exactly like CvInpaintingBackend does
+    (contrast color sampled from the model's own reconstructed interior,
+    not an outside ring - see _average_region_color()'s docstring for
+    why that's correct once the interior has actually been
+    reconstructed).
+
+    Real model inference needs an actual CUDA GPU, which this
+    development sandbox does not have (see RoadMap.md Phase 3) - the
+    fail-fast guard below and the mask-building helper are covered by
+    tests here; the model call itself must be verified through a real
+    run on the user's own machine, the same pattern used for every other
+    "needs real hardware/a live account" feature in this project.
+    """
+
+    def apply(self, image_path: str, replacements: list[TextReplacement], output_path: str) -> None:
+        if not gpu_inpainting_available():
+            raise InpaintingError(
+                "GPU-Inpainting ist auf diesem System nicht verfügbar (keine "
+                "ausreichend starke CUDA-GPU gefunden) - bitte ein anderes "
+                "Rückschreibe-Backend wählen (z. B. Cloud-Inpainting)."
+            )
+        try:
+            import torch
+            from simple_lama_inpainting import SimpleLama
+        except ImportError as exc:
+            raise InpaintingError(
+                f"GPU-Inpainting-Abhängigkeit fehlt: {exc}. Siehe requirements-gpu.txt."
+            ) from exc
+        from PIL import Image, ImageDraw
+
+        try:
+            image = Image.open(image_path).convert("RGB")
+        except Exception as exc:
+            raise InpaintingError(f"Bild konnte nicht geöffnet werden: {exc}") from exc
+
+        if replacements:
+            mask = _build_inpainting_mask(image.size, replacements)
+            model = _get_lama_model(torch, SimpleLama)
+            try:
+                image = model(image, mask).convert("RGB")
+            except Exception as exc:
+                raise InpaintingError(f"KI-Inpainting fehlgeschlagen: {exc}") from exc
+
+        draw = ImageDraw.Draw(image)
+        for replacement in replacements:
+            region = replacement.region
+            # The model's own reconstructed interior is now a valid
+            # background estimate (same reasoning as CvInpaintingBackend
+            # above) - sampled directly rather than BoxOverlayBackend's
+            # outside-ring approach.
+            background = _average_region_color(image, region.x, region.y, region.width, region.height)
+            font = _load_font(region.height)
+            text_color = _contrasting_text_color(background)
+            draw.text((region.x, region.y), replacement.translated_text, fill=text_color, font=font)
+
+        try:
+            image.save(output_path)
+        except Exception as exc:
+            raise InpaintingError(f"Bild konnte nicht gespeichert werden: {exc}") from exc

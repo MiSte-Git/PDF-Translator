@@ -21,6 +21,7 @@ from ui.analysis import PRICING
 from ui.document_job_common import (
     INPAINTING_BACKEND_FACTORIES,
     OCR_ENGINE_FACTORIES,
+    inpainting_backend_available,
     ocr_engine_available,
     safe_destination,
 )
@@ -251,7 +252,10 @@ class MainWindow(QMainWindow):
         self.inpainting_backend = QComboBox()
         for key in INPAINTING_BACKEND_FACTORIES:
             self.inpainting_backend.addItem("", key)
-        self.inpainting_backend.currentIndexChanged.connect(self._invalidate_analysis)
+        self.inpainting_backend.currentIndexChanged.connect(self._inpainting_backend_changed)
+        self.inpainting_backend_hint = QLabel()
+        self.inpainting_backend_hint.setWordWrap(True)
+        self.inpainting_backend_hint.setStyleSheet("font-weight: bold; padding-left: 2px;")
 
         self.form = QFormLayout()
         self.form_labels = [QLabel() for _ in range(12)]
@@ -269,6 +273,7 @@ class MainWindow(QMainWindow):
         self.form.addRow(self.form_labels[10], self.ocr_engine)
         self.form.addRow("", self.ocr_engine_hint)
         self.form.addRow(self.form_labels[11], self.inpainting_backend)
+        self.form.addRow("", self.inpainting_backend_hint)
 
         self.analyze = QPushButton()
         self.analyze.clicked.connect(self._analyze)
@@ -389,6 +394,7 @@ class MainWindow(QMainWindow):
             self._show_job_result(self._job_result)
         self._update_provider_credential_hint()
         self._update_ocr_engine_hint()
+        self._update_inpainting_backend_hint()
         self._update_start_state()
 
     def _update_provider_credential_hint(self) -> None:
@@ -443,6 +449,7 @@ class MainWindow(QMainWindow):
         self.form.setRowVisible(self.ocr_engine, is_images)
         self.form.setRowVisible(self.inpainting_backend, is_images)
         self._update_ocr_engine_hint()
+        self._update_inpainting_backend_hint()
         self._invalidate_analysis()
 
     def _ocr_engine_changed(self) -> None:
@@ -460,6 +467,25 @@ class MainWindow(QMainWindow):
         available = engine is None or ocr_engine_available(engine)
         self.ocr_engine_hint.setText("" if available else self.language.text("ocr_engine.unavailable"))
         self.ocr_engine_hint.setVisible(is_images and not available)
+
+    def _inpainting_backend_changed(self) -> None:
+        self._update_inpainting_backend_hint()
+        self._invalidate_analysis()
+
+    def _update_inpainting_backend_hint(self) -> None:
+        # Same pattern as _update_ocr_engine_hint() (checked proactively,
+        # never only failing deep inside a run) - relevant in practice
+        # only for "gpu_inpainting" today: Box-Overlay/CvInpaintingBackend
+        # are always available (see
+        # ui/document_job_common.py::inpainting_backend_available()'s
+        # docstring), so this hint stays empty/hidden for them.
+        is_images = self.mode.currentData() == TranslationMode.IMAGES
+        backend = self.inpainting_backend.currentData()
+        available = backend is None or inpainting_backend_available(backend)
+        self.inpainting_backend_hint.setText(
+            "" if available else self.language.text("inpainting_backend.unavailable")
+        )
+        self.inpainting_backend_hint.setVisible(is_images and not available)
 
     def _choose_sources(self) -> None:
         mode = self.mode.currentData()
@@ -600,6 +626,17 @@ class MainWindow(QMainWindow):
             # a full run.
             QMessageBox.warning(
                 self, self.language.text("dialog.check_input"), self.language.text("ocr_engine.unavailable"),
+            )
+            return
+        if is_images and not inpainting_backend_available(request.inpainting_backend):
+            # Same fail-fast principle, for the rewrite-backend choice (e.g.
+            # "gpu_inpainting" selected without a qualifying CUDA GPU - see
+            # ui/document_job_common.py::inpainting_backend_available()) -
+            # relevant in practice only for GPU-Inpainting today, since
+            # Box-Overlay/CvInpaintingBackend are always available.
+            QMessageBox.warning(
+                self, self.language.text("dialog.check_input"),
+                self.language.text("inpainting_backend.unavailable"),
             )
             return
 

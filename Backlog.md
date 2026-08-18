@@ -2178,3 +2178,110 @@
   ein-/ausgeblendet werden und `_request()` die Dropdown-Auswahl korrekt
   überträgt. Gesamter Testlauf am Ende: 212 passed, 1 skipped (vorher
   198 passed, 1 skipped).
+
+- **Bildübersetzung/OCR - GPU-Inpainting-Backend (LaMa) (18.08.2026):**
+  Dritter Umsetzungsblock von RoadMap.md Phase 3, direkt im Anschluss an
+  Fundament und Mehrdatei-Batch/UI-Anbindung (siehe die beiden Einträge
+  oben). Auf ausdrücklichen Nutzerwunsch ("Also beides CPU und
+  GPU-Inpainting umsetzen") als viertes Rückschreibe-Backend neben
+  Box-Overlay/CvInpaintingBackend hinzugefügt.
+
+  **Architektur:** `pipeline/images/inpainting.py::GpuInpaintingBackend`
+  nutzt das vortrainierte LaMa-Modell (Large-Mask-Inpainting,
+  https://github.com/advimman/lama) über die leichtgewichtige
+  `simple-lama-inpainting`-Wrapper-Bibliothek (`SimpleLama(image, mask)
+  -> Image`, API per WebFetch gegen das GitHub-Repo verifiziert statt
+  aus dem Gedächtnis angenommen - Konstruktor nimmt ein
+  `torch.device`-Argument, hier immer explizit `"cuda"`, nie die eigene
+  Default-Logik der Bibliothek). Neue optionale `requirements-gpu.txt`
+  (getrennt von `requirements-ocr.txt`, da PyTorch eine deutlich
+  größere, GPU-spezifische Installation ist, inkl. Hinweis auf die
+  CUDA-spezifische Installationsanleitung unter pytorch.org statt eines
+  einfachen "pip install torch").
+  - `gpu_inpainting_available(min_vram_gb=GPU_MIN_VRAM_GB)`: prüft VOR
+    jedem Lauf (mirrors `tesseract_available()`) PyTorch-Importierbarkeit,
+    `torch.cuda.is_available()` und
+    `torch.cuda.get_device_properties(0).total_memory` gegen einen
+    Mindest-VRAM-Schwellwert (4 GB, dokumentierter, nicht hart validierter
+    Wert). Jede Ausnahme bei der Geräte-Abfrage (Treiber-Mismatch, kein
+    Gerät Index 0, ...) wird als "nicht verfügbar" behandelt statt die
+    Prüfung selbst crashen zu lassen. Bewusst KEIN automatischer
+    CPU-Fallback: eine reine CPU-LaMa-Inferenz wäre so viel langsamer,
+    dass sie den Zweck eines GPU-Backends unterlaufen würde - eine nicht
+    ausreichende GPU wird stattdessen als nicht verfügbar gemeldet, damit
+    der Nutzer manuell auf Cloud-Inpainting wechseln kann.
+  - `_build_inpainting_mask()`: baut die für LaMa erwartete
+    Binärmaske (255 = zu entfernender/rekonstruierender Bereich) aus den
+    OCR-Bounding-Boxes, mit `padding`-Pixeln Rand (Standard 4) um jede
+    Region, geclampt an die Bildgrenzen - der Rand deckt anti-aliasierte
+    Buchstabenkanten ab, die die OCR-Box knapp verfehlt hat.
+  - `_get_lama_model()`/`_LAMA_MODEL_CACHE`: das geladene Modell wird
+    modul-weit gecached (nicht pro `GpuInpaintingBackend()`-Instanz, da
+    `build_inpainting_backend()` für jeden `run_image_job()`-Aufruf eine
+    neue Instanz baut) - ein Mehrdatei-Batch lädt/downloaded die
+    mehrere-hundert-MB-Gewichte dadurch nur einmal pro Prozess, nicht pro
+    Datei. `simple-lama-inpainting` selbst unterstützt eine
+    `LAMA_MODEL`-Umgebungsvariable für lokal vorab bereitgestellte
+    Gewichte - relevant für eine spätere Standalone-Version ohne
+    Internetzugriff zur Laufzeit (siehe requirements-gpu.txt).
+  - `apply()`: Fail-fast-Guard ganz am Anfang (wirft `InpaintingError`,
+    bevor überhaupt `torch`/`simple_lama_inpainting` importiert wird,
+    falls `gpu_inpainting_available()` False meldet) als zweite
+    Verteidigungslinie zusätzlich zum UI-seitigen Check. Text wird nach
+    dem Inpainting exakt wie bei `CvInpaintingBackend` zurückgeschrieben
+    (Kontrastfarbe aus dem bereits REKONSTRUIERTEN Bereich selbst
+    gesampelt, siehe `_average_region_color()`).
+  - `ui/document_job_common.py`: neue `inpainting_backend_available()`
+    (analog zu `ocr_engine_available()` - Box-Overlay/
+    CvInpaintingBackend immer verfügbar, `"gpu_inpainting"` delegiert an
+    `gpu_inpainting_available()`), `"gpu_inpainting"` in
+    `INPAINTING_BACKEND_FACTORIES` registriert.
+  - `ui/app.py`: drittes Element im Rückschreibe-Dropdown (automatisch
+    aus `INPAINTING_BACKEND_FACTORIES` befüllt, kein Code-Änderungsbedarf
+    dafür), neuer `inpainting_backend_hint`-Hinweistext
+    (`_update_inpainting_backend_hint()`, spiegelt
+    `_update_ocr_engine_hint()`s Muster 1:1), Fail-fast-Warnung in
+    `_start()` analog zur bestehenden OCR-Engine-Prüfung. Neue
+    i18n-Schlüssel `inpainting_backend.gpu_inpainting`/
+    `inpainting_backend.unavailable` (DE+EN, Parität durch bestehenden
+    Test abgesichert).
+
+  **Testabdeckung ohne echte GPU/PyTorch-Installation:** Diese
+  Cloud-Sandbox hat keine CUDA-GPU (siehe RoadMap.md Phase 3) - PyTorch
+  wurde deshalb bewusst NICHT installiert (spart eine ~500+ MB Installation,
+  die ohnehin nur den bereits feststehenden "nicht verfügbar"-Pfad testen
+  würde). Stattdessen wird für die Verfügbarkeitsprüfung ein minimales
+  Fake-`torch`-Modul über `monkeypatch.setitem(sys.modules, "torch",
+  ...)` injiziert (Standardtechnik für Import-Mocking ohne die reale
+  Abhängigkeit) - deckt alle fünf Verzweigungen von
+  `gpu_inpainting_available()` ab (PyTorch fehlt komplett - über
+  `sys.modules["torch"] = None`, was `import torch` wie bei einem
+  fehlenden Paket ImportError werfen lässt -, CUDA nicht verfügbar, zu
+  wenig VRAM, Geräte-Abfrage wirft eine Exception, ausreichend VRAM).
+  `_build_inpainting_mask()` ist reine PIL-Logik und komplett ohne
+  PyTorch getestet (Padding, Clamping an Bildgrenzen, leere
+  Ersetzungsliste). `GpuInpaintingBackend.apply()`s Fail-fast-Guard ist
+  ebenfalls ohne PyTorch testbar (er wirft, bevor er `torch` überhaupt zu
+  importieren versucht). Ein echter Ende-zu-Ende-Testfall
+  (`test_apply_end_to_end_on_a_real_gpu`) existiert im Code, wird aber
+  automatisch übersprungen (`@pytest.mark.skipif(not
+  gpu_inpainting_available(), ...)`) und dient als die eigentliche
+  Regressionsabsicherung für einen künftigen Lauf auf der GPU-Maschine
+  des Nutzers - Muster identisch zu jeder anderen "braucht echte
+  Hardware/einen Live-Account"-Funktion in diesem Projekt.
+
+  15 neue Tests über zwei Dateien (`tests/test_image_gpu_inpainting.py`:
+  10, davon 9 laufend + 1 automatisch übersprungen; `tests/
+  test_document_job_common.py`: 5 zusätzliche für
+  `inpainting_backend_available()`/die erweiterte
+  `build_inpainting_backend()`-Parametrisierung) plus 3 neue UI-Tests in
+  `tests/test_ui_images_mode.py` (Dropdown bietet GPU-Inpainting an,
+  Hinweistext nur bei nicht verfügbarem Backend sichtbar, Fail-fast-
+  Warnung blockiert den Start). Kern-Mechanik (VRAM-Schwellwertvergleich
+  in `gpu_inpainting_available()`) per Revert-Probe verifiziert: gezielt
+  auf `return True` (Schwellwert-Vergleich komplett ignoriert)
+  zurückgebaut, erwarteter Testfehler bestätigt (die
+  Zu-wenig-VRAM-Testfall schlägt fehl), aus Backup wiederhergestellt,
+  `diff` bestätigt byte-genaue Wiederherstellung, danach Gesamtsuite
+  erneut grün. Gesamter Testlauf am Ende: 229 passed, 2 skipped (vorher
+  212 passed, 1 skipped).

@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import pytest
 
-from pipeline.images.inpainting import BoxOverlayBackend, CvInpaintingBackend
+from pipeline.images.inpainting import BoxOverlayBackend, CvInpaintingBackend, GpuInpaintingBackend
 from pipeline.images.ocr import TesseractOcrEngine
 from ui.document_job_common import (
     build_inpainting_backend,
     build_ocr_engine,
+    inpainting_backend_available,
     ocr_engine_available,
 )
 
@@ -28,7 +29,11 @@ def test_build_ocr_engine_raises_for_unknown_name() -> None:
 
 @pytest.mark.parametrize(
     ("name", "expected_cls"),
-    [("box_overlay", BoxOverlayBackend), ("cv_inpainting", CvInpaintingBackend)],
+    [
+        ("box_overlay", BoxOverlayBackend),
+        ("cv_inpainting", CvInpaintingBackend),
+        ("gpu_inpainting", GpuInpaintingBackend),
+    ],
 )
 def test_build_inpainting_backend_returns_matching_instance(name: str, expected_cls: type) -> None:
     backend = build_inpainting_backend(name)
@@ -50,3 +55,24 @@ def test_ocr_engine_available_reflects_tesseract_binary(monkeypatch: pytest.Monk
 
 def test_ocr_engine_available_false_for_unknown_engine() -> None:
     assert ocr_engine_available("does-not-exist") is False
+
+
+@pytest.mark.parametrize("name", ["box_overlay", "cv_inpainting"])
+def test_inpainting_backend_available_always_true_for_cpu_backends(name: str) -> None:
+    # Box-Overlay/CvInpaintingBackend need no GPU/extra hardware - only
+    # Pillow, resp. Pillow+OpenCV, both hard dependencies of running
+    # IMAGES mode at all (see requirements-ocr.txt) - so they're always
+    # reported available, unlike "gpu_inpainting" below.
+    assert inpainting_backend_available(name) is True
+
+
+def test_inpainting_backend_available_reflects_gpu_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("pipeline.images.inpainting.gpu_inpainting_available", lambda: True)
+    assert inpainting_backend_available("gpu_inpainting") is True
+
+    monkeypatch.setattr("pipeline.images.inpainting.gpu_inpainting_available", lambda: False)
+    assert inpainting_backend_available("gpu_inpainting") is False
+
+
+def test_inpainting_backend_available_false_for_unknown_backend() -> None:
+    assert inpainting_backend_available("does-not-exist") is False

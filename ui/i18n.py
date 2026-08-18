@@ -78,6 +78,12 @@ DE = {
     "field.inpainting_backend": "Rückschreibe-Methode",
     "inpainting_backend.box_overlay": "Box-Overlay (Fläche überdecken)",
     "inpainting_backend.cv_inpainting": "Klassisches CPU-Inpainting (Hintergrund rekonstruieren)",
+    "inpainting_backend.gpu_inpainting": "KI-Inpainting lokal (GPU, LaMa)",
+    "inpainting_backend.unavailable": (
+        "Für diese Methode wurde keine ausreichend starke CUDA-GPU gefunden "
+        "(siehe requirements-gpu.txt) - bitte eine andere Rückschreibe-"
+        "Methode wählen."
+    ),
     "source_language.placeholder": "optional / automatisch",
     "protected.placeholder": "Ein geschützter Begriff pro Zeile",
     "analysis.group": "Analyse und Kostenkontrolle",
@@ -222,6 +228,11 @@ EN = {
     "field.inpainting_backend": "Rewrite method",
     "inpainting_backend.box_overlay": "Box overlay (cover the area)",
     "inpainting_backend.cv_inpainting": "Classic CPU inpainting (reconstruct background)",
+    "inpainting_backend.gpu_inpainting": "AI inpainting, local (GPU, LaMa)",
+    "inpainting_backend.unavailable": (
+        "No sufficiently strong CUDA GPU was found for this method (see "
+        "requirements-gpu.txt) - please choose a different rewrite method."
+    ),
     "source_language.placeholder": "optional / automatic",
     "protected.placeholder": "One protected term per line",
     "analysis.group": "Analysis and cost control",
