@@ -16,11 +16,14 @@ somewhere (via growth/shrink/force-fit, see pipeline/pdf/pymupdf_engine.py),
 but "fit" isn't the same as "fits cleanly at the original size", which is
 exactly what overflow_blocks flags for a QA follow-up look.
 
-No "ICO document" first-page-skip option yet (unlike ui/word_job.py's
-ico_mode) - the underlying detection already exists in
-pipeline/pdf/pymupdf_engine.py (FIRST_PAGE_ANCHOR_TERMS/
-_split_first_page_metadata(), DocumentTemplate.first_page_zones) but isn't
-wired to a UI toggle yet; see RoadMap.md Phase 2/PDF.
+"ICO document" first-page-skip option (mirroring ui/word_job.py's
+ico_mode) - the underlying detection has existed in
+pipeline/pdf/pymupdf_engine.py since before this wiring
+(FIRST_PAGE_ANCHOR_TERMS/_split_first_page_metadata()) and is now gated
+behind PyMuPdfEngine.open()'s own ico_mode parameter exactly like
+DocxEngine.open()'s; see RoadMap.md Phase 2/PDF and
+PyMuPdfEngine.open()'s docstring for why the split used to run
+unconditionally and no longer does.
 """
 from __future__ import annotations
 
@@ -66,6 +69,7 @@ def run_pdf_job(
     total_callback: Callable[[int], None] | None = None,
     exclude_header: bool = False,
     exclude_footer: bool = False,
+    ico_mode: bool = False,
 ) -> PdfJobResult:
     """Run one full PDF translation job and return its result.
 
@@ -94,9 +98,13 @@ def run_pdf_job(
     does) - the real PyMuPdfEngine is then constructed WITH the resulting
     template, since PyMuPdfEngine takes its template at construction time
     and extract_blocks() caches per page once called, so swapping the
-    template on an already-used engine instance would be unsafe. See this
-    module's docstring for why there's still no ico_mode-equivalent
-    first-page option.
+    template on an already-used engine instance would be unsafe.
+
+    ``ico_mode`` is passed straight through to PyMuPdfEngine.open() (see
+    its docstring): only when True is the page-1 FIRST_PAGE_ANCHOR_TERMS
+    metadata split even attempted - the same "ICO-Dokument" checkbox in
+    ui/app.py already used for Word, reused here rather than inventing a
+    PDF-specific field on TranslationRequest.
     """
     source = Path(source)
     destination = Path(destination)
@@ -121,7 +129,7 @@ def run_pdf_job(
         )
 
     engine = PyMuPdfEngine(template=template)
-    engine.open(str(source))
+    engine.open(str(source), ico_mode=ico_mode)
 
     if total_callback is not None:
         total_callback(total_block_count(engine))
@@ -149,6 +157,7 @@ def run_pdf_job(
             source, destination, provider_name, target_lang, source_lang, stats,
             exclude_header=exclude_header, exclude_footer=exclude_footer,
             detected_header=detected_header, detected_footer=detected_footer,
+            ico_mode=ico_mode, first_page_metadata_found=engine.first_page_metadata_found,
         ),
         encoding="utf-8",
     )
@@ -166,6 +175,8 @@ def _build_qa_report(
     exclude_footer: bool = False,
     detected_header: tuple[float, float, float, float] | None = None,
     detected_footer: tuple[float, float, float, float] | None = None,
+    ico_mode: bool = False,
+    first_page_metadata_found: bool = False,
 ) -> str:
     lines: list[str] = [
         "PDF-Übersetzung - QA-Bericht",
@@ -174,6 +185,27 @@ def _build_qa_report(
         f"Ziel: {destination}",
         f"Anbieter: {provider_name}",
         f"Sprache: {source_lang or 'automatisch erkannt'} -> {target_lang}",
+        "",
+    ]
+    # Mirrors ui/word_job.py::_build_qa_report()'s ico_mode section
+    # (same three cases: off, on-and-found, on-and-nothing-found) - see
+    # PyMuPdfEngine.open()'s docstring for what "found" means here.
+    if ico_mode and first_page_metadata_found:
+        lines.append(
+            "ICO-Modus: aktiv. Der erkannte Seite-1-Metadatenbereich wurde NICHT "
+            "übersetzt (in \"Blöcke übersprungen\" unten enthalten)."
+        )
+    elif ico_mode and not first_page_metadata_found:
+        lines.append(
+            "ICO-Modus: aktiv, aber auf Seite 1 wurde KEIN passender Metadatenbereich "
+            "(z. B. \"Issuer Address\"/\"Asset Matrix\") gefunden - das gesamte Dokument "
+            "wurde regulär übersetzt, kein Bereich wurde ausgeschlossen. Bitte prüfen, "
+            "ob dieses Dokument wirklich vom internen Typ ICO ist bzw. die erwartete "
+            "Struktur hat."
+        )
+    else:
+        lines.append("ICO-Modus: nicht aktiv - das gesamte Dokument wurde regulär übersetzt.")
+    lines += [
         "",
         "Ergebnis",
         f"  Blöcke übersetzt: {stats.translated}",

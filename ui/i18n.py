@@ -47,10 +47,12 @@ DE = {
     "field.ico_mode": "ICO-Dokument",
     "ico_mode.checkbox": "Seite-1-Bereich nicht übersetzen",
     "ico_mode.tooltip": (
-        "Nur für den internen Dokumententyp ICO: erzwingt, dass der Metadaten-"
-        "bereich vor der Trennlinie auf Seite 1 NICHT übersetzt wird - "
-        "unabhängig davon, ob die Trennlinie gefunden wird. Für alle anderen "
-        "Dokumente deaktiviert lassen."
+        "Nur für den internen Dokumententyp ICO: schließt den Metadaten-"
+        "bereich auf Seite 1 von der Übersetzung aus (bei Word: der Bereich "
+        "vor der Trennlinie; bei PDF: erkannt anhand von Ankerbegriffen wie "
+        "\"Issuer Address\"/\"Asset Matrix\") - unabhängig davon, ob dieser "
+        "Bereich tatsächlich gefunden wird. Für alle anderen Dokumente "
+        "deaktiviert lassen."
     ),
     "field.exclude_header": "Kopfzeile",
     "exclude_header.checkbox": "Wiederkehrende Kopfzeile nicht übersetzen",
@@ -177,10 +179,11 @@ EN = {
     "field.ico_mode": "ICO document",
     "ico_mode.checkbox": "Skip page-1 region",
     "ico_mode.tooltip": (
-        "Internal ICO document type only: forces the page-1 metadata block "
-        "in front of the separator line to be excluded from translation - "
-        "regardless of whether the separator is found. Leave disabled for "
-        "every other document."
+        "Internal ICO document type only: excludes the page-1 metadata "
+        "block from translation (Word: the block in front of the "
+        "separator line; PDF: detected via anchor terms like "
+        "\"Issuer Address\"/\"Asset Matrix\") - regardless of whether that "
+        "block is actually found. Leave disabled for every other document."
     ),
     "field.exclude_header": "Header",
     "exclude_header.checkbox": "Don't translate recurring header",

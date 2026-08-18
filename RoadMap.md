@@ -1,6 +1,6 @@
 # Projekt-Roadmap
 
-Stand: 18. August 2026
+Stand: 18. August 2026 (PDF-ICO-Dokument, Word-vs-PDF-Priorität)
 
 Diese Roadmap bündelt die offenen Arbeiten für PDF-, Word-, Präsentations- und
 Bildübersetzung sowie UI, Provider, Kostenkontrolle, Qualitätssicherung und
@@ -119,8 +119,14 @@ Nutzers abgeschlossen (17.08.2026).
 
 ### PDF
 
-- [ ] Entscheiden und dokumentieren, wann der direkte PDF-Pfad produktiv
-      eingesetzt wird und wann ein vorhandenes Word-Original Vorrang hat.
+- [x] Entscheiden und dokumentieren, wann der direkte PDF-Pfad produktiv
+      eingesetzt wird und wann ein vorhandenes Word-Original Vorrang hat
+      (18.08.2026, Nutzerentscheidung): Liegt ein Word-Original vor, wird
+      IMMER der Word-Pfad genommen; der direkte PDF-Pfad ist ausschließlich
+      für den Fall vorgesehen, dass NUR ein PDF (kein Word-Original)
+      existiert. Reine Dokumentationsentscheidung, keine Codeänderung -
+      beide Pfade bleiben technisch unverändert nebeneinander bestehen und
+      im UI weiterhin unabhängig wählbar.
 - [x] Direkte PDF-Pipeline an den gemeinsamen UI-Auftragsablauf anbinden
       (17.08.2026) - siehe Backlog.md für Details. `ui/pdf_job.py` (neu,
       auf `pipeline/pdf/translate_pdf.py`, ebenfalls neu, aufgebaut) und
@@ -131,13 +137,55 @@ Nutzers abgeschlossen (17.08.2026).
       Noch ohne echten Live-Lauf gegen ein reales PDF über das UI (nur mit
       Fake-Provider automatisiert getestet) - analog zu den entsprechenden
       offenen Punkten bei PPTX/Word.
-- [ ] Nach Anbindung: dasselbe explizite "ICO-Dokument"-Konzept wie jetzt bei
-      Word (siehe Word/Writer-Abschnitt oben) für PDF ergänzen - Grundlage
-      dafür existiert bereits in der Pipeline (`FIRST_PAGE_ANCHOR_TERMS`/
-      `_split_first_page_metadata()` in `pipeline/pdf/pymupdf_engine.py`,
-      alternativ `DocumentTemplate.first_page_zones`/`templates/
-      virelicon.json`), ist aber noch nicht ans UI angebunden und läuft
-      bisher automatisch statt usergesteuert.
+- [x] Dasselbe explizite "ICO-Dokument"-Konzept wie bei Word (siehe
+      Word/Writer-Abschnitt oben) auch für PDF ergänzt (18.08.2026), auf
+      ausdrücklichen Nutzerwunsch ("ICO-Dokument auf alle Fälle
+      nachrüsten"). Genau spiegelt Wort für Wort das bestehende
+      Word-Muster (`DocxEngine.open(ico_mode=...)` /
+      `self.separator_found`):
+      - `pipeline/pdf/pymupdf_engine.py`: `PyMuPdfEngine.open(path,
+        ico_mode=False)` - neuer Parameter, setzt `self._ico_mode` und
+        setzt `self.first_page_metadata_found = False` zurück. Vorher lief
+        `_split_first_page_metadata()` (Trennung auf
+        `FIRST_PAGE_ANCHOR_TERMS = ["Issuer Address", "Asset Matrix"]`)
+        für JEDE Seite 0 JEDES PDFs unbedingt mit - exakt derselbe
+        Fehlerklasse, die `DocxEngine`s `ico_mode` schon für Word
+        verhindert: ein PDF, das zufällig eine dieser Zeilen enthält, ohne
+        ein tatsächliches ICO-Dokument zu sein, hätte ohne Vorwarnung
+        einen Teil von Seite 1 unübersetzt gelassen. `extract_blocks()`
+        wendet die Trennung jetzt nur noch an, wenn `page_index == 0 and
+        self._ico_mode` gilt, und setzt `self.first_page_metadata_found`
+        (Pendant zu `DocxEngine.separator_found`) danach frisch.
+      - `ui/pdf_job.py`: `run_pdf_job(..., ico_mode=False)` reicht den
+        Schalter an `engine.open()` durch; der QA-Bericht bekommt
+        dieselbe dreistufige Meldung wie bei Word (aktiv & gefunden →
+        Metadatenbereich ausgeschlossen; aktiv & nichts gefunden → Warnung,
+        ob es wirklich ein ICO-Dokument ist; nicht aktiv → normale
+        Volltextübersetzung).
+      - `ui/workers.py` (`PdfTranslationWorker`), `ui/analysis.py`
+        (Kostenanalyse nutzt denselben `ico_mode`, damit Schätzung und
+        realer Lauf übereinstimmen) und `ui/i18n.py` (Tooltip-Text
+        formatneutral für Word UND PDF umformuliert) entsprechend
+        angepasst.
+      - `ui/app.py`: statt eines zweiten, PDF-eigenen Schalters wird
+        dieselbe `TranslationRequest.ico_mode`-Checkbox wiederverwendet
+        (`TranslationRequest.ico_mode` war schon vorher ein generisches
+        Feld, nur die UI-Sichtbarkeit war Word-only). `_mode_changed()`
+        zeigt die Checkbox jetzt für Word ODER PDF und setzt sie nur beim
+        Wechsel zu einem Modus zurück, der keines von beiden ist
+        (Präsentation/Bilder); der Zustand bleibt beim Wechsel
+        Word↔PDF bewusst erhalten, da beide Formate das Konzept
+        unterstützen.
+      - Neue Tests: `tests/test_pdf_ico_mode.py` (8 Tests, Engine- und
+        Job-Ebene, inkl. Grenzfall "nur Seite 0 zählt" und
+        "erneutes open() setzt zurück"); `tests/test_ui_word_mode.py`
+        erweitert (Checkbox-Sichtbarkeit über beide Modi,
+        Worker-Dispatch des Flags für PDF). Jeder Fix einzeln per
+        Revert-Probe verifiziert (Engine-Gating, QA-Bericht-Meldung,
+        UI-Sichtbarkeitslogik - jeweils gezielt zurückgebaut, Testfehler
+        bestätigt, wiederhergestellt, `diff` bestätigt exakte
+        Wiederherstellung, Gesamtsuite erneut grün). Gesamter Testlauf am
+        Ende: 160 passed, 1 skipped.
 - [x] Duplikat-Text-Bug im Redact/Insert-Pfad reproduziert und Fix verifiziert
       (17.08.2026) - siehe Backlog.md für Details. Wichtiger Vorbehalt: der
       zugrundeliegende Mechanismus (unkontrolliertes Höhenwachstum eines
@@ -191,17 +239,16 @@ Nutzers abgeschlossen (17.08.2026).
       bewusst nicht angegangene Architekturentscheidung.
 - [x] Hintergrundbilder und überlagerte Textblöcke gegen unbeabsichtigte
       Redaction abgesichert (17.08.2026) - siehe Backlog.md für Details.
-- [ ] Den PDF-UI-Pfad an einem echten Dokument über einen echten Provider
-      live durchlaufen lassen (analog zu den jetzt erledigten PPTX-/
-      geplanten Word-Live-Läufen oben) - bisher nur mit Fake-Provider gegen
-      die neue Test-Fixture (`tests/fixtures/representative.pdf`)
-      automatisiert verifiziert. Strukturteil an der echten, vertraulichen
-      "1526 VIRELICON.pdf" jetzt zusätzlich erledigt (17.08.2026, siehe
-      Backlog.md): voller `translate_pdf()`-Lauf über alle 14 Seiten mit
-      Platzhalter- statt echtem Provider (keine API-Zugangsdaten in dieser
-      Cloud-Sitzung hinterlegt), 0 Fehler, alle 11 echten Links erhalten,
-      Formatierung/Highlights visuell unauffällig. Offen bleibt weiterhin
-      der eigentliche Übersetzungsschritt mit einem echten Provider.
+- [x] Den PDF-UI-Pfad an einem echten Dokument über einen echten Provider
+      live durchlaufen lassen (18.08.2026, als abgeschlossen markiert auf
+      Nutzeranweisung) - dieser Punkt war ein stehengebliebenes Duplikat:
+      der eigentliche echte Live-Lauf gegen "1526 VIRELICON.pdf" über
+      Google als Provider ist bereits im direkt folgenden Eintrag unten
+      ("Echter Live-Lauf des PDF-UI-Pfads...", 17.08.2026) vollständig
+      dokumentiert, inklusive der drei dabei gefundenen und behobenen
+      Bugs. Strukturteil (0 Fehler, alle Links erhalten, Formatierung
+      unauffällig) war zu diesem Zeitpunkt bereits erledigt, siehe
+      Backlog.md.
 - [x] Echter Live-Lauf des PDF-UI-Pfads gegen "1526 VIRELICON.pdf" über
       einen echten Provider (Google) durchgeführt (17.08.2026) - der oben
       als offen markierte Punkt ist damit nachgeholt. Drei reale Bugs

@@ -121,11 +121,16 @@ def test_pdf_mode_is_no_longer_blocked_as_unexecutable(qapp: QApplication) -> No
         window.close()
 
 
-def test_ico_mode_checkbox_only_visible_and_active_for_word_mode(qapp: QApplication) -> None:
-    """Regression guard for the "ICO document" special case (RoadMap.md):
-    the checkbox must be Word-only (no PDF/PPTX equivalent exists yet) and
-    must never carry a stale checked state into a mode that ignores it -
-    see MainWindow._mode_changed().
+def test_ico_mode_checkbox_visible_for_word_and_pdf_modes(qapp: QApplication) -> None:
+    """Regression guard for the "ICO document" special case (RoadMap.md
+    Phase 2/PDF): the checkbox must be visible for BOTH Word and PDF mode
+    (PyMuPdfEngine.open()'s ico_mode was added after DocxEngine's, reusing
+    the same TranslationRequest.ico_mode field/checkbox rather than a
+    PDF-specific one - see PyMuPdfEngine.open()'s docstring), stay CHECKED
+    across a Word<->PDF switch (both modes support it, so a stale reset
+    there would be a regression, not a safety measure), and still reset
+    to unchecked/hidden for a mode that doesn't support it at all
+    (PRESENTATION/IMAGES) - see MainWindow._mode_changed().
     """
     window = MainWindow()
     window.show()
@@ -133,6 +138,10 @@ def test_ico_mode_checkbox_only_visible_and_active_for_word_mode(qapp: QApplicat
         window.mode.setCurrentIndex(list(TranslationMode).index(TranslationMode.WORD))
         assert window.form.isRowVisible(window.ico_mode)
         window.ico_mode.setChecked(True)
+
+        window.mode.setCurrentIndex(list(TranslationMode).index(TranslationMode.PDF))
+        assert window.form.isRowVisible(window.ico_mode)
+        assert window.ico_mode.isChecked()  # NOT reset - PDF supports it too
 
         window.mode.setCurrentIndex(list(TranslationMode).index(TranslationMode.PRESENTATION))
         assert not window.form.isRowVisible(window.ico_mode)
@@ -179,6 +188,35 @@ def test_word_worker_receives_ico_mode_from_request(
         window.close()
 
 
+def test_pdf_worker_receives_ico_mode_from_request(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+    no_run_thread_pool: list[object],
+    tmp_path: Path,
+) -> None:
+    """PDF counterpart of test_word_worker_receives_ico_mode_from_request()
+    above - see PyMuPdfEngine.open()'s docstring/RoadMap.md Phase 2/PDF for
+    why PdfTranslationWorker now takes ico_mode too, not just
+    exclude_header/exclude_footer.
+    """
+    monkeypatch.setattr(app_module, "credential_status", lambda provider: "credential.keyring")
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+
+    window = MainWindow()
+    window.show()
+    try:
+        _prepare_confirmed_run(window, TranslationMode.PDF, PDF_FIXTURE, tmp_path)
+        window.ico_mode.setChecked(True)
+
+        window._start()
+
+        assert len(no_run_thread_pool) == 1
+        assert no_run_thread_pool[0].ico_mode is True
+    finally:
+        window.close()
+
+
 def test_exclude_header_footer_checkboxes_only_visible_and_active_for_pdf_mode(
     qapp: QApplication,
 ) -> None:
@@ -186,9 +224,10 @@ def test_exclude_header_footer_checkboxes_only_visible_and_active_for_pdf_mode(
     (RoadMap.md Phase 2/PDF, added after a live user run against a real
     document had its header translated along with the body - see
     pipeline/pdf/template.py's detect_header_footer_zones()): both must be
-    PDF-only (mirroring ico_mode's Word-only pattern above) and must never
-    carry a stale checked state into a mode that ignores them - see
-    MainWindow._mode_changed().
+    PDF-only (unlike ico_mode, which is now shared between Word and PDF -
+    see test_ico_mode_checkbox_visible_for_word_and_pdf_modes() above) and
+    must never carry a stale checked state into a mode that ignores them -
+    see MainWindow._mode_changed().
     """
     window = MainWindow()
     window.show()

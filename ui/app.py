@@ -196,10 +196,12 @@ class MainWindow(QMainWindow):
         self.protected = QTextEdit()
         self.protected.setMaximumHeight(90)
         # Explicit, user-controlled special case for the internal "ICO"
-        # document type (see RoadMap.md): only enabled/visible for Word mode
-        # today, wired through TranslationRequest.ico_mode -> ui/word_job.py
-        # -> DocxEngine.open(). Never checked/inferred automatically -
-        # see _mode_changed() and DocxEngine.open()'s docstring for why.
+        # document type (see RoadMap.md): visible for Word AND PDF mode
+        # (see _mode_changed()), wired through TranslationRequest.ico_mode
+        # -> ui/word_job.py -> DocxEngine.open() resp. ui/pdf_job.py ->
+        # PyMuPdfEngine.open(). Never checked/inferred automatically - see
+        # _mode_changed() and DocxEngine.open()'s/PyMuPdfEngine.open()'s
+        # docstrings for why.
         self.ico_mode = QCheckBox()
         # PDF-only pair (see _mode_changed()): a real user's live run
         # against a real document had its repeating header translated
@@ -368,19 +370,19 @@ class MainWindow(QMainWindow):
         self.image_mode.setEnabled(not is_images)
         if is_images:
             self.image_mode.setCurrentIndex(2)
-        # ico_mode is a Word-only special case today (see RoadMap.md) - hide
-        # the whole row rather than just disabling it, and force it back off
-        # when leaving Word mode so a stale checked state can't silently
-        # carry over into a request for a mode that doesn't support it.
+        # ico_mode applies to Word AND PDF mode (see RoadMap.md) - hide the
+        # whole row rather than just disabling it, and force it back off
+        # when leaving BOTH modes so a stale checked state can't silently
+        # carry over into a request for a mode (PPTX/images) that doesn't
+        # support it.
         is_word = self.mode.currentData() == TranslationMode.WORD
-        self.form.setRowVisible(self.ico_mode, is_word)
-        if not is_word:
-            self.ico_mode.setChecked(False)
-        # exclude_header/exclude_footer are the PDF-mode equivalent special
-        # case (see their construction above) - same hide-the-row-and-
-        # reset-on-mode-change treatment as ico_mode, just for PDF instead
-        # of Word.
         is_pdf = self.mode.currentData() == TranslationMode.PDF
+        self.form.setRowVisible(self.ico_mode, is_word or is_pdf)
+        if not (is_word or is_pdf):
+            self.ico_mode.setChecked(False)
+        # exclude_header/exclude_footer are PDF's own additional special
+        # case (see their construction above) - same hide-the-row-and-
+        # reset-on-mode-change treatment as ico_mode, just PDF-only.
         self.form.setRowVisible(self.exclude_header, is_pdf)
         self.form.setRowVisible(self.exclude_footer, is_pdf)
         if not is_pdf:
@@ -572,15 +574,18 @@ class MainWindow(QMainWindow):
             TranslationMode.WORD: WordTranslationWorker,
             TranslationMode.PDF: PdfTranslationWorker,
         }[request.mode]
-        # ico_mode only exists on WordTranslationWorker, exclude_header/
-        # exclude_footer only on PdfTranslationWorker (see their
-        # docstrings) - each is passed as an extra kwarg only for its own
-        # mode rather than added to every constructor just to keep the
-        # call below uniform.
+        # ico_mode exists on both WordTranslationWorker and
+        # PdfTranslationWorker (see their docstrings); exclude_header/
+        # exclude_footer only on PdfTranslationWorker. Each is passed as an
+        # extra kwarg only for the mode(s) that support it rather than
+        # added to every constructor just to keep the call below uniform.
         if request.mode == TranslationMode.WORD:
             extra_kwargs = {"ico_mode": request.ico_mode}
         elif request.mode == TranslationMode.PDF:
-            extra_kwargs = {"exclude_header": request.exclude_header, "exclude_footer": request.exclude_footer}
+            extra_kwargs = {
+                "exclude_header": request.exclude_header, "exclude_footer": request.exclude_footer,
+                "ico_mode": request.ico_mode,
+            }
         else:
             extra_kwargs = {}
         worker = worker_cls(

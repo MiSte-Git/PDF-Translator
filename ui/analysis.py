@@ -112,7 +112,11 @@ def analyze_request(
         from pipeline.pdf.pymupdf_engine import PyMuPdfEngine, spans_to_html
 
         engine = PyMuPdfEngine()
-        engine.open(str(request.source_paths[0]))
+        # ico_mode must match what the actual run will use (see
+        # PyMuPdfEngine.open()'s docstring / ui/pdf_job.py - mirrors the
+        # WORD branch below) - otherwise this cost estimate would count
+        # a page-1 metadata block the run then excludes (or vice versa).
+        engine.open(str(request.source_paths[0]), ico_mode=request.ico_mode)
         pages = engine.get_pages()
         units, label = len(pages), "unit.pages"
         for page in pages:

@@ -1881,3 +1881,103 @@
   bleibt (er prüft nur die Bindung, nicht das Verhalten - erwartungs-
   gemäß unberührt von dieser Änderung). Gesamter Testlauf am Ende: 151
   passed, 1 skipped (vorher 147 passed, 1 skipped - 4 neue Tests).
+
+- **"ICO-Dokument"-Konzept für PDF nachgerüstet (18.08.2026):** Auf
+  ausdrücklichen Nutzerwunsch ("ICO-Dokument auf alle Fälle nachrüsten")
+  das für Word bereits bestehende `ico_mode`-Konzept (siehe oben,
+  Eintrag zu `DocxEngine.open(ico_mode=...)`) 1:1 auf PDF übertragen.
+
+  **Auslöser/Motivation:** `_split_first_page_metadata()` in
+  `pipeline/pdf/pymupdf_engine.py` (Trennung von Seite-0-Zeilengruppen an
+  `FIRST_PAGE_ANCHOR_TERMS = ["Issuer Address", "Asset Matrix"]`) lief
+  bis dahin für JEDES PDF unbedingt mit - dieselbe Fehlerklasse, die
+  `DocxEngine`s `ico_mode` für Word schon verhindert: ein PDF, das
+  zufällig eine dieser Zeilen aus anderem Grund enthält, ohne
+  tatsächlich ein "ICO-Dokument" zu sein, hätte ohne Vorwarnung einen
+  Teil von Seite 1 unübersetzt gelassen.
+
+  **Architektur (Datei für Datei):**
+  - `pipeline/pdf/pymupdf_engine.py`: `__init__` bekommt `self._ico_mode
+    = False` und `self.first_page_metadata_found = False` (Pendant zu
+    `DocxEngine.separator_found`, exakt so benannt/dokumentiert).
+    `open(path, ico_mode=False)` nimmt den neuen Parameter, setzt
+    `self._ico_mode` und setzt `first_page_metadata_found` bei jedem
+    `open()` frisch zurück. `extract_blocks()`s Gating-Bedingung für die
+    Seite-0-Sondertrennung wurde von `if page_index == 0` auf `if
+    page_index == 0 and self._ico_mode` verschärft; ein neues
+    `found_metadata_split`-Flag wird während der Blockschleife gesetzt
+    und am Ende (nur für `page_index == 0`) nach
+    `self.first_page_metadata_found` übernommen. `extract_blocks()`
+    cached zwar `self._page_blocks_cache`, liest ihn aber nie zum
+    Überspringen der Neuberechnung - jeder Aufruf (auch mehrfach pro
+    Seite, z. B. einmal über `total_block_count()`, einmal über
+    `translate_pdf()`s Blocksammlung) berechnet `first_page_metadata_found`
+    daher zuverlässig neu.
+  - `ui/pdf_job.py`: `run_pdf_job(..., ico_mode=False)` reicht den
+    Schalter an `engine.open()` durch. `_build_qa_report()` bekommt
+    `ico_mode`/`first_page_metadata_found` als Parameter und exakt
+    dieselbe dreistufige Meldung wie beim Word-Pendant: aktiv & etwas
+    gefunden → Metadatenbereich wurde ausgeschlossen; aktiv & nichts
+    gefunden → Warnhinweis, ob das Dokument wirklich vom erwarteten
+    ICO-Typ ist; nicht aktiv → normaler Hinweis auf vollständige
+    Übersetzung.
+  - `ui/workers.py` (`PdfTranslationWorker`) und `ui/analysis.py` (PDF-
+    Zweig ruft `engine.open(..., ico_mode=request.ico_mode)`, damit
+    Kostenschätzung und tatsächlicher Lauf denselben Zustand sehen -
+    Kommentar spiegelt den bereits vorhandenen Word-Kommentar an
+    derselben Stelle) entsprechend angepasst.
+  - `ui/i18n.py`: `ico_mode.tooltip` (DE/EN) von einer rein
+    Word-spezifischen Beschreibung (Trennform-Erkennung) auf eine
+    formatneutrale Formulierung umgeschrieben, die beide Mechanismen
+    (Word-Trennform, PDF-Ankerbegriffe) abdeckt.
+  - `ui/app.py`: bewusst KEINE zweite, PDF-eigene Checkbox - stattdessen
+    dieselbe `TranslationRequest.ico_mode`/`self.ico_mode`-Checkbox
+    wiederverwendet, da `TranslationRequest.ico_mode` schon vorher ein
+    generisches (nicht Word-spezifisches) Dataclass-Feld war und nur die
+    UI-Sichtbarkeit Word-only gegated hatte. `_mode_changed()` berechnet
+    jetzt sowohl `is_word` als auch `is_pdf` und zeigt die Checkbox bei
+    `is_word or is_pdf`; zurückgesetzt (unchecked) wird sie nur beim
+    Wechsel in einen Modus, der KEINES von beiden ist (Präsentation/
+    Bilder) - ein Wechsel Word↔PDF behält den Haken bewusst bei, da
+    beide Formate das Konzept unterstützen. `_start()`s PDF-Zweig reicht
+    `ico_mode` zusätzlich zu `exclude_header`/`exclude_footer` an den
+    Worker durch.
+
+  **Testfixture-Besonderheit:** Die synthetischen Test-PDFs in
+  `tests/test_pdf_ico_mode.py` bauen ihre Seite-0-Zeilen über
+  `page.insert_text()` einzeln bei manuell kontrollierten,
+  gleichmäßig verteilten y-Koordinaten auf (inklusive eines echten
+  `" "`-Strings als "Leerzeile") statt über
+  `page.insert_textbox(..., "\n\n")`. Per direkter Untersuchung
+  bestätigt: `insert_textbox()` erzeugt bei einer Leerzeilen-Lücke ZWEI
+  getrennte rohe PyMuPDF-Blöcke, während `_split_first_page_metadata()`
+  nur Zeilen INNERHALB eines einzigen Blocks sieht - die reale,
+  vertrauliche "1526 VIRELICON.pdf", für die dieser Mechanismus
+  ursprünglich gebaut wurde, hat Metadatenzeile, Adresszeile, Leerzeile
+  und Titelzeile alles in einem einzigen PyMuPDF-Block. Nur
+  `insert_text()` pro Zeile reproduziert diese Ein-Block-Form korrekt.
+
+  **Testabdeckung:** `tests/test_pdf_ico_mode.py` (neu, 8 Tests) -
+  Engine-Ebene: `ico_mode=False` lässt Metadaten übersetzbar,
+  `ico_mode=True` trennt und markiert non-translatable,
+  `ico_mode=True` ohne passenden Ankerbegriff findet nichts, Sonderfall
+  gilt nur für Seite 0 (nicht für spätere Seiten), erneutes `open()`
+  setzt Zustand zuverlässig zurück. Job-Ebene: `ico_mode=True` mit Fund
+  (Metadaten bleiben im Output unverändert/unübersetzt, QA-Bericht
+  nennt es), `ico_mode=False` (alles inklusive Metadaten wird
+  übersetzt), `ico_mode=True` ohne Fund (QA-Warnung). Zusätzlich
+  `tests/test_ui_word_mode.py` erweitert:
+  `test_ico_mode_checkbox_visible_for_word_and_pdf_modes` (umbenannt von
+  der vorherigen Word-only-Version, prüft jetzt Sichtbarkeit/Erhalt über
+  Word→PDF UND Reset bei Präsentation) sowie neu
+  `test_pdf_worker_receives_ico_mode_from_request` (PDF-Pendant zum
+  bestehenden Word-Test).
+
+  Jede einzelne Änderung per Revert-Probe verifiziert (Engine-Gating in
+  `extract_blocks()`, QA-Bericht-Meldungsblock in `_build_qa_report()`,
+  UI-Sichtbarkeitslogik in `_mode_changed()` - jeweils gezielt auf den
+  alten/fehlenden Zustand zurückgebaut, erwarteter Testfehler bestätigt,
+  aus Backup wiederhergestellt, `diff` bestätigt byte-genaue
+  Wiederherstellung, danach Gesamtsuite erneut grün). Gesamter Testlauf
+  am Ende: 160 passed, 1 skipped (vorher 151 passed, 1 skipped - 9 neue
+  Tests, davon 8 in einer neuen Datei).

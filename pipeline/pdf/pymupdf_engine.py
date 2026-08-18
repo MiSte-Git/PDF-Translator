@@ -1146,6 +1146,17 @@ class PyMuPdfEngine:
         self._highlight_rects_cache: dict[int, list[fitz.Rect]] = {}
         self._page_blocks_cache: dict[int, list[TextBlock]] = {}
         self._original_links: dict[int, list[dict]] = {}
+        self._ico_mode = False
+        self.first_page_metadata_found = False
+        """Whether page 0's FIRST_PAGE_ANCHOR_TERMS split (see
+        extract_blocks()) actually found and excluded a metadata chunk on
+        the most recent open() call - only meaningful once extract_blocks(0)
+        has actually run (open() itself does no page scanning). Mirrors
+        DocxEngine.separator_found: lets a caller (ui/pdf_job.py) warn when
+        ico_mode=True but the expected structure wasn't actually present,
+        exactly like Word's ico_mode does. Always False when
+        open()'s ico_mode is False, since the split is never even
+        attempted then - see open()'s docstring."""
 
     def _get_page_highlight_rects(self, page: fitz.Page, page_index: int) -> list[fitz.Rect]:
         """Cached per-page _get_highlight_rects() lookup, shared between
@@ -1289,7 +1300,7 @@ class PyMuPdfEngine:
                 },
             )
 
-    def open(self, path: str) -> None:
+    def open(self, path: str, ico_mode: bool = False) -> None:
         """Load a PDF document for processing.
 
         Snapshots every page's link annotations into self._original_links
@@ -1305,8 +1316,25 @@ class PyMuPdfEngine:
         page.insert_link() is invisible to page.get_links() for the rest
         of the live session, so a per-call restore can't detect a SECOND
         redaction later destroying the same link again).
+
+        ``ico_mode`` mirrors DocxEngine.open()'s parameter of the same
+        name (RoadMap.md Phase 2/PDF): the FIRST_PAGE_ANCHOR_TERMS
+        page-1-metadata split (see extract_blocks()) used to run
+        unconditionally for every PDF, which meant any document that
+        happened to contain a line matching one of those anchor terms
+        (e.g. "Issuer Address") for unrelated reasons would silently lose
+        that part of its first page to translation - not just documents
+        of the specific internal type the split was actually meant for.
+        Now the split only runs when the caller explicitly opts in via
+        ico_mode=True (the user ticked the "ICO-Dokument" checkbox in
+        ui/app.py) - every other PDF has its first page translated in
+        full, exactly like every other page. See
+        self.first_page_metadata_found for how a caller detects whether
+        ico_mode=True actually found anything to exclude.
         """
         self._doc = fitz.open(path)
+        self._ico_mode = ico_mode
+        self.first_page_metadata_found = False
         for page in self._doc:
             self._original_links[page.number] = page.get_links()
 
@@ -1329,13 +1357,16 @@ class PyMuPdfEngine:
         sub-groups of lines with similar x0 (see _group_lines_by_x0), each
         becoming its own TextBlock with a tight bbox - this avoids a union
         bbox that spans a paragraph starting next to an image and continuing
-        full-width below it. On page_index == 0, each such group is then
-        further split on FIRST_PAGE_ANCHOR_TERMS (see
-        _split_first_page_metadata()): a metadata chunk like "Issuer
-        Address:" plus its address line, which would otherwise share one
-        block with a following title/subtitle line, becomes its own
-        non-translatable TextBlock, separate from the (normally
-        translatable) rest. A block/group is marked non-translatable if it
+        full-width below it. On page_index == 0, IF self._ico_mode is True
+        (see open()'s docstring - False by default, the split is skipped
+        entirely otherwise), each such group is then further split on
+        FIRST_PAGE_ANCHOR_TERMS (see _split_first_page_metadata()): a
+        metadata chunk like "Issuer Address:" plus its address line, which
+        would otherwise share one block with a following title/subtitle
+        line, becomes its own non-translatable TextBlock, separate from
+        the (normally translatable) rest - self.first_page_metadata_found
+        is set to whether this actually found and excluded anything. A
+        block/group is marked non-translatable if it
         overlaps the template's header/footer zones, (on page_index == 0
         only) the template's first_page_zones, is the metadata half of a
         FIRST_PAGE_ANCHOR_TERMS split, or is a LINE-level run that overlaps
@@ -1382,6 +1413,7 @@ class PyMuPdfEngine:
                 link_bboxes.append((rect.x0, rect.y0, rect.x1, rect.y1))
 
         blocks: list[TextBlock] = []
+        found_metadata_split = False
         for raw_block in raw.get("blocks", []):
             if raw_block.get("type") != 0:
                 continue  # skip image blocks
@@ -1393,10 +1425,12 @@ class PyMuPdfEngine:
             for group in _group_lines_by_x0(lines, _COLUMN_SPLIT_THRESHOLD):
                 subgroups = (
                     _split_first_page_metadata(group, FIRST_PAGE_ANCHOR_TERMS)
-                    if page_index == 0
+                    if page_index == 0 and self._ico_mode
                     else [group]
                 )
                 is_metadata_split = len(subgroups) == 2
+                if is_metadata_split:
+                    found_metadata_split = True
 
                 for subgroup_index, subgroup in enumerate(subgroups):
                     for run_lines, highlighted in _split_by_highlight(
@@ -1464,6 +1498,8 @@ class PyMuPdfEngine:
                                 )
                             )
 
+        if page_index == 0:
+            self.first_page_metadata_found = found_metadata_split
         self._page_blocks_cache[page_index] = blocks
         return blocks
 

@@ -200,16 +200,19 @@ class PdfTranslationWorker(QRunnable):
     PresentationTranslationWorker/WordTranslationWorker exactly (same
     cooperative-cancellation contract, same TranslationSignals) - see
     PresentationTranslationWorker's docstring - just calling
-    run_pdf_job()/ui.pdf_job instead. No ico_mode parameter (unlike
-    WordTranslationWorker) - see ui/pdf_job.py's docstring for why there
-    is no PDF equivalent yet.
+    run_pdf_job()/ui.pdf_job instead.
+
+    ``ico_mode`` (default False) is the same "ICO-Dokument" checkbox
+    WordTranslationWorker already exposes - ui/app.py now shows it for
+    BOTH Word and PDF mode (see PyMuPdfEngine.open()'s docstring/
+    RoadMap.md Phase 2/PDF), reusing TranslationRequest.ico_mode rather
+    than adding a PDF-specific field.
 
     ``exclude_header``/``exclude_footer`` (default False) are PDF's own
-    special case - the "Header ausschließen"/"Footer ausschließen"
-    checkboxes in ui/app.py, PDF-mode only - mirroring how
-    WordTranslationWorker's ``ico_mode`` is that format's own special
-    case. See run_pdf_job()'s docstring for what they actually do
-    (automatic header/footer detection via
+    additional special case - the "Header ausschließen"/"Footer
+    ausschließen" checkboxes in ui/app.py, PDF-mode only. See
+    run_pdf_job()'s docstring for what they actually do (automatic
+    header/footer detection via
     pipeline.pdf.template.detect_header_footer_zones()).
     """
 
@@ -225,6 +228,7 @@ class PdfTranslationWorker(QRunnable):
         max_chars_per_run: int,
         exclude_header: bool = False,
         exclude_footer: bool = False,
+        ico_mode: bool = False,
     ) -> None:
         super().__init__()
         self.source = source
@@ -235,6 +239,7 @@ class PdfTranslationWorker(QRunnable):
         self.source_lang = source_lang
         self.protected_terms = protected_terms
         self.max_chars_per_run = max_chars_per_run
+        self.ico_mode = ico_mode
         self.exclude_header = exclude_header
         self.exclude_footer = exclude_footer
         self.signals = TranslationSignals()
@@ -261,6 +266,7 @@ class PdfTranslationWorker(QRunnable):
                 total_callback=self.signals.total.emit,
                 exclude_header=self.exclude_header,
                 exclude_footer=self.exclude_footer,
+                ico_mode=self.ico_mode,
             )
         except Exception as exc:
             self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
