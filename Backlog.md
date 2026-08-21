@@ -87,7 +87,14 @@
 - [ ] PPTX-Live-Übersetzung produktiv im UI verdrahten und anschließend nicht
   unterstützte Inhalte (SmartArt, Charts, Notizen, Master/Layout, OLE und
   Bildtext) schrittweise katalogisieren beziehungsweise freigeben.
-- [ ] Bildübersetzungs-Modul (OCR + Inpainting) als separater Bereich
+- [x] Bildübersetzungs-Modul (OCR + Inpainting) als separater Bereich - umgesetzt
+  als pipeline/images/ (ocr.py, inpainting.py, translate_image.py), siehe
+  RoadMap.md Phase 3 für den vollständigen Verlauf (Tesseract-OCR, drei
+  Rückschreibe-Backends, Batch-Verarbeitung, Korrektur-Dialog, GPU-Backend
+  auf echter Hardware verifiziert). Dieser Eintrag war seit Phase 3 nicht
+  mehr aktualisiert (21.08.2026 beim Cross-Projekt-Check für TME
+  aufgefallen, siehe "Ideen / später bewerten" unten) - Cloud-OCR und
+  Cloud-Inpainting bleiben laut RoadMap.md offen.
 - [ ] PyInstaller-Bundles für Releases (später, nach stabiler Kernfunktion)
 - [ ] Optional: PyPI-Package
 
@@ -124,6 +131,37 @@
   auf seinen Geräten ausführt, oder ob langfristig eine CI-Pipeline
   (z. B. GitHub Actions mit Runnern je Betriebssystem) das übernehmen soll.
   Umsetzung noch nicht begonnen.
+
+- Cross-Projekt: Bildübersetzung als Basis für TME (21.08.2026, Claude per
+  Cowork, im Rahmen einer TME-Session geprüft): TME (github.com/MiSte-Git/TME,
+  Telegram-Export-Tool desselben Nutzers) hat in seinem eigenen Backlog einen
+  offenen Punkt für Bildübersetzung, praktisch identischer Scope zu
+  pipeline/images/ hier (kein Font-Matching, kein Vektor-Text-Pfad). Geprüft,
+  ob sich das hiesige pipeline/images/ dafür wiederverwenden lässt, statt in
+  TME neu zu bauen.
+
+  Ergebnis: pipeline/images/ ist sauber von PDF/Word/PPTX hier entkoppelt
+  (einzige externe Abhängigkeit: pipeline.translation.base.TranslationProvider
+  als Protocol, kein konkreter Import) - grundsätzlich wiederverwendbar. Eine
+  geteilte Python-Bibliothek wurde trotzdem verworfen: TMEs eigene
+  Provider-Abstraktion ist `async def` (Telethon-bedingt), pipeline/images/
+  hier ruft `provider.translate()` synchron auf - ein direkter Import würde
+  einen Adapter brauchen und TME eng an hiesige, noch in Bewegung befindliche
+  interne APIs koppeln (siehe "Zu verifizieren"/"Bekannte Einschränkungen"
+  oben - Mehrspalten-/Infografik-OCR-Fehllesungen, Cloud-Inpainting fehlt
+  noch).
+
+  Stattdessen angedachte Richtung: ein eigenständiges, per Subprocess/CLI
+  aufrufbares Bildübersetzungs-Tool auf Basis von pipeline/images/ hier
+  (Bildpfad(e) + Config rein, übersetzte Bilder + JSON-Report raus, analog zu
+  run_image_batch_job()) - stabile, kleine Schnittstelle statt Kopplung an
+  interne APIs, TME bräuchte dann keinen async/sync-Adapter. Das überschneidet
+  sich mit der Deployment-Lösung/Entscheidung oben (native Standalone-Route):
+  ein solcher Standalone-Build von pipeline/images/ hier könnte derselbe sein,
+  der auch als CLI-Baustein für TME dient - beim Angehen der Deployment-Frage
+  oben mitdenken. Zurückgestellt bis pipeline/images/ hier stabiler ist
+  (siehe "Bildübersetzungs-Modul"-Eintrag oben) - noch nicht begonnen, kein
+  Umsetzungsdruck von TME-Seite.
 
 ## Zu verifizieren
 - [ ] Word-Pfad: PAGE-Feld in footer1.xml sollte sich bei Neuberechnung automatisch aktualisieren, auch wenn das übersetzte Dokument länger wird als das Original - noch nicht an einem tatsächlich länger werdenden Dokument verifiziert (Word aktualisiert Felder nicht immer automatisch beim programmatischen Schreiben, ggf. muss ein Feld-Update erzwungen werden)
