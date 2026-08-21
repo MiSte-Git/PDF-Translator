@@ -41,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-import fitz
+import pymupdf as fitz
 
 from pipeline.pdf.base import TextBlock
 from pipeline.pdf.pymupdf_engine import (

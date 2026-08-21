@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import fitz
+import pymupdf as fitz
 import pytest
 
 from pipeline.pdf import pymupdf_engine as pymupdf_engine_module

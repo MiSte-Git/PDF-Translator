@@ -21,6 +21,19 @@ Text in Bildern (z. B. gescannte Seiten) ist geplant.
 - Separates Modul zur Übersetzung von Text in Bildern
 - Mehrsprachige UI (i18n via Qt Linguist)
 
+## Systemvoraussetzungen
+
+- Python 3.10+
+- Entwickelt und getestet unter Linux (Debian). PySide6/Qt ist grundsätzlich
+  auch unter Windows und macOS lauffähig, das ist hier aber nicht der primäre
+  Testfall.
+- Für die optionale OCR-Funktionalität zusätzlich das Tesseract-Binary über
+  den System-Paketmanager (z. B. `apt install tesseract-ocr` unter
+  Debian/Ubuntu, `brew install tesseract` unter macOS) – siehe
+  [requirements-ocr.txt](requirements-ocr.txt).
+- Für optionales GPU-Inpainting (LaMa, Phase 3) zusätzlich eine
+  CUDA-fähige GPU – siehe [requirements-gpu.txt](requirements-gpu.txt).
+
 ## Installation für Entwickler
 
 ```bash
@@ -34,6 +47,15 @@ Für optionale OCR-Funktionalität zusätzlich:
 ```bash
 pip install -r requirements-ocr.txt
 ```
+
+## Start
+
+```bash
+python -m ui.app
+```
+
+Startet die Desktop-UI (PySide6). Details zur Bedienung stehen in
+[ui/README.md](ui/README.md).
 
 ## Tech Stack
 

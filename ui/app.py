@@ -353,7 +353,77 @@ class MainWindow(QMainWindow):
         widget = QWidget(); widget.setLayout(root); self.setCentralWidget(widget)
         self.language.changed.connect(self.retranslate)
         self.retranslate()
+        # Restored BEFORE _mode_changed(): that call re-derives which
+        # rows/checkboxes are actually valid for the (just-restored) mode -
+        # e.g. it resets ico_mode if the restored mode is neither Word nor
+        # PDF - so a stale combination from an old, no-longer-applicable
+        # mode can never survive the restore.
+        self._restore_form_state()
         self._mode_changed()
+
+    def _restore_form_state(self) -> None:
+        """Refill the form with whatever was on screen the last time the
+        app was closed (see closeEvent()) - a real user reported having to
+        retype the source/target language, protected terms and every
+        dropdown choice again on every single run."""
+        settings = self.settings
+        mode_value = settings.value("form.mode", "", type=str)
+        if mode_value:
+            try:
+                index = self.mode.findData(TranslationMode(mode_value))
+            except ValueError:
+                index = -1
+            if index >= 0:
+                self.mode.setCurrentIndex(index)
+        image_mode_value = settings.value("form.image_mode", "", type=str)
+        if image_mode_value:
+            try:
+                index = self.image_mode.findData(EmbeddedImageMode(image_mode_value))
+            except ValueError:
+                index = -1
+            if index >= 0:
+                self.image_mode.setCurrentIndex(index)
+        self.source_lang.setText(settings.value("form.source_lang", "", type=str))
+        self.target_lang.setText(settings.value("form.target_lang", "DE", type=str))
+        self.protected.setPlainText(settings.value("form.protected_terms", "", type=str))
+        self.ico_mode.setChecked(settings.value("form.ico_mode", False, type=bool))
+        self.exclude_header.setChecked(settings.value("form.exclude_header", False, type=bool))
+        self.exclude_footer.setChecked(settings.value("form.exclude_footer", False, type=bool))
+        ocr_engine_value = settings.value("form.ocr_engine", "", type=str)
+        if ocr_engine_value:
+            index = self.ocr_engine.findData(ocr_engine_value)
+            if index >= 0:
+                self.ocr_engine.setCurrentIndex(index)
+        inpainting_value = settings.value("form.inpainting_backend", "", type=str)
+        if inpainting_value:
+            index = self.inpainting_backend.findData(inpainting_value)
+            if index >= 0:
+                self.inpainting_backend.setCurrentIndex(index)
+
+    def _persist_form_state(self) -> None:
+        """Counterpart to _restore_form_state() - called from closeEvent()
+        so the next run starts where this one left off instead of blank."""
+        settings = self.settings
+        mode = self.mode.currentData()
+        if mode is not None:
+            settings.setValue("form.mode", TranslationMode(mode).value)
+        image_mode = self.image_mode.currentData()
+        if image_mode is not None:
+            settings.setValue("form.image_mode", EmbeddedImageMode(image_mode).value)
+        settings.setValue("form.source_lang", self.source_lang.text())
+        settings.setValue("form.target_lang", self.target_lang.text())
+        settings.setValue("form.protected_terms", self.protected.toPlainText())
+        settings.setValue("form.ico_mode", self.ico_mode.isChecked())
+        settings.setValue("form.exclude_header", self.exclude_header.isChecked())
+        settings.setValue("form.exclude_footer", self.exclude_footer.isChecked())
+        if self.ocr_engine.currentData():
+            settings.setValue("form.ocr_engine", self.ocr_engine.currentData())
+        if self.inpainting_backend.currentData():
+            settings.setValue("form.inpainting_backend", self.inpainting_backend.currentData())
+
+    def closeEvent(self, event) -> None:
+        self._persist_form_state()
+        super().closeEvent(event)
 
     def retranslate(self) -> None:
         t = self.language.text
@@ -493,13 +563,20 @@ class MainWindow(QMainWindow):
             TranslationMode.PDF: "PDF (*.pdf)", TranslationMode.PRESENTATION: "PowerPoint (*.pptx)",
             TranslationMode.WORD: "Word (*.docx)", TranslationMode.IMAGES: "Bilder (*.png *.jpg *.jpeg *.webp *.tif *.tiff *.bmp)",
         }
+        # Remembers the folder the LAST source selection was made from
+        # (separate from "last_output_dir" below - a real user pointed out
+        # these are often two different folders and both had to be
+        # re-navigated to from scratch, every single run) as the starting
+        # directory for the next file dialog.
+        start_dir = str(self.settings.value("last_source_dir", "", type=str))
         if mode == TranslationMode.IMAGES:
-            names, _ = QFileDialog.getOpenFileNames(self, self.language.text("dialog.choose_images"), "", filters[mode])
+            names, _ = QFileDialog.getOpenFileNames(self, self.language.text("dialog.choose_images"), start_dir, filters[mode])
         else:
-            name, _ = QFileDialog.getOpenFileName(self, self.language.text("dialog.choose_document"), "", filters[mode]); names = [name] if name else []
+            name, _ = QFileDialog.getOpenFileName(self, self.language.text("dialog.choose_document"), start_dir, filters[mode]); names = [name] if name else []
         if names:
             self.paths = tuple(Path(name) for name in names)
             self.source_label.setText("\n".join(path.name for path in self.paths))
+            self.settings.setValue("last_source_dir", str(self.paths[0].parent))
             self._invalidate_analysis()
 
     def _request(self) -> TranslationRequest:
@@ -640,9 +717,16 @@ class MainWindow(QMainWindow):
             )
             return
 
-        directory = QFileDialog.getExistingDirectory(self, self.language.text("dialog.choose_output_dir"))
+        # Own, separate remembered folder from "last_source_dir" above - see
+        # that field's comment for why a real user asked for these two to
+        # be tracked independently.
+        directory = QFileDialog.getExistingDirectory(
+            self, self.language.text("dialog.choose_output_dir"),
+            str(self.settings.value("last_output_dir", "", type=str)),
+        )
         if not directory:
             return
+        self.settings.setValue("last_output_dir", directory)
         source = request.source_paths[0]
         output_dir = Path(directory)
         # IMAGES mode treats the chosen directory as the output directory

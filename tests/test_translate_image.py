@@ -206,6 +206,94 @@ def test_translate_image_min_confidence_is_configurable(tmp_path: Path) -> None:
     assert provider.calls == ["Borderline"]
 
 
+# --- max_height_ratio skipping (RoadMap.md/Backlog.md 21.08.2026: real
+# user-reported infographic where Tesseract folded a nearby icon/graphic
+# element into a text line's bounding box, inflating just its height far
+# beyond every other line in the same image - drawn oversized, these
+# overlapped neighbouring boxes; several still scored above
+# DEFAULT_MIN_OCR_CONFIDENCE, so the confidence filter alone didn't catch
+# them - see DEFAULT_MAX_HEIGHT_RATIO's docstring) --------------------------
+
+
+def test_translate_image_skips_region_with_outlier_height(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+
+    regions = [
+        OcrTextRegion(text="Real Text", x=20, y=20, width=150, height=24, confidence=90.0),
+        OcrTextRegion(text="Other Real Text", x=20, y=60, width=150, height=22, confidence=90.0),
+        # An icon merged into this "line" by Tesseract: height is far
+        # beyond the other two regions', even though confidence is high.
+        OcrTextRegion(text="Icon Blob", x=20, y=100, width=150, height=200, confidence=85.0),
+    ]
+    provider = _CountingProvider()
+
+    stats = translate_image(
+        str(source), str(destination), _StubOcrEngine(regions), BoxOverlayBackend(),
+        provider, [], target_lang="de", min_confidence=40.0, max_height_ratio=3.5,
+    )
+
+    assert stats.translated == 2
+    assert stats.skipped == 1
+    assert stats.failed == 0
+    # The outlier region's text must never even reach the provider.
+    assert provider.calls == ["Real Text", "Other Real Text"]
+    assert len(stats.replacements) == 2
+    assert all(r.region.text != "Icon Blob" for r in stats.replacements)
+
+
+def test_translate_image_max_height_ratio_is_configurable(tmp_path: Path) -> None:
+    """A caller that explicitly raises max_height_ratio gets the tall
+    region translated instead of skipped - confirms the threshold is a
+    real parameter, not a hardcoded cutoff."""
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+
+    regions = [
+        OcrTextRegion(text="Real Text", x=20, y=20, width=150, height=24, confidence=90.0),
+        OcrTextRegion(text="Tall Text", x=20, y=60, width=150, height=200, confidence=85.0),
+    ]
+    provider = _CountingProvider()
+
+    stats = translate_image(
+        str(source), str(destination), _StubOcrEngine(regions), BoxOverlayBackend(),
+        provider, [], target_lang="de", min_confidence=40.0, max_height_ratio=100.0,
+    )
+
+    assert stats.translated == 2
+    assert stats.skipped == 0
+    assert provider.calls == ["Real Text", "Tall Text"]
+
+
+def test_translate_image_height_outlier_check_ignores_low_confidence_regions(tmp_path: Path) -> None:
+    """The median used for the height-outlier threshold is computed only
+    from regions that already pass min_confidence - a low-confidence
+    noise region's (possibly tiny) height must not skew that median."""
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+
+    regions = [
+        OcrTextRegion(text="Real Text", x=20, y=20, width=150, height=24, confidence=90.0),
+        OcrTextRegion(text="Other Real Text", x=20, y=60, width=150, height=22, confidence=90.0),
+        # Low confidence AND tiny height - skipped for confidence, not
+        # height, and must not pull the median down further.
+        OcrTextRegion(text="0 & Oo", x=20, y=95, width=30, height=5, confidence=10.0),
+    ]
+    provider = _CountingProvider()
+
+    stats = translate_image(
+        str(source), str(destination), _StubOcrEngine(regions), BoxOverlayBackend(),
+        provider, [], target_lang="de", min_confidence=40.0, max_height_ratio=3.5,
+    )
+
+    assert stats.translated == 2
+    assert stats.skipped == 1
+    assert provider.calls == ["Real Text", "Other Real Text"]
+
+
 def _make_replacement(text: str, translated_text: str) -> TextReplacement:
     region = OcrTextRegion(text=text, x=20, y=20, width=150, height=24, confidence=95.0)
     return TextReplacement(region=region, translated_text=translated_text)
@@ -237,6 +325,59 @@ def test_build_corrected_replacements_ignores_out_of_range_index() -> None:
     original = [_make_replacement("Hello World", "Hallo Welt")]
 
     corrected = build_corrected_replacements(original, {5: "Egal"})
+
+    assert corrected == original
+
+
+# --- edited_geometry (RoadMap.md/Backlog.md 21.08.2026: the draggable/
+# resizable box canvas in ImageCorrectionDialog - a real user asked for a
+# way to move/resize individual boxes by hand after the automatic
+# placement fixes still left a few in the wrong spot) --------------------
+
+
+def test_build_corrected_replacements_applies_edited_geometry() -> None:
+    original = [_make_replacement("Hello World", "Hallo Welt")]
+
+    corrected = build_corrected_replacements(original, {}, edited_geometry={0: (30, 40, 200, 50)})
+
+    region = corrected[0].region
+    assert (region.x, region.y, region.width, region.height) == (30, 40, 200, 50)
+    # Text/confidence must survive untouched - only geometry was edited.
+    assert region.text == "Hello World"
+    assert region.confidence == 95.0
+    assert corrected[0].translated_text == "Hallo Welt"
+
+
+def test_build_corrected_replacements_combines_text_and_geometry_edits_independently() -> None:
+    original = [
+        _make_replacement("Hello World", "Hallo Welt"),
+        _make_replacement("Second Line", "Zweite Zeile"),
+    ]
+
+    corrected = build_corrected_replacements(
+        original,
+        {0: "Hallo Welt (korrigiert)"},  # row 0: text only
+        edited_geometry={1: (10, 10, 100, 30)},  # row 1: geometry only
+    )
+
+    assert corrected[0].translated_text == "Hallo Welt (korrigiert)"
+    assert corrected[0].region is original[0].region  # untouched geometry
+    assert corrected[1].translated_text == "Zweite Zeile"  # untouched text
+    assert (corrected[1].region.x, corrected[1].region.y) == (10, 10)
+
+
+def test_build_corrected_replacements_geometry_none_keeps_old_behavior() -> None:
+    original = [_make_replacement("Hello World", "Hallo Welt")]
+
+    corrected = build_corrected_replacements(original, {0: "Hallo Welt"})
+
+    assert corrected[0] is original[0]
+
+
+def test_build_corrected_replacements_ignores_out_of_range_geometry_index() -> None:
+    original = [_make_replacement("Hello World", "Hallo Welt")]
+
+    corrected = build_corrected_replacements(original, {}, edited_geometry={5: (0, 0, 10, 10)})
 
     assert corrected == original
 

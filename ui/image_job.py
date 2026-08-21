@@ -28,6 +28,7 @@ from typing import Callable
 
 from pipeline.images.inpainting import TextReplacement
 from pipeline.images.translate_image import (
+    DEFAULT_MAX_HEIGHT_RATIO,
     DEFAULT_MIN_OCR_CONFIDENCE,
     ImageTranslationStats,
     translate_image,
@@ -73,6 +74,7 @@ def run_image_job(
     inpainting_backend_name: str = "box_overlay",
     ocr_language: str | None = None,
     min_confidence: float = DEFAULT_MIN_OCR_CONFIDENCE,
+    max_height_ratio: float = DEFAULT_MAX_HEIGHT_RATIO,
     progress_callback: Callable[[str], None] | None = None,
     stats_callback: Callable[[ImageTranslationStats], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
@@ -95,11 +97,12 @@ def run_image_job(
     doesn't re-check credentials either (both fail naturally, with a clear
     error, the first time they're actually used if skipped).
 
-    ``min_confidence`` is forwarded to translate_image() as-is - see
-    pipeline.images.translate_image.DEFAULT_MIN_OCR_CONFIDENCE's docstring.
-    Not yet exposed as a UI setting (see RoadMap.md/Backlog.md 18.08.2026);
-    a caller (or a test) that needs a different threshold passes it here
-    directly.
+    ``min_confidence``/``max_height_ratio`` are forwarded to
+    translate_image() as-is - see
+    pipeline.images.translate_image.DEFAULT_MIN_OCR_CONFIDENCE's and
+    DEFAULT_MAX_HEIGHT_RATIO's docstrings. Neither is yet exposed as a UI
+    setting (see RoadMap.md/Backlog.md 18.08.2026 and 21.08.2026); a caller
+    (or a test) that needs a different threshold passes it here directly.
     """
     source = Path(source)
     destination = Path(destination)
@@ -127,6 +130,7 @@ def run_image_job(
         source_lang,
         ocr_language=ocr_language,
         min_confidence=min_confidence,
+        max_height_ratio=max_height_ratio,
         progress_callback=progress_callback,
         stats_callback=stats_callback,
         should_cancel=should_cancel,
@@ -247,7 +251,8 @@ def _build_qa_report(
         "Ergebnis",
         f"  Erkannte Textregionen: {len(stats.regions)}",
         f"  Regionen übersetzt: {stats.translated}",
-        f"  Regionen übersprungen (niedrige OCR-Konfidenz): {stats.skipped}",
+        f"  Regionen übersprungen (niedrige OCR-Konfidenz oder unplausibel "
+        f"große Bounding-Box): {stats.skipped}",
         f"  Regionen fehlgeschlagen: {stats.failed}",
         f"  Gesendete Zeichen: {stats.chars_sent}",
     ]
@@ -271,12 +276,20 @@ def _build_qa_report(
     lines.append(
         "Bekannte, noch nicht automatisiert geprüfte Einschränkungen (siehe RoadMap.md "
         "Phase 3): keine Erkennung/Ausnahme für Logos oder rein dekorative Bildbereiche, "
-        "keine Deduplizierung mehrfach identischer Bilder, Konfidenz-Filter fängt nur "
-        "die eindeutigsten OCR-Fehllesungen ab (siehe 'Regionen übersprungen' oben - "
-        "einzelne fragwürdige Regionen können trotzdem durchrutschen). Bitte das "
-        "Ergebnis stichprobenartig prüfen; eine falsch übersetzte oder übersprungene "
-        "Region lässt sich über den Korrektur-Dialog (Button unter dem Ergebnis) "
-        "nachträglich anpassen."
+        "keine Deduplizierung mehrfach identischer Bilder. Der Konfidenz-Filter und der "
+        "Bounding-Box-Größen-Filter (siehe 'Regionen übersprungen' oben) fangen nur die "
+        "eindeutigsten OCR-Fehllesungen ab - einzelne fragwürdige Regionen (z. B. bei "
+        "grafiklastigen Designs mit vielen Icons) können trotzdem durchrutschen. Die "
+        "Schriftschätzung (Größe aus der erkannten Zeilenhöhe, Fett/Regular aus einem "
+        "Vergleich der Original-Pixel mit einer synthetischen Vergleichszeile) ist ein "
+        "Best-Effort-Verfahren ohne Fidelity-Garantie - Kursivschrift, Farbe und die "
+        "exakte Original-Schriftart werden nicht übernommen. Bitte das Ergebnis "
+        "stichprobenartig prüfen; eine falsch übersetzte, übersprungene oder zu groß/"
+        "klein geratene Region lässt sich über den Korrektur-Dialog (Button unter dem "
+        "Ergebnis) nachträglich anpassen - dort auch Position per Ziehen, Größe per "
+        "Ziehen an der Ecke der ausgewählten Box, das manuelle Hinzufügen einer Box für "
+        "nicht erkannten Text sowie Zoomen (Strg+Mausrad oder Zoom-Knöpfe) für kleine "
+        "Textstellen; der Dialog lässt sich auch maximieren."
     )
     return "\n".join(lines) + "\n"
 
@@ -346,6 +359,7 @@ def run_image_batch_job(
     inpainting_backend_name: str = "box_overlay",
     ocr_language: str | None = None,
     min_confidence: float = DEFAULT_MIN_OCR_CONFIDENCE,
+    max_height_ratio: float = DEFAULT_MAX_HEIGHT_RATIO,
     progress_callback: Callable[[str], None] | None = None,
     stats_callback: Callable[[ImageBatchStats], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
@@ -413,6 +427,7 @@ def run_image_batch_job(
             protected_terms, max_chars_per_run,
             ocr_engine_name=ocr_engine_name, inpainting_backend_name=inpainting_backend_name,
             ocr_language=ocr_language, min_confidence=min_confidence,
+            max_height_ratio=max_height_ratio,
             progress_callback=progress_callback,
             should_cancel=should_cancel,
             provider=provider,

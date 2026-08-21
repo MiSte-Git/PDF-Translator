@@ -19,7 +19,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import fitz
+import pymupdf as fitz
 import pytest
 from PySide6.QtGui import QFont, QTextCharFormat
 from PySide6.QtWidgets import QApplication, QTextEdit

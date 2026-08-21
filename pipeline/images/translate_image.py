@@ -25,6 +25,8 @@ cancellation actually does here.
 """
 from __future__ import annotations
 
+import dataclasses
+import statistics
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -51,6 +53,48 @@ from pipeline.translation.protected_terms import protect_terms, restore_terms
 # (see Backlog.md's documented residual cases) still gets through.
 DEFAULT_MIN_OCR_CONFIDENCE = 40.0
 
+# Ratio (region.height / the image's own MEDIAN recognized-line height)
+# beyond which a region is treated as an OCR bounding-box outlier and
+# skipped rather than drawn - added after a real user-reported infographic
+# (RoadMap.md/Backlog.md, 21.08.2026) as a safety net alongside the (more
+# targeted) fix for that same image's DOMINANT problem, cross-column line
+# merging (see pipeline.images.ocr._MAX_WORD_GAP_RATIO): a region whose
+# bounding box got inflated some OTHER way - e.g. Tesseract folding a
+# nearby icon/graphic element into a text line's box, inflating just its
+# HEIGHT far beyond every other line in the image - would still be drawn
+# at close to pipeline.images.inpainting._MAX_FONT_SIZE, towering over and
+# overlapping neighbouring text, without necessarily scoring low enough on
+# DEFAULT_MIN_OCR_CONFIDENCE to be screened out there instead.
+#
+# Compared against the image's own MEDIAN recognized-line height (among
+# regions that already pass min_confidence) rather than a fixed pixel
+# value, since designs vary hugely in base font size - and MEDIAN rather
+# than mean so a handful of genuinely large headlines don't drag the
+# baseline up and mask a real outlier. 4.0x was picked by checking it
+# against the one real sample above AFTER the word-gap fix: two
+# legitimately large (but real, not icon-merged) bold banner lines in that
+# image sat at ~3.5-3.8x the median and must NOT be skipped, while nothing
+# in that sample needed a ceiling below 4x to be caught - so, like
+# DEFAULT_MIN_OCR_CONFIDENCE, a real-sample-calibrated heuristic, not a
+# broadly validated cutoff.
+DEFAULT_MAX_HEIGHT_RATIO = 4.0
+
+
+def _max_plausible_height(
+    regions: list[OcrTextRegion], min_confidence: float, max_height_ratio: float
+) -> float | None:
+    """DEFAULT_MAX_HEIGHT_RATIO times the median height among `regions`
+    that pass `min_confidence` - the per-image threshold
+    translate_image() compares each region's height against (see that
+    constant's docstring). None if there are no such regions to compute a
+    median from, so the caller can skip the outlier check entirely rather
+    than compare against nothing.
+    """
+    heights = [region.height for region in regions if region.confidence >= min_confidence]
+    if not heights:
+        return None
+    return statistics.median(heights) * max_height_ratio
+
 
 @dataclass
 class ImageTranslationStats:
@@ -60,12 +104,17 @@ class ImageTranslationStats:
 
     translated: int = 0
     skipped: int = 0
-    """Regions recognized by OCR but never even sent for translation
-    because their confidence was below `min_confidence` (see
-    translate_image()'s docstring and DEFAULT_MIN_OCR_CONFIDENCE above) -
-    distinct from `failed` (a region that WAS attempted but the provider
-    call itself raised). Mirrors PdfTranslationStats.skipped's role
-    (a structurally-excluded block, not an error)."""
+    """Regions recognized by OCR but never even sent for translation, for
+    either of two reasons (see translate_image()'s docstring): their
+    confidence was below `min_confidence` (DEFAULT_MIN_OCR_CONFIDENCE), or
+    their height exceeded the image's own outlier threshold
+    (`max_height_ratio`, DEFAULT_MAX_HEIGHT_RATIO) - not distinguished
+    further here since both mean the same thing to a user reading the QA
+    report ("left untouched, check manually if needed"); the progress
+    callback message for each region does distinguish them. Distinct from
+    `failed` (a region that WAS attempted but the provider call itself
+    raised). Mirrors PdfTranslationStats.skipped's role (a structurally-
+    excluded block, not an error)."""
     failed: int = 0
     chars_sent: int = 0
     cancelled: bool = False
@@ -100,6 +149,7 @@ class ImageTranslationStats:
 def build_corrected_replacements(
     replacements: list[TextReplacement],
     edited_texts: dict[int, str],
+    edited_geometry: dict[int, tuple[int, int, int, int]] | None = None,
 ) -> list[TextReplacement]:
     """Turn a correction-table UI's edits back into a new list of
     TextReplacement ready for a fresh InpaintingBackend.apply() call -
@@ -120,7 +170,22 @@ def build_corrected_replacements(
     build_corrected_records_from_html()'s "only touch rows that were
     genuinely dirty" contract.
 
-    An index outside `range(len(replacements))` in `edited_texts` is
+    `edited_geometry` - added for the draggable/resizable box canvas in
+    ImageCorrectionDialog (RoadMap.md/Backlog.md 21.08.2026: a real user's
+    infographic still had a handful of boxes in the wrong place/size even
+    after the automatic placement fixes, and asked for a way to nudge
+    individual boxes by hand rather than accept-or-redo-nothing) - maps a
+    `replacements` LIST INDEX to a (x, y, width, height) pixel tuple in
+    the SAME coordinate system as OcrTextRegion (top-left origin, whole
+    image). An index present here gets a region rebuilt with this
+    geometry (same `text`/`confidence`, only x/y/width/height replaced -
+    see dataclasses.replace()) independently of whether that same index
+    is also present in `edited_texts`: a row can have its text corrected,
+    its box moved/resized, both, or neither, in any combination. None
+    (the default) behaves exactly like the pre-geometry-editing version
+    of this function - no region is ever touched.
+
+    An index outside `range(len(replacements))` in either dict is
     silently ignored - lets a caller pass a dict built once against a
     possibly-stale `replacements` length without needing to defensively
     filter it first.
@@ -128,10 +193,17 @@ def build_corrected_replacements(
     corrected: list[TextReplacement] = []
     for index, replacement in enumerate(replacements):
         edited_text = edited_texts.get(index)
-        if edited_text is None or edited_text == replacement.translated_text:
+        text_changed = edited_text is not None and edited_text != replacement.translated_text
+        geometry = edited_geometry.get(index) if edited_geometry else None
+        if not text_changed and geometry is None:
             corrected.append(replacement)
             continue
-        corrected.append(TextReplacement(region=replacement.region, translated_text=edited_text))
+        region = replacement.region
+        if geometry is not None:
+            x, y, width, height = geometry
+            region = dataclasses.replace(region, x=x, y=y, width=width, height=height)
+        translated_text = edited_text if text_changed else replacement.translated_text
+        corrected.append(TextReplacement(region=region, translated_text=translated_text))
     return corrected
 
 
@@ -146,6 +218,7 @@ def translate_image(
     source_lang: str | None = None,
     ocr_language: str | None = None,
     min_confidence: float = DEFAULT_MIN_OCR_CONFIDENCE,
+    max_height_ratio: float = DEFAULT_MAX_HEIGHT_RATIO,
     progress_callback: Callable[[str], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
     stats_callback: Callable[[ImageTranslationStats], None] | None = None,
@@ -160,10 +233,13 @@ def translate_image(
     wraps the whole job call - mirrors ui/workers.py::PdfTranslationWorker.run()).
 
     A region whose `region.confidence` is below `min_confidence` (see
-    DEFAULT_MIN_OCR_CONFIDENCE's docstring) is never sent to the provider
-    at all - counted in `stats.skipped`, left completely untouched in the
-    output (no translation, no box drawn over it), same "don't guess"
-    principle as everything else in this pipeline that fails closed.
+    DEFAULT_MIN_OCR_CONFIDENCE's docstring), OR whose height exceeds the
+    image's own outlier threshold (`max_height_ratio` times the median
+    recognized-line height - see DEFAULT_MAX_HEIGHT_RATIO's docstring), is
+    never sent to the provider at all - counted in `stats.skipped`, left
+    completely untouched in the output (no translation, no box drawn over
+    it), same "don't guess" principle as everything else in this pipeline
+    that fails closed.
 
     `should_cancel`, if given, is polled before each region's translation
     call (between API calls, never mid-call). Once it returns True,
@@ -195,6 +271,7 @@ def translate_image(
 
     regions = ocr_engine.recognize(source_path, language=ocr_language)
     stats.regions = regions
+    max_plausible_height = _max_plausible_height(regions, min_confidence, max_height_ratio)
 
     for index, region in enumerate(regions):
         if _cancelled():
@@ -205,6 +282,17 @@ def translate_image(
             _notify(
                 f"Textregion {index + 1}/{len(regions)}: uebersprungen "
                 f"(niedrige OCR-Konfidenz {region.confidence:.0f})"
+            )
+            stats.skipped += 1
+            _report()
+            continue
+
+        if max_plausible_height is not None and region.height > max_plausible_height:
+            _notify(
+                f"Textregion {index + 1}/{len(regions)}: uebersprungen "
+                f"(ungewoehnlich grosse Bounding-Box, vermutlich Icon-/"
+                f"Grafik-Fehllesung - Hoehe {region.height}px, erwartet bis "
+                f"zu {max_plausible_height:.0f}px)"
             )
             stats.skipped += 1
             _report()

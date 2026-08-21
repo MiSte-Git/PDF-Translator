@@ -10,7 +10,7 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
-import fitz
+import pymupdf as fitz
 import pytest
 
 from pipeline.pdf.translate_pdf import build_corrected_records

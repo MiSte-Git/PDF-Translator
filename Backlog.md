@@ -109,8 +109,21 @@
   andere Zugangsdaten-Architektur) vs. native Installer (PyInstaller/
   Briefcase o. ä., überschaubarer Aufwand, aber iPad bleibt ungelöst und
   GPU-Backend muss aus dem Basis-Paket ausgeschlossen werden) vs. Hybrid.
-  Keine Entscheidung getroffen - siehe Konversation vom 18.08.2026 für die
-  ausführliche Abwägung.
+
+  **Entscheidung (18.08.2026, Michael):** native Installer/Standalone-Route,
+  keine Web-App (iPad damit vorerst zurückgestellt). Schwere/optionale
+  Abhängigkeiten (Tesseract, PyTorch fürs GPU-Backend) sollen NICHT im
+  Installer mitgeliefert, sondern bei Bedarf vor Ort separat installiert
+  werden - genau das Muster, das requirements-gpu.txt für GPU-Inpainting
+  schon heute vorsieht, jetzt auch für die Standalone-Distribution gedacht.
+  Wichtige praktische Einschränkung, noch mit Michael zu klären: PyInstaller/
+  Briefcase bauen NICHT plattformübergreifend - ein Windows-Installer muss
+  auf echtem Windows gebaut werden, ein macOS-Installer auf echtem macOS;
+  aus dieser (Linux-)Sandbox lässt sich verlässlich nur der Linux-Build
+  erstellen/testen. Noch offen: ob Michael die Windows/macOS-Builds selbst
+  auf seinen Geräten ausführt, oder ob langfristig eine CI-Pipeline
+  (z. B. GitHub Actions mit Runnern je Betriebssystem) das übernehmen soll.
+  Umsetzung noch nicht begonnen.
 
 ## Zu verifizieren
 - [ ] Word-Pfad: PAGE-Feld in footer1.xml sollte sich bei Neuberechnung automatisch aktualisieren, auch wenn das übersetzte Dokument länger wird als das Original - noch nicht an einem tatsächlich länger werdenden Dokument verifiziert (Word aktualisiert Felder nicht immer automatisch beim programmatischen Schreiben, ggf. muss ein Feld-Update erzwungen werden)

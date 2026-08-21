@@ -66,6 +66,23 @@ _MIN_FONT_SIZE = 9
 # Ober-/Unterlängen aufeinanderfolgender Zeilen nicht berühren).
 _LINE_SPACING = 1.15
 
+# Luminance-Differenz zum geschätzten Hintergrund, ab der ein Pixel als
+# "Tinte" (Teil eines Glyphen-Strichs) statt Hintergrund zählt (siehe
+# _ink_ratio() unten) - ein realer Nutzer-Fund (RoadMap.md/Backlog.md,
+# 21.08.2026): jede zurückgeschriebene Übersetzung wurde bisher IMMER in
+# DejaVuSans Regular gerendert, unabhängig davon, ob die Original-Zeile
+# fett war - bei einem real getesteten Infografik-Design (durchgehend
+# fette/halbfette Display-Schrift für Überschriften UND Fließtext) sah
+# dadurch jede übersetzte Zeile im direkten Vergleich zu dünn/"anders"
+# aus. 40 wurde gegen echte JPEG-Regionen dieses Bilds kalibriert:
+# gemessene Ink-Ratios für fünf visuell bestätigt fette Original-Zeilen
+# lagen bei diesem Schwellwert zwischen 0.37 und 0.55 und damit in jedem
+# Fall klar näher an einer synthetisch fett gerenderten Vergleichszeile
+# als an einer regulären (siehe _estimate_is_bold()) - kein absoluter
+# Schwellwert für "ist fett", sondern nur die Pixel-Klassifikation, auf
+# der der RELATIVE Vergleich in _estimate_is_bold() aufbaut.
+_INK_LUMINANCE_THRESHOLD = 40
+
 
 class InpaintingError(Exception):
     """Raised when a backend fails to produce the replacement image -
@@ -100,16 +117,30 @@ class InpaintingBackend(Protocol):
         ...
 
 
-def _load_font(size: int):
+def _load_font(size: int, bold: bool = False):
     """Load a font at the given PIXEL SIZE directly (not a region height
     to derive a size from - see _fit_text() below for that step, done
     once by the caller instead of inside this function, so a caller
     trying several candidate sizes doesn't repeat the *0.8 conversion
-    every time)."""
+    every time).
+
+    `bold` (RoadMap.md/Backlog.md 21.08.2026, see _estimate_is_bold() for
+    where it comes from) picks _FALLBACK_FONT_PATHS' Bold entry FIRST
+    instead of Regular - previously EVERY call always tried Regular
+    first, so Bold was effectively dead code (Regular is present on
+    essentially every real system this runs on) and every rendered
+    translation came out in the same weight regardless of the original
+    line's actual weight. Still falls back to the OTHER weight (then
+    Pillow's built-in default) if the preferred one's file is missing -
+    same "never crash, always render something" fallback chain as
+    before, just weight-aware now.
+    """
     from PIL import ImageFont
 
     size = max(1, size)
-    for path in _FALLBACK_FONT_PATHS:
+    regular_path, bold_path = _FALLBACK_FONT_PATHS
+    paths = (bold_path, regular_path) if bold else (regular_path, bold_path)
+    for path in paths:
         try:
             return ImageFont.truetype(path, size)
         except OSError:
@@ -144,45 +175,64 @@ def _wrap_text_to_width(draw, text: str, font, max_width: int) -> list[str]:
     return lines
 
 
-def _fit_text(draw, text: str, region: OcrTextRegion) -> tuple[list[str], object, int]:
-    """Pick the largest font size - starting from the same region-height-
-    derived size the old single-line code always used, but capped at
-    _MAX_FONT_SIZE regardless of region.height (see that constant's
-    docstring) - that, once `text` is word-wrapped to region.width,
-    fits within region.height without shrinking past _MIN_FONT_SIZE.
+def _initial_font_size(region: OcrTextRegion) -> int:
+    """Starting point for _fit_text()'s shrink-to-fit loop, derived from
+    the region's own OCR height and capped at _MAX_FONT_SIZE (see that
+    constant's docstring) - factored out of _fit_text() so
+    _estimate_is_bold() below can pick a comparably-sized synthetic
+    sample without duplicating the *0.8 conversion."""
+    return min(max(_MIN_FONT_SIZE, int(region.height * 0.8)), _MAX_FONT_SIZE)
+
+
+def _fit_text(
+    draw, text: str, region: OcrTextRegion, max_height: float, bold: bool = False
+) -> tuple[list[str], object, int]:
+    """Pick the largest font size - starting from _initial_font_size()'s
+    region-height-derived size, in the requested weight (`bold` - see
+    _estimate_is_bold()) - that, once `text` is word-wrapped to
+    region.width, fits within `max_height` without shrinking past
+    _MIN_FONT_SIZE.
 
     This is a SHRINK-to-fit strategy, deliberately never a GROW-the-box
-    one: growing region.height to fit more wrapped lines would risk the
-    box encroaching on whatever sits just below it (a real risk in
-    tightly line-spaced screenshots - see the Backlog.md 18.08.2026 fund
-    that motivated this function), overwriting content that was never
-    part of this replacement. At _MIN_FONT_SIZE the wrapped block may
-    still exceed region.height - that overflow is accepted rather than
-    shrinking further into illegibility, mirroring the PDF pipeline's
-    own insert_text() "always make it fit somewhere" policy (see
+    one: growing past `max_height` to fit more wrapped lines would risk
+    the box encroaching on whatever sits just below it - which is exactly
+    what `max_height` itself is computed to leave room for (see
+    _vertical_room_below(), whose result every caller below passes here
+    instead of region.height directly - a real risk in tightly line-
+    spaced screenshots/infographics, see the Backlog.md 18.08.2026 and
+    21.08.2026 finds that motivated this function and this parameter,
+    respectively). At _MIN_FONT_SIZE the wrapped block may still exceed
+    `max_height` - that overflow is accepted rather than shrinking
+    further into illegibility, mirroring the PDF pipeline's own
+    insert_text() "always make it fit somewhere" policy (see
     pipeline/pdf/pymupdf_engine.py).
 
     Returns (lines, font, line_height) - the caller draws each line at
     `region.y + i * line_height`, same x for every line.
     """
-    start_size = min(max(_MIN_FONT_SIZE, int(region.height * 0.8)), _MAX_FONT_SIZE)
-    size = start_size
+    size = _initial_font_size(region)
     while True:
-        font = _load_font(size)
+        font = _load_font(size, bold=bold)
         lines = _wrap_text_to_width(draw, text, font, max(region.width, 1))
         line_height = max(1, int(size * _LINE_SPACING))
         total_height = line_height * len(lines)
-        if total_height <= region.height or size <= _MIN_FONT_SIZE:
+        if total_height <= max_height or size <= _MIN_FONT_SIZE:
             return lines, font, line_height
         size = max(_MIN_FONT_SIZE, size - 2)
 
 
 def _draw_fitted_text(
-    draw, region: OcrTextRegion, text: str, color: tuple[int, int, int], image_height: int
+    draw,
+    region: OcrTextRegion,
+    text: str,
+    color: tuple[int, int, int],
+    image_height: int,
+    max_height: float,
+    bold: bool = False,
 ) -> None:
     """Shared final drawing step for all three InpaintingBackend
     implementations below - wraps and shrinks `text` to fit inside
-    `region` (see _fit_text()) instead of the old single
+    `max_height` (see _fit_text()) instead of the old single
     draw.text((region.x, region.y), text, ...) call, which drew the
     ENTIRE translated text on one unwrapped line regardless of
     region.width - the real cause (confirmed against actual user-
@@ -191,18 +241,206 @@ def _draw_fitted_text(
     longer-than-English target language) no longer fit the original
     line's width.
 
+    `max_height` - normally region.height's neighbour-aware replacement
+    from _vertical_room_below(), NOT region.height itself (see that
+    function's docstring for why the two differ and Backlog.md
+    21.08.2026 for the real image that motivated the distinction) - is a
+    separate parameter from region.height so a caller can pass the plain
+    region.height back in specific cases (e.g. a test asserting the
+    original single-region behaviour) without needing a second region in
+    play.
+
     `image_height` clips line drawing at the image's own bottom edge -
     relevant only for the rare _MIN_FONT_SIZE-and-still-overflowing case
     described in _fit_text()'s docstring, so an extreme case can't draw
     lines past the image entirely.
+
+    `bold` (RoadMap.md/Backlog.md 21.08.2026, see _estimate_is_bold())
+    picks the Bold vs Regular DejaVu family for the WHOLE wrapped block -
+    every InpaintingBackend.apply() below estimates this ONCE per region,
+    from the original (pre-overwrite) pixels, before calling here.
     """
-    lines, font, line_height = _fit_text(draw, text, region)
+    lines, font, line_height = _fit_text(draw, text, region, max_height, bold=bold)
     y = region.y
     for line in lines:
         if y >= image_height:
             break
         draw.text((region.x, y), line, fill=color, font=font)
         y += line_height
+
+
+def _ink_ratio(image, x: int, y: int, width: int, height: int, background: tuple[int, int, int]) -> float:
+    """Fraction of pixels within [x, x+width) x [y, y+height) (clamped to
+    the image bounds) whose luminance differs from `background`'s by more
+    than _INK_LUMINANCE_THRESHOLD - a crude proxy for "how much stroke/
+    glyph area this region occupies", used ONLY as one half of the
+    RELATIVE comparison in _estimate_is_bold() below, never as an
+    absolute measurement anything else depends on (real photographed/
+    scanned/compressed text is far too noisy for an absolute ink-ratio
+    threshold to mean the same thing across different images, fonts and
+    sizes - see that function's docstring)."""
+    img_w, img_h = image.size
+    x0, y0 = max(0, x), max(0, y)
+    x1, y1 = min(img_w, x + width), min(img_h, y + height)
+    if x1 <= x0 or y1 <= y0:
+        return 0.0
+    pixels = image.load()
+    bg_luminance = 0.299 * background[0] + 0.587 * background[1] + 0.114 * background[2]
+    ink = 0
+    total = 0
+    for px in range(x0, x1):
+        for py in range(y0, y1):
+            r, g, b = pixels[px, py]
+            luminance = 0.299 * r + 0.587 * g + 0.114 * b
+            total += 1
+            if abs(luminance - bg_luminance) > _INK_LUMINANCE_THRESHOLD:
+                ink += 1
+    return ink / total if total else 0.0
+
+
+def _synthetic_ink_ratio(text: str, font) -> float:
+    """_ink_ratio() of a freshly black-on-white-rendered sample of `text`
+    in `font` - the "known weight" reference point _estimate_is_bold()
+    compares the REAL region's observed ink ratio against."""
+    from PIL import Image, ImageDraw
+
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    bbox = probe.textbbox((0, 0), text, font=font)
+    width = max(1, bbox[2] - bbox[0] + 4)
+    height = max(1, bbox[3] - bbox[1] + 4)
+    sample = Image.new("RGB", (width, height), "white")
+    ImageDraw.Draw(sample).text((2, 2), text, fill="black", font=font)
+    return _ink_ratio(sample, 0, 0, width, height, (255, 255, 255))
+
+
+def _estimate_is_bold(image, region: OcrTextRegion, background: tuple[int, int, int], candidate_text: str) -> bool:
+    """Guess whether `region`'s ORIGINAL text (still present in `image` -
+    the caller must pass an image where this region hasn't been
+    overwritten/inpainted yet) was set in a bold weight, so the
+    translated replacement can be drawn in the same weight instead of
+    _load_font()'s old always-Regular default.
+
+    Real regions (JPEG noise, anti-aliasing, colored/patterned
+    backgrounds, decorative surrounding graphics) never look like a clean
+    synthetic render - an ABSOLUTE ink-ratio threshold ("bold if ink
+    ratio > X") calibrated on one image would not transfer to another.
+    Instead this renders a comparison string once in Regular and once in
+    Bold at a comparable size (_initial_font_size()) and picks whichever
+    synthetic ink ratio the real region's OWN observed ink ratio sits
+    closer to.
+
+    That comparison string is `region.text` - the ORIGINAL recognized
+    text - whenever OCR actually found one, NOT `candidate_text` (the
+    TRANSLATED text) despite that being what will actually get drawn.
+    This matters: `observed` is measured from the ORIGINAL glyphs still
+    sitting in `image`, so the fairest possible comparison renders the
+    SAME string synthetically, isolating font weight as the only
+    remaining variable. An early version of this function used
+    `candidate_text` instead and was measurably less reliable in
+    practice (RoadMap.md/Backlog.md 21.08.2026): a real region confirmed
+    bold by eye flipped between correctly- and incorrectly-classified
+    across otherwise-equivalent German candidate strings ("Das ist
+    fetter Text" correctly -> bold, "Fetter Beispieltext" incorrectly ->
+    regular, same region, same image) purely because different letters
+    carry different natural ink density, a confound `region.text` avoids
+    entirely. `candidate_text` is still the fallback for a region with no
+    original text at all - a manually-drawn box from the correction UI
+    (ui/image_correction_dialog.py's "Neue Box hinzufügen") - where there
+    is no original glyph content to compare against in the first place.
+
+    Exploratory heuristic, not a guarantee (RoadMap.md/Backlog.md
+    21.08.2026: the user explicitly asked for this knowing "Aufwand
+    unklar, kein Fidelity-Garant") - an unusual original font or a very
+    noisy/textured background can still produce the wrong guess.
+    Defaults to False (Regular) whenever the comparison can't
+    discriminate at all (no text at all to compare against, or
+    _load_font() silently fell back to the same file for both weights
+    because Bold isn't installed on this system).
+    """
+    sample_text = region.text if region.text.strip() else candidate_text
+    if not sample_text.strip():
+        return False
+    size = _initial_font_size(region)
+    regular_font = _load_font(size, bold=False)
+    bold_font = _load_font(size, bold=True)
+    regular_ratio = _synthetic_ink_ratio(sample_text, regular_font)
+    bold_ratio = _synthetic_ink_ratio(sample_text, bold_font)
+    if regular_ratio == bold_ratio:
+        return False
+    observed = _ink_ratio(image, region.x, region.y, region.width, region.height, background)
+    return abs(observed - bold_ratio) < abs(observed - regular_ratio)
+
+
+# Multiple of region.height used as the vertical-growth ceiling when
+# _vertical_room_below() finds no OTHER translated region below this one
+# in the same horizontal band (last line in a box, or nothing else
+# recognized/translated further down that column) - generous, since
+# there is no real neighbour to protect against, but still bounded so a
+# short lone region near the image's bottom edge doesn't effectively
+# claim unlimited height. Same value as
+# pipeline.images.translate_image.DEFAULT_MAX_HEIGHT_RATIO by
+# coincidence of both being "how far past one line is still plausible",
+# not because the two are the same computation.
+_NO_NEIGHBOR_HEIGHT_ALLOWANCE = 4.0
+
+# Pixels of breathing room _vertical_room_below() subtracts from the raw
+# gap to the nearest region below - so wrapped/shrunk text stops just
+# short of touching that region's own top edge rather than landing
+# exactly on it.
+_VERTICAL_SAFETY_MARGIN = 3
+
+
+def _vertical_room_below(region: OcrTextRegion, other_regions: list[OcrTextRegion]) -> float:
+    """How far `region`'s drawn text may extend downward (from
+    `region.y`) before reaching the nearest OTHER region below it in the
+    same horizontal band, minus _VERTICAL_SAFETY_MARGIN - the `max_height`
+    every InpaintingBackend.apply() below passes to _draw_fitted_text()
+    instead of region.height directly.
+
+    Added after a real user-reported infographic (RoadMap.md/Backlog.md,
+    21.08.2026) with very tight line spacing (a multi-tier bullet list
+    with only a few pixels between one recognized line and the next):
+    region.height alone is this project's ORIGINAL, single-line English
+    text's height - frequently far too little room once a translated
+    (typically longer) text needs to wrap to a second line, and
+    _fit_text()'s shrink-to-fit accepted that overflow rather than
+    shrinking into illegibility (see that function's own docstring). But
+    accepting it blindly meant overflowing text collided with whatever
+    real, still-visible content - translated or original - sat in the
+    very next line, a few pixels below.
+
+    "Same horizontal band" (their x-ranges actually overlap) matters so a
+    sidebar box's constraining neighbour is the next line INSIDE that
+    same sidebar box, never some unrelated line in the main column merely
+    sitting at a similar height. Falls back to a generous multiple of
+    `region.height` (_NO_NEIGHBOR_HEIGHT_ALLOWANCE) when no such neighbour
+    exists at all.
+
+    Known remaining gap: `other_regions` is only ever the CURRENT run's
+    successfully TRANSLATED regions (every InpaintingBackend.apply()
+    passes `[r.region for r in replacements]`) - a region OCR recognized
+    but skipped (low confidence or an outlier height, see
+    pipeline.images.translate_image), or text OCR never detected at all,
+    still occupies real space in the image but isn't counted here, so a
+    translated region can still overflow into either of those. Left as a
+    known limitation rather than threading the full skipped-region list
+    through InpaintingBackend.apply()'s existing signature.
+    """
+    region_bottom = region.y + region.height
+    best_gap: float | None = None
+    for other in other_regions:
+        if other is region:
+            continue
+        if other.x + other.width <= region.x or other.x >= region.x + region.width:
+            continue  # no horizontal overlap - a different column/box
+        if other.y < region_bottom:
+            continue  # not actually below (overlaps or sits above)
+        gap = other.y - region_bottom
+        if best_gap is None or gap < best_gap:
+            best_gap = gap
+    if best_gap is None:
+        return region.height * _NO_NEIGHBOR_HEIGHT_ALLOWANCE
+    return max(best_gap - _VERTICAL_SAFETY_MARGIN, 1)
 
 
 def _sample_background_color(image, x: int, y: int, width: int, height: int) -> tuple[int, int, int]:
@@ -277,15 +515,23 @@ class BoxOverlayBackend:
             raise InpaintingError(f"Bild konnte nicht geöffnet werden: {exc}") from exc
 
         draw = ImageDraw.Draw(image)
+        all_regions = [r.region for r in replacements]
         for replacement in replacements:
             region = replacement.region
             background = _sample_background_color(image, region.x, region.y, region.width, region.height)
+            # Bold estimation reads `image`'s CURRENT pixels at this
+            # region - must happen before draw.rectangle() below
+            # overwrites them, or there is nothing left to estimate from.
+            is_bold = _estimate_is_bold(image, region, background, replacement.translated_text)
             draw.rectangle(
                 [region.x, region.y, region.x + region.width, region.y + region.height],
                 fill=background,
             )
             text_color = _contrasting_text_color(background)
-            _draw_fitted_text(draw, region, replacement.translated_text, text_color, image.height)
+            max_height = _vertical_room_below(region, all_regions)
+            _draw_fitted_text(
+                draw, region, replacement.translated_text, text_color, image.height, max_height, bold=is_bold
+            )
 
         try:
             image.save(output_path)
@@ -346,6 +592,7 @@ class CvInpaintingBackend:
         from PIL import ImageDraw
 
         draw = ImageDraw.Draw(result)
+        all_regions = [r.region for r in replacements]
         for replacement in replacements:
             region = replacement.region
             # The interior itself is now a valid background estimate
@@ -355,8 +602,17 @@ class CvInpaintingBackend:
             # would still be correct here too but is a needless detour
             # now that the interior itself is meaningful.
             background = _average_region_color(result, region.x, region.y, region.width, region.height)
+            # `pil_image` (unlike `result`) was never touched by
+            # cv2.inpaint() - still holds the ORIGINAL, un-reconstructed
+            # glyph pixels this region's boldness has to be estimated
+            # from; `background` still comes from the RECONSTRUCTED
+            # `result` (the best available background-color estimate).
+            is_bold = _estimate_is_bold(pil_image, region, background, replacement.translated_text)
             text_color = _contrasting_text_color(background)
-            _draw_fitted_text(draw, region, replacement.translated_text, text_color, result.height)
+            max_height = _vertical_room_below(region, all_regions)
+            _draw_fitted_text(
+                draw, region, replacement.translated_text, text_color, result.height, max_height, bold=is_bold
+            )
 
         try:
             result.save(output_path)
@@ -508,6 +764,12 @@ class GpuInpaintingBackend:
         except Exception as exc:
             raise InpaintingError(f"Bild konnte nicht geöffnet werden: {exc}") from exc
 
+        # Kept around ONLY for _estimate_is_bold() below, which needs the
+        # ORIGINAL, not-yet-reconstructed glyph pixels - `image` itself
+        # gets REASSIGNED to the model's output a few lines down (not
+        # mutated in place), so this reference has to be captured first or
+        # it would be lost once that reassignment happens.
+        original_image = image
         if replacements:
             mask = _build_inpainting_mask(image.size, replacements)
             model = _get_lama_model(torch, SimpleLama)
@@ -517,6 +779,7 @@ class GpuInpaintingBackend:
                 raise InpaintingError(f"KI-Inpainting fehlgeschlagen: {exc}") from exc
 
         draw = ImageDraw.Draw(image)
+        all_regions = [r.region for r in replacements]
         for replacement in replacements:
             region = replacement.region
             # The model's own reconstructed interior is now a valid
@@ -524,8 +787,12 @@ class GpuInpaintingBackend:
             # above) - sampled directly rather than BoxOverlayBackend's
             # outside-ring approach.
             background = _average_region_color(image, region.x, region.y, region.width, region.height)
+            is_bold = _estimate_is_bold(original_image, region, background, replacement.translated_text)
             text_color = _contrasting_text_color(background)
-            _draw_fitted_text(draw, region, replacement.translated_text, text_color, image.height)
+            max_height = _vertical_room_below(region, all_regions)
+            _draw_fitted_text(
+                draw, region, replacement.translated_text, text_color, image.height, max_height, bold=is_bold
+            )
 
         try:
             image.save(output_path)

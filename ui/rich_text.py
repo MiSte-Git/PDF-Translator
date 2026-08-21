@@ -8,8 +8,8 @@ trade-off turned out to matter to a real user).
 Deliberately its own module, not part of pipeline/pdf/pymupdf_engine.py:
 this file is the ONLY place in the project allowed to import Qt's rich
 text classes (QFont/QTextDocument), the same separation-of-concerns reason
-pymupdf_engine.py is the only file allowed to import fitz - the pipeline
-layer must stay UI-framework-agnostic.
+pymupdf_engine.py is the only file allowed to import PyMuPDF - the
+pipeline layer must stay UI-framework-agnostic.
 
 Loading a translated_html string INTO a QTextEdit needs no conversion at
 all: QTextEdit.setHtml() already understands this project's tag set

@@ -35,6 +35,23 @@ def _build_blank_image(path: Path) -> None:
     Image.new("RGB", (200, 100), "white").save(path)
 
 
+def _build_two_column_image(path: Path) -> None:
+    """Two single words on the SAME visual row, far enough apart to
+    simulate a two-column layout (a main content area + a right-hand
+    sidebar box) - the shape that motivated _MAX_WORD_GAP_RATIO (see
+    pipeline/images/ocr.py, RoadMap.md/Backlog.md 21.08.2026): without the
+    gap-split, Tesseract's (block, par, line) grouping alone would glue
+    "Left" and "Right" into one nonsensical "Left Right" region spanning
+    the whole gap between them.
+    """
+    font = ImageFont.truetype(_FONT_PATH, 24)
+    image = Image.new("RGB", (600, 80), "white")
+    draw = ImageDraw.Draw(image)
+    draw.text((20, 20), "Left", fill="black", font=font)
+    draw.text((420, 20), "Right", fill="black", font=font)
+    image.save(path)
+
+
 def test_tesseract_available_reflects_shutil_which(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("pipeline.images.ocr.shutil.which", lambda name: "/usr/bin/tesseract")
     assert tesseract_available() is True
@@ -87,6 +104,25 @@ def test_recognize_returns_empty_list_for_blank_image(tmp_path: Path) -> None:
     regions = TesseractOcrEngine().recognize(str(source))
 
     assert regions == []
+
+
+@pytest.mark.skipif(not tesseract_available(), reason="Tesseract binary not installed")
+def test_recognize_splits_words_far_apart_on_the_same_line(tmp_path: Path) -> None:
+    """A wide horizontal gap between two words Tesseract put on the same
+    (block, par, line) - the two-column-layout case - must yield TWO
+    regions, not one giant one spanning the gap (see
+    _build_two_column_image()'s docstring and _MAX_WORD_GAP_RATIO)."""
+    source = tmp_path / "two_columns.png"
+    _build_two_column_image(source)
+
+    regions = TesseractOcrEngine().recognize(str(source))
+
+    assert len(regions) == 2
+    first, second = regions
+    assert first.text == "Left"
+    assert second.text == "Right"
+    # Left-to-right within the row, same as reading order elsewhere.
+    assert first.x < second.x
 
 
 @pytest.mark.skipif(not tesseract_available(), reason="Tesseract binary not installed")

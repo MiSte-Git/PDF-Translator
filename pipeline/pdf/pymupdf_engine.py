@@ -1,6 +1,9 @@
-"""PdfEngine implementation backed by PyMuPDF (fitz).
+"""PdfEngine implementation backed by PyMuPDF (imported as `fitz`, its
+legacy alias; `import fitz` alone is deprecated by PyMuPDF and now
+triggers a runtime warning, so this project uses `import pymupdf as
+fitz` instead - same API, no warning).
 
-This is the only file in the project allowed to import fitz/PyMuPDF.
+This is the only file in the project allowed to import PyMuPDF.
 """
 from __future__ import annotations
 
@@ -9,7 +12,7 @@ import json
 import re
 from pathlib import Path
 
-import fitz
+import pymupdf as fitz
 
 from pipeline.pdf.base import (
     LINE_BREAK_MARKER,

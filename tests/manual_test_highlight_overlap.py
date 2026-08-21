@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-import fitz  # PyMuPDF
+import pymupdf as fitz  # PyMuPDF
 
 PDF_PATH = "1526 VIRELICON.pdf"
 PAGE_INDEX = 1
