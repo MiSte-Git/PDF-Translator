@@ -139,6 +139,7 @@ class _ResizableRegionItem(QGraphicsRectItem):
         super().__init__(0, 0, width, height)
         self.row = row
         self._text = text
+        self._show_preview = True
         self._on_changed = on_changed
         self._on_selected = on_selected
         self._resizing = False
@@ -164,6 +165,25 @@ class _ResizableRegionItem(QGraphicsRectItem):
         if text == self._text:
             return
         self._text = text
+        self.update()
+
+    def set_show_preview(self, show: bool) -> None:
+        """Toggle the translated-text overlay drawn inside this box (see
+        paint()) - added after Michael reported (23.08.2026): "Bei der
+        Korrektur sieht man leider den Text nicht deutlich, da ja die
+        Übersetzung das Original überlagert." The box's semi-transparent
+        FILL (_FILL_COLOR, alpha 40/255) already lets the pristine
+        original mostly show through, but the translated PREVIEW TEXT
+        itself is drawn fully opaque directly on top of it - exactly
+        where the original text sits, since both share the same box -
+        so the two visually collide, especially for a longer German
+        translation. `show=False` skips the text draw entirely (outline
+        + faint fill only), leaving the original underneath fully
+        legible; called from every box at once via
+        ImageCorrectionDialog._on_toggle_original_visible()."""
+        if show == self._show_preview:
+            return
+        self._show_preview = show
         self.update()
 
     def set_active(self, active: bool) -> None:
@@ -249,7 +269,7 @@ class _ResizableRegionItem(QGraphicsRectItem):
             finally:
                 painter.restore()
 
-        if not self._text or rect.width() < 6 or rect.height() < 6:
+        if not self._show_preview or not self._text or rect.width() < 6 or rect.height() < 6:
             return
         painter.save()
         try:
@@ -555,6 +575,19 @@ class ImageCorrectionDialog(QDialog):
         self.add_region_button.setCheckable(True)
         self.add_region_button.toggled.connect(self._on_add_region_toggled)
         canvas_toolbar.addWidget(self.add_region_button)
+        # 23.08.2026, real user report: "Bei der Korrektur sieht man leider
+        # den Text nicht deutlich, da ja die Übersetzung das Original
+        # überlagert." - every box's translated-text PREVIEW is drawn
+        # fully opaque directly over the pristine original (see
+        # _ResizableRegionItem.paint()/set_show_preview()'s own docstring
+        # for the exact mechanism); this toggle lets the user hide every
+        # box's preview text at once to read the original underneath,
+        # without losing the box outlines themselves (still needed to see
+        # WHERE each region is while comparing against the original).
+        self.toggle_original_button = QPushButton(t("image_correction.show_original"))
+        self.toggle_original_button.setCheckable(True)
+        self.toggle_original_button.toggled.connect(self._on_toggle_original_visible)
+        canvas_toolbar.addWidget(self.toggle_original_button)
         canvas_toolbar.addStretch(1)
         # Zoom controls (RoadMap.md/Backlog.md 21.08.2026: a real user
         # reported having no way to zoom in on the canvas, making precise
@@ -737,6 +770,15 @@ class ImageCorrectionDialog(QDialog):
         t = self.language.text
         self.status_label.setText(t("image_correction.add_region_hint") if checked else "")
 
+    def _on_toggle_original_visible(self, checked: bool) -> None:
+        """"Original anzeigen" toggled - hides/shows every box's
+        translated-text preview at once (see _ResizableRegionItem.
+        set_show_preview()'s docstring). `checked=True` means "show the
+        original" -> hide the preview text, so this is inverted relative
+        to set_show_preview()'s own `show` meaning."""
+        for item in self._region_items:
+            item.set_show_preview(not checked)
+
     def _on_new_box_drawn(self, x: float, y: float, width: float, height: float) -> None:
         """A user just finished drawing a brand-new box on the canvas
         (RoadMap.md/Backlog.md 21.08.2026: for text Tesseract never
@@ -774,6 +816,12 @@ class ImageCorrectionDialog(QDialog):
             row, x, y, width, height, text="",
             on_changed=self._on_region_item_changed, on_selected=self._on_region_item_selected,
         )
+        # A brand-new box must respect whatever the "Original anzeigen"
+        # toggle is currently set to, same as every pre-existing box -
+        # otherwise a box drawn WHILE the toggle hides previews would
+        # start out ignoring it (only matters once the user types a
+        # translation for it; see set_show_preview()'s docstring).
+        item.set_show_preview(not self.toggle_original_button.isChecked())
         self.scene.addItem(item)
         self._region_items.append(item)
 

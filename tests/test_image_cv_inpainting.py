@@ -144,3 +144,74 @@ def test_apply_reconstructs_gradient_more_closely_than_flat_fill(tmp_path: Path)
     right_edge = pixels[region.x + region.width - 2, region.y + region.height - 1]
     assert left_edge != right_edge
     assert left_edge[0] < right_edge[0]  # darker on the left, matching the gradient's direction
+
+
+# --- obstacle_regions (22.08.2026 - see tests/test_image_inpainting.py's
+# identical section for the full real-user motivation; same verified
+# fixture coordinates reused here since _fit_text()/_vertical_room_below()
+# are shared by every backend, not re-derived per backend). --------------
+
+
+def _build_two_tight_lines_image(path: Path) -> OcrTextRegion:
+    font = ImageFont.truetype(_FONT_PATH, 24)
+    image = Image.new("RGB", (400, 150), "white")
+    draw = ImageDraw.Draw(image)
+    draw.text((20, 20), "Short", fill="black", font=font)
+    draw.text((20, 80), "Untouched Neighbour", fill="black", font=font)
+    image.save(path)
+    return OcrTextRegion(text="Untouched Neighbour", x=20, y=80, width=220, height=24, confidence=95.0)
+
+
+_OBSTACLE_TRANSLATED_TEXT = (
+    "Ein deutlich laengerer Text der garantiert mehrere Zeilen braucht dies und jenes"
+)
+
+
+def test_apply_with_obstacle_regions_leaves_the_skipped_neighbour_untouched(tmp_path: Path) -> None:
+    source = tmp_path / "tight.png"
+    neighbour_region = _build_two_tight_lines_image(source)
+    output = tmp_path / "out.png"
+
+    replacement = TextReplacement(
+        region=OcrTextRegion(text="Short", x=20, y=20, width=200, height=24, confidence=95.0),
+        translated_text=_OBSTACLE_TRANSLATED_TEXT,
+    )
+    CvInpaintingBackend().apply(
+        str(source), [replacement], str(output), obstacle_regions=[neighbour_region]
+    )
+
+    original = Image.open(source).convert("RGB")
+    result = Image.open(output).convert("RGB")
+    box = (0, neighbour_region.y, 400, neighbour_region.y + neighbour_region.height)
+    assert original.crop(box).tobytes() == result.crop(box).tobytes()
+
+
+def test_apply_obstacle_regions_are_never_added_to_the_inpainting_mask(tmp_path: Path) -> None:
+    """obstacle_regions must only affect TEXT PLACEMENT (via
+    _vertical_room_below()), never the cv2.inpaint() mask itself - an
+    obstacle region's ORIGINAL pixels (not a reconstructed background)
+    are exactly what must stay visible, so passing it as an obstacle must
+    NOT cause its interior to be erased/reconstructed the way a real
+    `replacements` region's interior is.
+    """
+    source = tmp_path / "tight.png"
+    neighbour_region = _build_two_tight_lines_image(source)
+    output = tmp_path / "out.png"
+
+    replacement = TextReplacement(
+        region=OcrTextRegion(text="Short", x=20, y=20, width=200, height=24, confidence=95.0),
+        translated_text="Kurz",
+    )
+    CvInpaintingBackend().apply(
+        str(source), [replacement], str(output), obstacle_regions=[neighbour_region]
+    )
+
+    original = Image.open(source).convert("RGB")
+    result = Image.open(output).convert("RGB")
+    box = (
+        neighbour_region.x,
+        neighbour_region.y,
+        neighbour_region.x + neighbour_region.width,
+        neighbour_region.y + neighbour_region.height,
+    )
+    assert original.crop(box).tobytes() == result.crop(box).tobytes()

@@ -70,11 +70,28 @@ DE = {
     ),
     "field.ocr_engine": "OCR-Engine",
     "ocr_engine.tesseract": "Tesseract (lokal)",
-    "ocr_engine.unavailable": (
+    "ocr_engine.tesseract.unavailable": (
         "Tesseract wurde auf diesem System nicht gefunden. Bitte installieren "
         "(siehe README.md) - ohne installiertes Tesseract kann kein Text in "
         "Bildern erkannt werden."
     ),
+    "ocr_engine.google_vision": "Google Cloud Vision (Cloud, Absatzerkennung)",
+    "ocr_engine.google_vision.unavailable": (
+        "Kein Google-API-Key konfiguriert. In den Einstellungen hinterlegen "
+        "(derselbe Key wie für Google Translate, siehe README.md) oder eine "
+        "andere OCR-Engine wählen."
+    ),
+    "ocr_engine.paddleocr": "PaddleOCR (lokal, Absatzerkennung)",
+    "ocr_engine.paddleocr.unavailable": (
+        "PaddleOCR ist nicht installiert (siehe requirements-paddleocr.txt) "
+        "oder eine andere OCR-Engine wählen."
+    ),
+    # Generischer Fallback (23.08.2026) - falls jemals ein OCR-Engine-Key
+    # ohne eigenen ".unavailable"-Eintrag registriert wird, siehe
+    # ui/app.py::_update_ocr_engine_hint()/_start()'s ocr_engine_available()-
+    # Check, die auf "ocr_engine.{key}.unavailable" mit Rückfall auf diesen
+    # generischen Text zugreifen.
+    "ocr_engine.unavailable": "Diese OCR-Engine ist auf diesem System nicht verfügbar.",
     "field.inpainting_backend": "Rückschreibe-Methode",
     "inpainting_backend.box_overlay": "Box-Overlay (Fläche überdecken)",
     "inpainting_backend.cv_inpainting": "Klassisches CPU-Inpainting (Hintergrund rekonstruieren)",
@@ -160,6 +177,7 @@ DE = {
     "image_correction.zoom_reset": "Ansicht anpassen",
     "image_correction.add_region": "Neue Box hinzufügen",
     "image_correction.add_region_hint": "Ziehe im Bild einen Bereich auf, um dort eine neue Box mit eigenem Text hinzuzufügen.",
+    "image_correction.show_original": "Original anzeigen",
     "image_correction.manual_region_label": "(manuell hinzugefügt, keine OCR-Erkennung)",
     "image_correction.manual_region_added": "Neue Box hinzugefügt - bitte Übersetzung im Editor eintragen.",
     "image_correction.column_original": "Original",
@@ -241,11 +259,23 @@ EN = {
     ),
     "field.ocr_engine": "OCR engine",
     "ocr_engine.tesseract": "Tesseract (local)",
-    "ocr_engine.unavailable": (
+    "ocr_engine.tesseract.unavailable": (
         "Tesseract was not found on this system. Please install it (see "
         "README.md) - text in images cannot be recognized without an "
         "installed Tesseract."
     ),
+    "ocr_engine.google_vision": "Google Cloud Vision (cloud, paragraph detection)",
+    "ocr_engine.google_vision.unavailable": (
+        "No Google API key configured. Set one in Settings (the same key "
+        "used for Google Translate, see README.md) or choose a different "
+        "OCR engine."
+    ),
+    "ocr_engine.paddleocr": "PaddleOCR (local, paragraph detection)",
+    "ocr_engine.paddleocr.unavailable": (
+        "PaddleOCR is not installed (see requirements-paddleocr.txt) or "
+        "choose a different OCR engine."
+    ),
+    "ocr_engine.unavailable": "This OCR engine is not available on this system.",
     "field.inpainting_backend": "Rewrite method",
     "inpainting_backend.box_overlay": "Box overlay (cover the area)",
     "inpainting_backend.cv_inpainting": "Classic CPU inpainting (reconstruct background)",
@@ -330,6 +360,7 @@ EN = {
     "image_correction.zoom_reset": "Fit to view",
     "image_correction.add_region": "Add new box",
     "image_correction.add_region_hint": "Drag an area on the image to add a new box with its own text there.",
+    "image_correction.show_original": "Show original",
     "image_correction.manual_region_label": "(added manually, no OCR match)",
     "image_correction.manual_region_added": "New box added - enter its translation in the editor.",
     "image_correction.column_original": "Original",

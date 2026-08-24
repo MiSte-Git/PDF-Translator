@@ -29,7 +29,14 @@ def get_api_key(key_name: str, env_names: tuple[str, ...] = ()) -> str:
     Keyring import/backend errors are treated as an unavailable fallback and
     reported without exposing any credential value.
     """
-    candidates = (*env_names, key_name.upper())
+    # dict.fromkeys() dedupes while preserving order - without it, a
+    # get_*_api_key() helper whose env_names already equals key_name.upper()
+    # (e.g. get_deepl_api_key(): env_names=("DEEPL_API_KEY",),
+    # key_name="deepl_api_key") listed that same variable twice in the
+    # error message below (found 22.08.2026 while building
+    # image_translate_cli's `check` command, which surfaces this message
+    # to a caller like TME - see CLI.md).
+    candidates = tuple(dict.fromkeys((*env_names, key_name.upper())))
     for env_name in candidates:
         value = os.environ.get(env_name)
         if value and value.strip():

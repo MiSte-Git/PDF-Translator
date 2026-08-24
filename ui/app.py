@@ -532,10 +532,22 @@ class MainWindow(QMainWindow):
         # instead of only as a wall of per-file failures at the end of a run
         # - see ui/document_job_common.py::ocr_engine_available() and the
         # matching fail-fast check in _start().
+        #
+        # Hint text is looked up PER ENGINE ("ocr_engine.{key}.unavailable",
+        # 23.08.2026, added alongside google_vision/paddleocr) rather than
+        # one shared "ocr_engine.unavailable" string - a single generic
+        # message was fine while Tesseract was the only engine that could
+        # ever BE unavailable, but "Tesseract wurde nicht gefunden..." is
+        # actively wrong/confusing shown for an unavailable Google-Vision-
+        # or PaddleOCR-selection. ui/i18n.py keeps "ocr_engine.unavailable"
+        # itself only as the generic fallback Language.text() already falls
+        # back to for any key with no dedicated translation.
         is_images = self.mode.currentData() == TranslationMode.IMAGES
         engine = self.ocr_engine.currentData()
         available = engine is None or ocr_engine_available(engine)
-        self.ocr_engine_hint.setText("" if available else self.language.text("ocr_engine.unavailable"))
+        self.ocr_engine_hint.setText(
+            "" if available else self.language.text(f"ocr_engine.{engine}.unavailable")
+        )
         self.ocr_engine_hint.setVisible(is_images and not available)
 
     def _inpainting_backend_changed(self) -> None:
@@ -702,7 +714,9 @@ class MainWindow(QMainWindow):
             # only ever surface as a wall of per-file failures at the end of
             # a full run.
             QMessageBox.warning(
-                self, self.language.text("dialog.check_input"), self.language.text("ocr_engine.unavailable"),
+                self,
+                self.language.text("dialog.check_input"),
+                self.language.text(f"ocr_engine.{request.ocr_engine}.unavailable"),
             )
             return
         if is_images and not inpainting_backend_available(request.inpainting_backend):

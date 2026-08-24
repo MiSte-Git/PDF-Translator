@@ -6,6 +6,7 @@ job-level coverage).
 """
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import pytest
@@ -123,7 +124,11 @@ def test_translate_image_counts_failed_region_without_aborting_others(tmp_path: 
     assert stats.translated == 1
     assert stats.failed == 1
     assert len(stats.errors) == 1
-    assert "region" in stats.errors[0]
+    # "block", not "region" (22.08.2026: a failed provider call now marks
+    # a whole merge_lines_into_paragraphs() group as failed, which may
+    # span more than one original OCR region - see translate_image()'s
+    # docstring).
+    assert "block" in stats.errors[0]
     assert destination.exists()
 
 
@@ -438,6 +443,146 @@ def test_translate_image_invokes_progress_and_stats_callbacks(tmp_path: Path) ->
     assert stats_snapshots == [1, 2]
 
 
+# --- obstacle_regions (22.08.2026 - real user, same real infographic +
+# GPU-Inpainting qa_report.txt that motivated the qa_report.txt settings
+# fix: "Boxen überlappen oder sind an falscher Stelle". This is the
+# translate_image()-level half of the fix - the OTHER half being
+# InpaintingBackend.apply()'s new parameter itself, covered in
+# tests/test_image_inpainting.py/tests/test_image_cv_inpainting.py. These
+# tests confirm translate_image() actually COMPUTES and PASSES the right
+# set of regions - every region OCR recognized that is NOT in
+# stats.replacements (skipped, failed, or never reached because
+# should_cancel fired first), regardless of which of those three reasons
+# applies - without depending on font/pixel rendering at all.) -----------
+
+
+class _RecordingBackend:
+    """Fake InpaintingBackend that just records the exact arguments its
+    apply() was called with, once - lets these tests assert on the
+    obstacle_regions list translate_image() computed without needing a
+    real image/font-rendering round-trip (that's what
+    tests/test_image_inpainting.py's obstacle_regions tests are for)."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[TextReplacement], list[OcrTextRegion] | None]] = []
+
+    def apply(
+        self,
+        image_path: str,
+        replacements: list[TextReplacement],
+        output_path: str,
+        obstacle_regions: list[OcrTextRegion] | None = None,
+    ) -> None:
+        self.calls.append((replacements, obstacle_regions))
+        Path(output_path).write_bytes(Path(image_path).read_bytes())
+
+
+def test_translate_image_passes_skipped_region_as_an_obstacle(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+
+    low_confidence_region = OcrTextRegion(text="0 & Oo", x=20, y=70, width=60, height=18, confidence=22.0)
+    regions = [
+        OcrTextRegion(text="Real Text", x=20, y=20, width=150, height=24, confidence=90.0),
+        low_confidence_region,
+    ]
+    backend = _RecordingBackend()
+
+    stats = translate_image(
+        str(source), str(destination), _StubOcrEngine(regions), backend,
+        _CountingProvider(), [], target_lang="de", min_confidence=40.0,
+    )
+
+    assert stats.skipped == 1
+    [(replacements, obstacle_regions)] = backend.calls
+    # merge_region_group() (22.08.2026) always rebuilds a fresh
+    # OcrTextRegion, even for a singleton group - same content as
+    # regions[0], but with line_height now set (see that field's
+    # docstring), so compare via dataclasses.replace() rather than
+    # identity/equality against the original object.
+    assert len(replacements) == 1
+    assert replacements[0].region == dataclasses.replace(regions[0], line_height=regions[0].height)
+    assert obstacle_regions == [low_confidence_region]
+
+
+def test_translate_image_passes_failed_region_as_an_obstacle(tmp_path: Path) -> None:
+    """A region the PROVIDER rejected (TranslationError) never reaches
+    stats.replacements either, and its original pixels are just as
+    visible in the output as a skipped region's - must be an obstacle
+    too, not just the confidence-filtered kind."""
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+
+    failing_region = OcrTextRegion(text="Second Line", x=20, y=70, width=150, height=24, confidence=90.0)
+    regions = [
+        OcrTextRegion(text="Hello World", x=20, y=20, width=150, height=24, confidence=90.0),
+        failing_region,
+    ]
+    backend = _RecordingBackend()
+
+    stats = translate_image(
+        str(source), str(destination), _StubOcrEngine(regions), backend,
+        _SelectiveFailProvider(fail_text="Second Line"), [], target_lang="de",
+    )
+
+    assert stats.failed == 1
+    [(replacements, obstacle_regions)] = backend.calls
+    assert len(replacements) == 1
+    assert replacements[0].region == dataclasses.replace(regions[0], line_height=regions[0].height)
+    assert obstacle_regions == [failing_region]
+
+
+def test_translate_image_passes_cancelled_remainder_as_obstacles(tmp_path: Path) -> None:
+    """A region should_cancel() stops translate_image() from ever
+    reaching is neither skipped nor failed in the stats sense - but it's
+    just as untouched/original in the output, so it must be an obstacle
+    too."""
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+
+    never_reached_region = OcrTextRegion(text="Second Line", x=20, y=70, width=150, height=24, confidence=90.0)
+    regions = [
+        OcrTextRegion(text="Hello World", x=20, y=20, width=150, height=24, confidence=90.0),
+        never_reached_region,
+    ]
+    backend = _RecordingBackend()
+    calls = {"n": 0}
+
+    def should_cancel() -> bool:
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    stats = translate_image(
+        str(source), str(destination), _StubOcrEngine(regions), backend,
+        _CountingProvider(), [], target_lang="de", should_cancel=should_cancel,
+    )
+
+    assert stats.cancelled is True
+    assert stats.translated == 1
+    [(replacements, obstacle_regions)] = backend.calls
+    assert len(replacements) == 1
+    assert replacements[0].region == dataclasses.replace(regions[0], line_height=regions[0].height)
+    assert obstacle_regions == [never_reached_region]
+
+
+def test_translate_image_obstacle_regions_empty_when_everything_translated(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+    backend = _RecordingBackend()
+
+    translate_image(
+        str(source), str(destination), TesseractOcrEngine(), backend,
+        _FakeProvider(), [], target_lang="de",
+    )
+
+    [(_replacements, obstacle_regions)] = backend.calls
+    assert obstacle_regions == []
+
+
 def test_translate_image_respects_protected_terms(tmp_path: Path) -> None:
     """protect_terms()/restore_terms() must actually be wired in - a
     protected term must survive untranslated inside the (otherwise
@@ -455,3 +600,179 @@ def test_translate_image_respects_protected_terms(tmp_path: Path) -> None:
     assert stats.translated == 2
     result_texts = [r.text for r in TesseractOcrEngine().recognize(str(destination))]
     assert any("World" in text for text in result_texts)
+
+
+# --- paragraph merging (22.08.2026 - real user, after obstacle_regions
+# was verified against a real densely-laid-out infographic and turned out
+# NOT to be enough: "Ja, bitte [den] naechsten Punkt angehen." See
+# pipeline.images.ocr.merge_lines_into_paragraphs()'s module-level
+# docstring for the full diagnosis. These tests confirm translate_image()
+# itself actually FEEDS eligible regions through the merge step and
+# handles the resulting groups correctly - merge_lines_into_paragraphs()/
+# merge_region_group()'s own geometry is covered directly in
+# tests/test_image_ocr.py.) ------------------------------------------------
+
+
+def test_translate_image_merges_a_tightly_wrapped_sentence_into_one_translation_call(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+
+    first = OcrTextRegion(text="Operates outside of time", x=20, y=20, width=150, height=12, confidence=90.0)
+    second = OcrTextRegion(text="and sequence.", x=25, y=32, width=90, height=12, confidence=90.0)  # gap=0
+    provider = _CountingProvider()
+
+    stats = translate_image(
+        str(source), str(destination), _StubOcrEngine([first, second]), BoxOverlayBackend(),
+        provider, [], target_lang="de",
+    )
+
+    # ONE provider call with the JOINED text - not two independent calls.
+    assert provider.calls == ["Operates outside of time and sequence."]
+    assert stats.translated == 2  # counted in original-line units, not groups
+    assert len(stats.replacements) == 1
+    assert stats.replacements[0].region.text == "Operates outside of time and sequence."
+
+
+def test_translate_image_does_not_merge_two_unrelated_far_apart_regions(tmp_path: Path) -> None:
+    """Baseline/control - confirms the merge test above is actually
+    exercising the merge path and not just an artifact of _StubOcrEngine:
+    the SAME two-region shape used throughout this file's other tests
+    (far apart, same as _build_two_line_image's real layout) must still
+    translate as two independent calls."""
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+
+    first = OcrTextRegion(text="Hello World", x=20, y=20, width=150, height=24, confidence=90.0)
+    second = OcrTextRegion(text="Second Line", x=20, y=70, width=150, height=24, confidence=90.0)
+    provider = _CountingProvider()
+
+    stats = translate_image(
+        str(source), str(destination), _StubOcrEngine([first, second]), BoxOverlayBackend(),
+        provider, [], target_lang="de",
+    )
+
+    assert sorted(provider.calls) == ["Hello World", "Second Line"]
+    assert len(stats.replacements) == 2
+
+
+def test_translate_image_a_failed_merged_group_marks_every_member_line_failed(tmp_path: Path) -> None:
+    """When the ONE provider call for a merged group raises, every
+    ORIGINAL line in that group counts as failed (not just one) - each
+    of their original pixels is equally still visible in the output, so
+    stats.failed (and, via translate_image()'s obstacle_regions
+    computation, collision avoidance) must reflect all of them."""
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+
+    first = OcrTextRegion(text="Operates outside of time", x=20, y=20, width=150, height=12, confidence=90.0)
+    second = OcrTextRegion(text="and sequence.", x=25, y=32, width=90, height=12, confidence=90.0)
+    provider = _SelectiveFailProvider(fail_text="Operates outside of time and sequence.")
+
+    stats = translate_image(
+        str(source), str(destination), _StubOcrEngine([first, second]), BoxOverlayBackend(),
+        provider, [], target_lang="de",
+    )
+
+    assert stats.failed == 2
+    assert stats.translated == 0
+    assert stats.replacements == []
+
+
+class _StubParagraphOcrEngine:
+    """Like _StubOcrEngine above, but with returns_paragraph_regions =
+    True - lets the tests below assert translate_image()'s "skip
+    merge_lines_into_paragraphs() for an engine that already returns
+    paragraph-level regions" branch (23.08.2026, GoogleVisionOcrEngine/
+    PaddleOcrEngine) without depending on either real engine/network."""
+
+    returns_paragraph_regions = True
+
+    def __init__(self, regions: list[OcrTextRegion]) -> None:
+        self._regions = regions
+
+    def recognize(self, image_path: str, language: str | None = None) -> list[OcrTextRegion]:
+        return self._regions
+
+
+def test_translate_image_skips_merge_for_an_engine_that_returns_paragraph_regions(tmp_path: Path) -> None:
+    """Two regions that merge_lines_into_paragraphs() WOULD merge (same
+    column, tiny gap, same height - the identical shape
+    test_image_ocr.py's own merge test uses) must NOT be merged when the
+    engine itself already returns paragraph-level regions - each stays
+    its own translation call/replacement."""
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+
+    first = OcrTextRegion(text="Operates outside of time", x=822, y=180, width=138, height=12, confidence=90.0)
+    second = OcrTextRegion(text="and sequence.", x=837, y=196, width=71, height=12, confidence=90.0)
+    provider = _CountingProvider()
+
+    stats = translate_image(
+        str(source), str(destination), _StubParagraphOcrEngine([first, second]), BoxOverlayBackend(),
+        provider, [], target_lang="de",
+    )
+
+    assert sorted(provider.calls) == ["Operates outside of time", "and sequence."]
+    assert len(stats.replacements) == 2
+
+
+def test_translate_image_preserves_engine_supplied_line_height_for_paragraph_regions(tmp_path: Path) -> None:
+    """merge_region_group() would RECOMPUTE line_height from the group's
+    own `height` (its own docstring: built for single-line Tesseract
+    regions) - for a returns_paragraph_regions engine, that recomputation
+    must be skipped entirely so the engine's own, already-correct
+    line_height (e.g. GoogleVisionOcrEngine's word-height average)
+    survives unchanged into the final replacement."""
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+
+    region = OcrTextRegion(
+        text="A whole paragraph", x=10, y=10, width=200, height=40, confidence=90.0, line_height=12
+    )
+
+    stats = translate_image(
+        str(source), str(destination), _StubParagraphOcrEngine([region]), BoxOverlayBackend(),
+        _FakeProvider(), [], target_lang="de",
+    )
+
+    assert len(stats.replacements) == 1
+    assert stats.replacements[0].region.line_height == 12
+    assert stats.replacements[0].region.height == 40
+
+
+def test_translate_image_height_outlier_check_uses_line_height_for_paragraph_regions(tmp_path: Path) -> None:
+    """A legitimate multi-line paragraph block (large `height`, normal
+    `line_height`) must not be mistaken for an icon-inflated outlier -
+    the median/outlier check (DEFAULT_MAX_HEIGHT_RATIO) must compare
+    region_line_height(), not raw `height`, for exactly this reason: this
+    block's raw height (200) is 10x a normal ~20px line, far past the
+    default 4x ratio, but its line_height (20) is unremarkable."""
+    source = tmp_path / "source.png"
+    # Taller than _build_two_line_image()'s canvas (150px) - the
+    # (y=200, height=200) paragraph region below must fit fully inside
+    # the image for InpaintingBackend.apply()'s background sampling.
+    Image.new("RGB", (400, 450), "white").save(source)
+    destination = tmp_path / "out.png"
+
+    regions = [
+        OcrTextRegion(text=f"Line {i}", x=10, y=10 + i * 30, width=100, height=20, confidence=90.0)
+        for i in range(3)
+    ] + [
+        OcrTextRegion(
+            text="A big paragraph block", x=10, y=200, width=200, height=200, confidence=90.0, line_height=20,
+        )
+    ]
+    provider = _CountingProvider()
+
+    stats = translate_image(
+        str(source), str(destination), _StubParagraphOcrEngine(regions), BoxOverlayBackend(),
+        provider, [], target_lang="de",
+    )
+
+    assert stats.skipped == 0
+    assert "A big paragraph block" in provider.calls

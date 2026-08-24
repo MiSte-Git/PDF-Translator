@@ -1,132 +1,42 @@
 """Format-agnostic pieces shared by every per-format UI job module
 (ui/pptx_job.py, ui/word_job.py, ui/pdf_job.py, ui/image_job.py).
 
-Deliberately small: provider construction, destination safety, and the
-conflict-error type are the only parts that don't depend on which document
-format is being translated. Everything format-specific (which engine to
-open, which translate_*() function to call, what a QA report should say)
-stays in that format's own job module rather than being folded into one
-generic "document job" abstraction here - PPTX's overflow-risk comparison
-and Word's header/footer/break-marker concerns don't map onto each other
-cleanly enough to be worth forcing into a shared code path.
+Deliberately small: destination safety and the conflict-error type are the
+only parts left here that don't depend on which document format is being
+translated. Everything format-specific (which engine to open, which
+translate_*() function to call, what a QA report should say) stays in that
+format's own job module rather than being folded into one generic "document
+job" abstraction here - PPTX's overflow-risk comparison and Word's
+header/footer/break-marker concerns don't map onto each other cleanly
+enough to be worth forcing into a shared code path.
 
-OCR_ENGINE_FACTORIES/INPAINTING_BACKEND_FACTORIES (RoadMap.md Phase 3) live
-here rather than in pipeline/images/ - mirrors PROVIDER_FACTORIES: the
-mapping from a UI-facing string key to a concrete backend class is a UI-
-layer concern (which options the dropdown/checkbox offers), not something
-pipeline/images/ocr.py or pipeline/images/inpainting.py themselves need to
-know about. Placed here (not in ui/image_job.py) specifically so the
-planned embedding of the same OCR/Inpainting selection into PDF/Word/PPTX
-jobs (RoadMap.md Phase 3, still open) can import from this already-shared
-module instead of reaching into ui/image_job.py.
+PROVIDER_FACTORIES/OCR_ENGINE_FACTORIES/INPAINTING_BACKEND_FACTORIES and
+their availability checks used to live here (RoadMap.md Phase 3) - moved to
+pipeline/registry.py on 22.08.2026 once image_translate_cli (Backlog.md
+"Geplant") needed the exact same mapping without depending on anything
+under `ui`; see that module's docstring for the full reasoning. Re-exported
+below unchanged so existing imports from this module keep working.
 """
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
 
-from pipeline.images.inpainting import (
-    BoxOverlayBackend,
-    CvInpaintingBackend,
-    GpuInpaintingBackend,
-    InpaintingBackend,
+from pipeline.registry import (  # noqa: F401 - re-exported for existing callers
+    INPAINTING_BACKEND_FACTORIES,
+    OCR_ENGINE_FACTORIES,
+    PROVIDER_FACTORIES,
+    build_inpainting_backend,
+    build_ocr_engine,
+    build_provider,
+    inpainting_backend_available,
+    ocr_engine_available,
 )
-from pipeline.images.ocr import OcrEngine, TesseractOcrEngine
-from pipeline.translation.base import TranslationProvider
-from pipeline.translation.deepl_provider import DeepLProvider
-from pipeline.translation.google_provider import GoogleTranslateProvider
-from pipeline.translation.grok_provider import GrokProvider
-from pipeline.translation.openai_provider import OpenAIProvider
-
-PROVIDER_FACTORIES: dict[str, Callable[[], TranslationProvider]] = {
-    "deepl": DeepLProvider,
-    "google": GoogleTranslateProvider,
-    "openai": OpenAIProvider,
-    "grok": GrokProvider,
-}
-
-OCR_ENGINE_FACTORIES: dict[str, Callable[[], OcrEngine]] = {
-    "tesseract": TesseractOcrEngine,
-    # Cloud-OCR-Backend folgt als zweiter Eintrag (RoadMap.md Phase 3,
-    # konkreter Anbieter noch offen) - siehe ocr_engine_available() unten
-    # für die Verfügbarkeitsprüfung, die dann auch für diesen Eintrag
-    # gilt.
-}
-
-INPAINTING_BACKEND_FACTORIES: dict[str, Callable[[], InpaintingBackend]] = {
-    "box_overlay": BoxOverlayBackend,
-    "cv_inpainting": CvInpaintingBackend,
-    "gpu_inpainting": GpuInpaintingBackend,
-    # Cloud-Inpainting (OpenAI) folgt als weiterer Eintrag - siehe
-    # RoadMap.md Phase 3.
-}
 
 
 class DestinationConflictError(ValueError):
     """The chosen output path is unsafe: same as the source, or already
     exists. Raised before any translation API call is made.
     """
-
-
-def build_provider(name: str) -> TranslationProvider:
-    try:
-        factory = PROVIDER_FACTORIES[name]
-    except KeyError as exc:
-        raise ValueError(f"Unbekannter Übersetzungsanbieter: {name!r}") from exc
-    return factory()
-
-
-def build_ocr_engine(name: str) -> OcrEngine:
-    try:
-        factory = OCR_ENGINE_FACTORIES[name]
-    except KeyError as exc:
-        raise ValueError(f"Unbekannte OCR-Engine: {name!r}") from exc
-    return factory()
-
-
-def build_inpainting_backend(name: str) -> InpaintingBackend:
-    try:
-        factory = INPAINTING_BACKEND_FACTORIES[name]
-    except KeyError as exc:
-        raise ValueError(f"Unbekanntes Rückschreibe-Backend: {name!r}") from exc
-    return factory()
-
-
-def ocr_engine_available(name: str) -> bool:
-    """Whether the OCR engine `name` can actually be used right now -
-    checked BEFORE a job starts (ui/analysis.py), mirroring
-    ui/settings.py::credential_status() for translation providers. Only
-    "tesseract" has a real availability check today (its binary must be
-    on PATH, see pipeline.images.ocr.tesseract_available()) - a future
-    cloud backend would check for a configured API key instead, the same
-    way build_provider()'s providers do lazily on first use.
-    """
-    if name == "tesseract":
-        from pipeline.images.ocr import tesseract_available
-
-        return tesseract_available()
-    return name in OCR_ENGINE_FACTORIES
-
-
-def inpainting_backend_available(name: str) -> bool:
-    """Whether the rückschreibe-backend `name` can actually be used right
-    now - checked BEFORE a job starts (ui/app.py's IMAGES-mode dropdown
-    hint and fail-fast check, mirrors ocr_engine_available() above).
-    Box-Overlay/CvInpaintingBackend have no real availability question
-    (both only need Pillow, resp. Pillow+OpenCV, which are hard
-    dependencies of running IMAGES mode at all - see
-    requirements-ocr.txt) so they're always reported available; only
-    "gpu_inpainting" has a real check today (CUDA GPU with enough VRAM,
-    see pipeline.images.inpainting.gpu_inpainting_available()) - a future
-    Cloud-Inpainting backend would check for a configured API key
-    instead, the same way build_provider()'s providers do lazily on
-    first use.
-    """
-    if name == "gpu_inpainting":
-        from pipeline.images.inpainting import gpu_inpainting_available
-
-        return gpu_inpainting_available()
-    return name in INPAINTING_BACKEND_FACTORIES
 
 
 def safe_destination(source: Path, target_lang: str, output_dir: Path | None = None) -> Path:

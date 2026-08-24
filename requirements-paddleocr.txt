@@ -1,0 +1,22 @@
+# Optionale Abhängigkeit für pipeline/images/ocr.py::PaddleOcrEngine
+# (RoadMap.md Phase 3, 23.08.2026) - getrennt von requirements-ocr.txt, da
+# PaddlePaddle ein deutlich schwereres Paket ist (mehrere hundert MB inkl.
+# Modelle) und die meisten Nutzer weiterhin nur Tesseract brauchen.
+#
+# Laedt seine Layout-/Erkennungsmodelle beim allerersten Lauf automatisch
+# herunter (von HuggingFace/ModelScope/AIStudio/BOS - siehe
+# tools/probe_paddleocr.py) - dafuer wird ein normaler Internetzugang
+# gebraucht, kein API-Key.
+#
+# WICHTIG: paddlepaddle 3.3.x hat eine bestaetigte Regression im oneDNN/
+# PIR-CPU-Backend (NotImplementedError: ConvertPirAttribute2RuntimeAttribute
+# not support ... - siehe github.com/PaddlePaddle/Paddle Issue #77340 und
+# github.com/PaddlePaddle/PaddleOCR Issue #18162, beide bestaetigt
+# 23.08.2026 bei Michaels eigenem Testlauf). Bis das offiziell behoben ist,
+# explizit auf die letzte bekannt funktionierende Version gepinnt statt
+# einfach "paddlepaddle" - siehe pipeline/images/ocr.py::PaddleOcrEngine
+# fuer die entsprechende Fehlerbehandlung, falls trotzdem eine
+# inkompatible Version installiert ist.
+paddlepaddle==3.2.2
+paddleocr
+paddlex[ocr]

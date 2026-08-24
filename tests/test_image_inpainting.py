@@ -19,12 +19,20 @@ from pipeline.images.inpainting import (
     _MAX_FONT_SIZE,
     _MIN_FONT_SIZE,
     BoxOverlayBackend,
+    GradientBackground,
     InpaintingError,
     TextReplacement,
+    _color_distance,
     _contrasting_text_color,
+    _draw_fitted_text,
     _estimate_is_bold,
+    _fill_gradient_rect,
     _fit_text,
+    _horizontal_room,
+    _initial_font_size,
     _load_font,
+    _representative_color,
+    _sample_background,
     _sample_background_color,
     _wrap_text_to_width,
 )
@@ -227,7 +235,7 @@ def test_fit_text_shrinks_font_when_wrapped_block_exceeds_region_height() -> Non
     region = OcrTextRegion(text="Hi", x=0, y=0, width=80, height=24, confidence=95.0)
     long_text = "Dies ist ein sehr viel längerer übersetzter Text als im Original vorhanden war"
 
-    lines, font, line_height = _fit_text(draw, long_text, region, region.height)
+    lines, font, line_height, x_offset = _fit_text(draw, long_text, region, region.height)
 
     naive_size = int(region.height * 0.8)
     assert font.size < naive_size
@@ -245,7 +253,7 @@ def test_fit_text_caps_start_size_regardless_of_region_height() -> None:
     draw = _measure_draw()
     region = OcrTextRegion(text="X", x=0, y=0, width=2000, height=500, confidence=95.0)
 
-    lines, font, line_height = _fit_text(draw, "Kurzer Text", region, region.height)
+    lines, font, line_height, x_offset = _fit_text(draw, "Kurzer Text", region, region.height)
 
     assert font.size <= _MAX_FONT_SIZE
 
@@ -254,7 +262,7 @@ def test_fit_text_returns_single_line_for_short_text_that_already_fits() -> None
     draw = _measure_draw()
     region = OcrTextRegion(text="Hi", x=0, y=0, width=200, height=24, confidence=95.0)
 
-    lines, font, line_height = _fit_text(draw, "Hallo", region, region.height)
+    lines, font, line_height, x_offset = _fit_text(draw, "Hallo", region, region.height)
 
     assert lines == ["Hallo"]
 
@@ -428,19 +436,20 @@ def test_apply_renders_bold_original_text_in_bold_and_regular_in_regular(
     calls: list[bool] = []
     real_load_font = inpainting_module._load_font
 
-    def spy_load_font(size: int, bold: bool = False):
+    def spy_load_font(size: int, bold: bool = False, family: str = "sans_serif", italic: bool = False):
         calls.append(bold)
-        return real_load_font(size, bold=bold)
+        return real_load_font(size, bold=bold, family=family, italic=italic)
 
     monkeypatch.setattr(inpainting_module, "_load_font", spy_load_font)
 
     BoxOverlayBackend().apply(str(source), replacements, str(output))
 
-    # _load_font() is also called (bold=False, twice) inside
-    # _estimate_is_bold() itself to build the two synthetic comparison
-    # samples for EACH region - so the actually-drawn weight is whichever
-    # value _fit_text() passed down LAST for each region, not simply
-    # "every bold=True call".
+    # _load_font() is also called many more times now (22.08.2026,
+    # font_style.py's family/bold/italic classification each render their
+    # own synthetic comparison samples per region, not just the two
+    # bold-estimation samples from before) - so the actually-drawn weight
+    # is whichever value _fit_text() passed down LAST for each region, not
+    # simply "every bold=True call".
     assert calls[-1] is True, f"expected the final (drawing) _load_font() call for the BOLD region to use bold=True, got {calls}"
 
 
@@ -462,3 +471,488 @@ def test_apply_bold_output_still_recognizable_by_ocr(tmp_path: Path) -> None:
 
     result_texts = [r.text for r in TesseractOcrEngine().recognize(str(output))]
     assert any("Fetter" in text for text in result_texts)
+
+
+# --- _sample_background()/GradientBackground/_fill_gradient_rect (real
+# user, 22.08.2026: nach einem Google-Translate-Bildvergleich mit einer
+# eigenen Test-Infografik, "die sollten wir so wie auf das von Google
+# bringen" - BoxOverlayBackend füllte bislang JEDE Box einfarbig, auch
+# wenn die Umgebung sichtbar einen Farbverlauf zeigte, siehe
+# pipeline/images/inpainting.py's GradientBackground-Docstring.) ---------
+
+
+def _build_vertical_gradient_image(path: Path, region: OcrTextRegion) -> None:
+    """A 400x150 image whose background fades from a light color at the
+    top to a clearly darker one at the bottom - well past
+    _GRADIENT_DETECTION_THRESHOLD - with `region`'s own original text
+    drawn on top in black, exactly like a real gradient-backed infographic
+    banner."""
+    image = Image.new("RGB", (400, 150), "white")
+    pixels = image.load()
+    top_color = (250, 250, 250)
+    bottom_color = (40, 40, 120)
+    for y in range(150):
+        t = y / 149
+        color = tuple(round(top_color[i] + (bottom_color[i] - top_color[i]) * t) for i in range(3))
+        for x in range(400):
+            pixels[x, y] = color
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.truetype(_FONT_PATH, 24)
+    draw.text((region.x, region.y), region.text, fill="black", font=font)
+    image.save(path)
+
+
+def _build_horizontal_gradient_image(path: Path, region: OcrTextRegion) -> None:
+    """Same idea as _build_vertical_gradient_image(), but the fade runs
+    left->right instead of top->bottom."""
+    image = Image.new("RGB", (400, 150), "white")
+    pixels = image.load()
+    left_color = (250, 250, 250)
+    right_color = (120, 40, 40)
+    for x in range(400):
+        t = x / 399
+        color = tuple(round(left_color[i] + (right_color[i] - left_color[i]) * t) for i in range(3))
+        for y in range(150):
+            pixels[x, y] = color
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.truetype(_FONT_PATH, 24)
+    draw.text((region.x, region.y), region.text, fill="black", font=font)
+    image.save(path)
+
+
+def test_sample_background_returns_flat_color_for_uniform_background(tmp_path: Path) -> None:
+    """The common case (a genuinely flat, uniform surrounding) must still
+    return a plain (r, g, b) tuple, not a GradientBackground - backward
+    compatible with every existing flat-background test above."""
+    source = tmp_path / "flat.png"
+    _build_two_line_image(source)
+    image = Image.open(source).convert("RGB")
+
+    region = OcrTextRegion(text="Hello World", x=20, y=20, width=200, height=28, confidence=95.0)
+    background = _sample_background(image, region.x, region.y, region.width, region.height)
+
+    assert isinstance(background, tuple)
+
+
+def test_sample_background_detects_vertical_gradient(tmp_path: Path) -> None:
+    region = OcrTextRegion(text="Hello World", x=20, y=60, width=200, height=28, confidence=95.0)
+    source = tmp_path / "vgrad.png"
+    _build_vertical_gradient_image(source, region)
+    image = Image.open(source).convert("RGB")
+
+    background = _sample_background(image, region.x, region.y, region.width, region.height)
+
+    assert isinstance(background, GradientBackground)
+    assert background.axis == "vertical"
+    # top->bottom fade goes from light to dark - start must be the
+    # lighter stop, matching the real image, not swapped.
+    assert sum(background.start) > sum(background.end)
+
+
+def test_sample_background_detects_horizontal_gradient(tmp_path: Path) -> None:
+    region = OcrTextRegion(text="Hello World", x=20, y=60, width=200, height=28, confidence=95.0)
+    source = tmp_path / "hgrad.png"
+    _build_horizontal_gradient_image(source, region)
+    image = Image.open(source).convert("RGB")
+
+    background = _sample_background(image, region.x, region.y, region.width, region.height)
+
+    assert isinstance(background, GradientBackground)
+    assert background.axis == "horizontal"
+    assert sum(background.start) > sum(background.end)
+
+
+def test_representative_color_returns_flat_tuple_unchanged() -> None:
+    assert _representative_color((10, 20, 30)) == (10, 20, 30)
+
+
+def test_representative_color_is_midpoint_of_gradient_stops() -> None:
+    gradient = GradientBackground(axis="vertical", start=(0, 0, 0), end=(100, 200, 40))
+    assert _representative_color(gradient) == (50, 100, 20)
+
+
+def test_fill_gradient_rect_interpolates_from_start_to_end() -> None:
+    """Direct pixel check on _fill_gradient_rect() itself, independent of
+    detection/BoxOverlayBackend - the first row must match `start`, the
+    last row `end`, and rows in between must move monotonically from one
+    to the other (no banding/discontinuity)."""
+    image = Image.new("RGB", (20, 50), "white")
+    draw = ImageDraw.Draw(image)
+    gradient = GradientBackground(axis="vertical", start=(255, 0, 0), end=(0, 0, 255))
+
+    _fill_gradient_rect(draw, 0, 0, 20, 50, gradient)
+
+    pixels = image.load()
+    assert pixels[5, 0] == (255, 0, 0)
+    assert pixels[5, 49] == (0, 0, 255)
+    # monotonic: red channel decreases, blue channel increases, top to bottom
+    reds = [pixels[5, y][0] for y in range(50)]
+    blues = [pixels[5, y][2] for y in range(50)]
+    assert all(reds[i] >= reds[i + 1] for i in range(len(reds) - 1))
+    assert all(blues[i] <= blues[i + 1] for i in range(len(blues) - 1))
+
+
+def test_apply_fills_gradient_background_with_a_visible_gradient_not_flat(tmp_path: Path) -> None:
+    """End-to-end through BoxOverlayBackend.apply(): a region sitting on a
+    genuine vertical gradient must come back out with a gradient fill
+    (top of the box visibly different from the bottom of the box), not
+    today's single flat draw.rectangle() color."""
+    region = OcrTextRegion(text="Hello World", x=20, y=60, width=200, height=28, confidence=95.0)
+    source = tmp_path / "vgrad.png"
+    _build_vertical_gradient_image(source, region)
+    output = tmp_path / "out.png"
+
+    replacement = TextReplacement(region=region, translated_text="Hallo Welt")
+    BoxOverlayBackend().apply(str(source), [replacement], str(output))
+
+    result = Image.open(output).convert("RGB")
+    pixels = result.load()
+    # Sample the fill just inside the box's left edge (away from the drawn
+    # text itself), near the top vs. near the bottom of the box.
+    top_fill = pixels[region.x + 2, region.y + 2]
+    bottom_fill = pixels[region.x + 2, region.y + region.height - 2]
+    assert _color_distance(top_fill, bottom_fill) > 10.0
+
+
+@pytest.mark.skipif(not tesseract_available(), reason="Tesseract binary not installed")
+def test_apply_gradient_background_output_still_recognizable_by_ocr(tmp_path: Path) -> None:
+    """The gradient fill must not come at the cost of text legibility -
+    same round-trip discipline as test_apply_bold_output_still_recognizable_by_ocr().
+
+    Region deliberately sits near the LIGHT end of the gradient (y=15, not
+    the y=60 mid-fade position the other gradient tests above use) rather
+    than straddling the exact light/dark 50%-luminance crossover of a
+    400x150, near-white-to-dark-blue fade: found empirically (22.08.2026)
+    that Tesseract's own binarization simply fails outright (empty
+    result, not just a wrong reading) right at that crossover, even
+    though the rendered text is genuinely legible to a human eye there
+    too (visually confirmed) - a low-contrast-position artifact of this
+    specific synthetic test image, not a defect in the gradient fill or
+    text-drawing code itself (confirmed by moving only the region's y and
+    getting a clean OCR read - see git history of this test if that
+    edge case needs revisiting, e.g. sampling text-color contrast locally
+    under the text instead of _representative_color()'s single midpoint).
+    """
+    region = OcrTextRegion(text="Hello World", x=20, y=15, width=200, height=28, confidence=95.0)
+    source = tmp_path / "vgrad.png"
+    _build_vertical_gradient_image(source, region)
+    output = tmp_path / "out.png"
+
+    replacement = TextReplacement(region=region, translated_text="Erkennbarer Text")
+    BoxOverlayBackend().apply(str(source), [replacement], str(output))
+
+    result_texts = [r.text for r in TesseractOcrEngine().recognize(str(output))]
+    assert any("Erkennbarer" in text for text in result_texts)
+
+
+# --- obstacle_regions (22.08.2026, real user - same real infographic +
+# GPU-Inpainting qa_report.txt that motivated the qa_report.txt settings
+# fix: "Boxen überlappen oder sind an falscher Stelle". Until this date,
+# _vertical_room_below() only ever saw the CURRENT run's successfully
+# translated regions - a region OCR recognized but translate_image()
+# skipped/failed still shows its ORIGINAL pixels in the output, but was
+# invisible to collision avoidance, so a neighbouring translated region's
+# text could still grow straight into it. apply()'s new obstacle_regions
+# parameter closes that gap - these tests build the exact failure shape
+# (two tightly-spaced lines, only the first translated, the second passed
+# as an obstacle) and assert the translated text's growth actually stops
+# short of it now.) ----------------------------------------------------
+
+
+_OBSTACLE_TRANSLATED_TEXT = (
+    "Ein deutlich laengerer Text der garantiert mehrere Zeilen braucht dies und jenes"
+)
+
+
+def _build_two_tight_lines_image(path: Path) -> OcrTextRegion:
+    """A short first line (wide 200px box, so _OBSTACLE_TRANSLATED_TEXT
+    only needs to wrap, not shrink to the font floor) and a second line
+    60px below it (y=80, first line's own box ends at y=44) - close
+    enough that _fit_text()'s GENEROUS no-neighbour fallback
+    (_NO_NEIGHBOR_HEIGHT_ALLOWANCE * region.height = 96px of vertical
+    room) lets the wrapped translation grow right through it, but far
+    enough that the REAL gap-based room (still comfortably above what
+    the text needs even at the smallest font size) lets it fit without
+    touching the second line at all - see the two tests below, whose
+    exact pixel-level behaviour at these coordinates was verified by
+    directly running BoxOverlayBackend.apply() before being written down
+    here (not just hand-computed), since _fit_text()'s discrete font-size
+    steps make the exact chosen size/line count non-obvious in advance.
+    Returns the SECOND line's region (the one that must survive as an
+    obstacle - never itself translated in these tests, mirroring a
+    skipped/failed region that translate_image() left untouched).
+    """
+    font = ImageFont.truetype(_FONT_PATH, 24)
+    image = Image.new("RGB", (400, 150), "white")
+    draw = ImageDraw.Draw(image)
+    draw.text((20, 20), "Short", fill="black", font=font)
+    draw.text((20, 80), "Untouched Neighbour", fill="black", font=font)
+    image.save(path)
+    return OcrTextRegion(text="Untouched Neighbour", x=20, y=80, width=220, height=24, confidence=95.0)
+
+
+def test_apply_without_obstacle_regions_can_overwrite_a_skipped_neighbour(tmp_path: Path) -> None:
+    """Baseline/control: reproduces the pre-fix behaviour on purpose, so
+    the next test's improvement is demonstrably real and not just an
+    artifact of the fixture. A long enough translation, wrapped to the
+    first line's narrow width, needs more than the ~26px gap to the
+    second line - without obstacle_regions, _vertical_room_below() has no
+    neighbour to see (the second line was never in `replacements`) and
+    falls back to its generous _NO_NEIGHBOR_HEIGHT_ALLOWANCE, so the
+    wrapped block is free to grow down across the second line's own
+    pixels.
+    """
+    source = tmp_path / "tight.png"
+    neighbour_region = _build_two_tight_lines_image(source)
+    output = tmp_path / "out.png"
+
+    replacement = TextReplacement(
+        region=OcrTextRegion(text="Short", x=20, y=20, width=200, height=24, confidence=95.0),
+        translated_text=_OBSTACLE_TRANSLATED_TEXT,
+    )
+    BoxOverlayBackend().apply(str(source), [replacement], str(output))
+
+    original = Image.open(source).convert("RGB")
+    result = Image.open(output).convert("RGB")
+    box = (0, neighbour_region.y, 400, neighbour_region.y + neighbour_region.height)
+    assert original.crop(box).tobytes() != result.crop(box).tobytes(), (
+        "control fixture did not actually reproduce the overlap - adjust the fixture, "
+        "not the assertion"
+    )
+
+
+def test_apply_with_obstacle_regions_leaves_the_skipped_neighbour_untouched(tmp_path: Path) -> None:
+    """The fix itself: passing the second line's region as obstacle_regions
+    (never in `replacements`, exactly mirroring how translate_image() now
+    passes every skipped/failed region) must make _vertical_room_below()
+    see it as a real neighbour and constrain the first region's growth so
+    its pixels stay untouched - same translated text, same tight fixture
+    as the control test above, only obstacle_regions differs.
+    """
+    source = tmp_path / "tight.png"
+    neighbour_region = _build_two_tight_lines_image(source)
+    output = tmp_path / "out.png"
+
+    replacement = TextReplacement(
+        region=OcrTextRegion(text="Short", x=20, y=20, width=200, height=24, confidence=95.0),
+        translated_text=_OBSTACLE_TRANSLATED_TEXT,
+    )
+    BoxOverlayBackend().apply(
+        str(source), [replacement], str(output), obstacle_regions=[neighbour_region]
+    )
+
+    original = Image.open(source).convert("RGB")
+    result = Image.open(output).convert("RGB")
+    box = (0, neighbour_region.y, 400, neighbour_region.y + neighbour_region.height)
+    assert original.crop(box).tobytes() == result.crop(box).tobytes()
+
+
+def test_apply_obstacle_regions_defaults_to_none_without_error(tmp_path: Path) -> None:
+    """Every existing caller (e.g. run_image_correction_job(), which never
+    computes obstacle regions - see InpaintingBackend.apply()'s docstring
+    for why) omits the new parameter entirely - must keep working exactly
+    as before, not raise a TypeError for a missing argument."""
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    output = tmp_path / "out.png"
+    replacement = TextReplacement(
+        region=OcrTextRegion(text="Hello World", x=20, y=20, width=150, height=24, confidence=95.0),
+        translated_text="Hallo Welt",
+    )
+    BoxOverlayBackend().apply(str(source), [replacement], str(output))  # no obstacle_regions kwarg
+    assert output.exists()
+
+
+# --- _horizontal_room() / _fit_text() horizontal widening (23.08.2026 -
+# real user, QA-Bericht "(12)", "Spirit - Soul - Meatsuit.jpg": a footer
+# text got cut off at the image's own bottom edge even though the box's
+# left/right neighbours were both far enough away to leave real, unused
+# margin - "Der Text könnte ohne weiteres nach links... und... nach
+# rechts erweitert werden. Links und Rechts davon ist nichts." Mirrors
+# the _vertical_room_below()/obstacle_regions section above almost
+# exactly, just the other axis - see _horizontal_room()'s own docstring
+# for why there is no "generous no-neighbour multiplier" here unlike the
+# vertical case.) ------------------------------------------------------
+
+
+def test_horizontal_room_with_no_neighbours_is_bounded_by_image_edges() -> None:
+    region = OcrTextRegion(text="x", x=100, y=0, width=50, height=20, confidence=90.0)
+    left_room, right_room = _horizontal_room(region, [region], image_width=400)
+    # left edge at x=100 minus the 3px safety margin; right edge at
+    # x=150, image ends at 400, so 250px minus the margin.
+    assert left_room == 97.0
+    assert right_room == 247.0
+
+
+def test_horizontal_room_finds_nearest_left_and_right_neighbours_in_same_row() -> None:
+    region = OcrTextRegion(text="x", x=100, y=50, width=50, height=20, confidence=90.0)
+    left_neighbour = OcrTextRegion(text="L", x=20, y=50, width=50, height=20, confidence=90.0)
+    right_neighbour = OcrTextRegion(text="R", x=200, y=55, width=30, height=10, confidence=90.0)
+    left_room, right_room = _horizontal_room(
+        region, [region, left_neighbour, right_neighbour], image_width=1000
+    )
+    # left_neighbour's right edge is at x=70; gap to region.x=100 is 30,
+    # minus the 3px margin. right_neighbour's left edge is at x=200; gap
+    # from region's right edge (150) is 50, minus the margin.
+    assert left_room == 27.0
+    assert right_room == 47.0
+
+
+def test_horizontal_room_ignores_a_neighbour_in_a_different_row() -> None:
+    """A region sitting well to the left but in a completely different
+    row (no y-overlap at all) must not constrain this region's room -
+    same "same horizontal/vertical band" reasoning as
+    _vertical_room_below()'s own docstring, just the other axis."""
+    region = OcrTextRegion(text="x", x=100, y=50, width=50, height=20, confidence=90.0)
+    unrelated_row = OcrTextRegion(text="U", x=20, y=500, width=50, height=20, confidence=90.0)
+    left_room, right_room = _horizontal_room(region, [region, unrelated_row], image_width=400)
+    assert left_room == 97.0  # same as the no-neighbours case above
+    assert right_room == 247.0
+
+
+def test_horizontal_room_never_negative_when_a_neighbour_is_touching_or_overlapping() -> None:
+    region = OcrTextRegion(text="x", x=100, y=0, width=50, height=20, confidence=90.0)
+    touching_left = OcrTextRegion(text="L", x=98, y=0, width=2, height=20, confidence=90.0)
+    left_room, _ = _horizontal_room(region, [region, touching_left], image_width=400)
+    assert left_room == 0.0
+
+
+def test_fit_text_returns_zero_x_offset_when_shrink_alone_already_fits() -> None:
+    """Room being available must not change anything for the common case
+    where the existing shrink-to-fit loop already succeeds - widening is
+    a FALLBACK only (see _fit_text()'s own docstring)."""
+    draw = _measure_draw()
+    region = OcrTextRegion(text="Hi", x=0, y=0, width=200, height=24, confidence=95.0)
+    lines, font, line_height, x_offset = _fit_text(
+        draw, "Hallo", region, region.height, left_room=500, right_room=500
+    )
+    assert x_offset == 0.0
+
+
+def test_fit_text_widens_to_the_right_first_without_shifting_x(tmp_path: Path) -> None:
+    """A narrow, short region with a translation long enough that even
+    _MIN_FONT_SIZE still overflows max_height - verified directly here
+    (not just hand-computed, same discipline as _build_two_tight_lines_
+    image()'s docstring above) rather than assumed. With enough room on
+    the RIGHT alone, the block must fit without any left shift."""
+    draw = _measure_draw()
+    region = OcrTextRegion(text="x", x=100, y=50, width=60, height=20, confidence=90.0)
+    long_text = (
+        "Dies ist ein deutlich laengerer deutscher Uebersetzungstext "
+        "der garantiert nicht in eine kleine Box passt"
+    )
+    no_room_lines, _, no_room_lh, no_room_offset = _fit_text(draw, long_text, region, max_height=20)
+    assert no_room_lh * len(no_room_lines) > 20, (
+        "control fixture did not actually reproduce the overflow-at-min-size case - "
+        "adjust the fixture, not the assertion"
+    )
+    assert no_room_offset == 0.0
+
+    lines, _, line_height, x_offset = _fit_text(
+        draw, long_text, region, max_height=20, right_room=400
+    )
+    assert line_height * len(lines) <= 20
+    assert x_offset == 0.0
+
+
+def test_fit_text_uses_left_room_only_once_right_room_is_exhausted() -> None:
+    """Same overflowing fixture as above, but this time the RIGHT side
+    alone (small room) is not enough - the remainder must come from the
+    LEFT (negative x_offset), never more than left_room itself."""
+    draw = _measure_draw()
+    region = OcrTextRegion(text="x", x=100, y=50, width=60, height=20, confidence=90.0)
+    long_text = (
+        "Dies ist ein deutlich laengerer deutscher Uebersetzungstext "
+        "der garantiert nicht in eine kleine Box passt"
+    )
+    lines, _, line_height, x_offset = _fit_text(
+        draw, long_text, region, max_height=20, right_room=50, left_room=400
+    )
+    assert line_height * len(lines) <= 20
+    assert x_offset < 0.0
+    assert x_offset >= -400.0
+
+
+def test_fit_text_still_accepts_overflow_when_no_horizontal_room_exists() -> None:
+    """Unchanged pre-23.08.2026 behaviour: explicit left_room=right_room=0
+    (e.g. a region with real neighbours pressed right up against it on
+    both sides) must produce the exact same result as calling without
+    the parameters at all."""
+    draw = _measure_draw()
+    region = OcrTextRegion(text="x", x=100, y=50, width=60, height=20, confidence=90.0)
+    long_text = (
+        "Dies ist ein deutlich laengerer deutscher Uebersetzungstext "
+        "der garantiert nicht in eine kleine Box passt"
+    )
+    default_lines, default_font, default_lh, default_offset = _fit_text(draw, long_text, region, max_height=20)
+    zero_lines, zero_font, zero_lh, zero_offset = _fit_text(
+        draw, long_text, region, max_height=20, left_room=0.0, right_room=0.0
+    )
+    # Font objects from two separate _load_font() calls never compare
+    # equal by identity even for the same size/family - compare the
+    # size actually used instead, alongside everything else.
+    assert default_lines == zero_lines
+    assert default_font.size == zero_font.size
+    assert default_lh == zero_lh
+    assert default_offset == zero_offset == 0.0
+
+
+def test_apply_wires_horizontal_room_into_fit_text(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Integration check for BoxOverlayBackend.apply()'s own new
+    `_horizontal_room(region, all_regions, image.width)` call (added
+    23.08.2026) - patches _fit_text() to record the left_room/right_room
+    it was actually called with, so a copy-paste slip in apply() itself
+    (as opposed to _horizontal_room()/_fit_text() individually, both
+    already covered above) would be caught here."""
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    output = tmp_path / "out.png"
+    region = OcrTextRegion(text="Hello World", x=20, y=20, width=150, height=24, confidence=95.0)
+    replacement = TextReplacement(region=region, translated_text="Hallo Welt")
+
+    calls = []
+    import pipeline.images.inpainting as inpainting_module
+
+    real_fit_text = inpainting_module._fit_text
+
+    def _spy_fit_text(*args, **kwargs):
+        calls.append((kwargs.get("left_room"), kwargs.get("right_room")))
+        return real_fit_text(*args, **kwargs)
+
+    monkeypatch.setattr(inpainting_module, "_fit_text", _spy_fit_text)
+    BoxOverlayBackend().apply(str(source), [replacement], str(output))
+
+    assert len(calls) == 1
+    left_room, right_room = calls[0]
+    expected_left, expected_right = _horizontal_room(region, [region], image_width=400)
+    assert left_room == expected_left
+    assert right_room == expected_right
+
+
+# --- _initial_font_size() respecting OcrTextRegion.line_height (22.08.2026
+# - see that field's docstring: a region built by pipeline.images.ocr.
+# merge_region_group() has a `height` spanning several merged original
+# lines together, which must NOT drive the seeded font size the way a
+# genuine single-line region's `height` does.) ---------------------------
+
+
+def test_initial_font_size_uses_height_when_line_height_is_none() -> None:
+    """Every OcrTextRegion anywhere else in the codebase (line_height
+    defaults to None) - unchanged behaviour."""
+    region = OcrTextRegion(text="x", x=0, y=0, width=10, height=30, confidence=90.0)
+    assert _initial_font_size(region) == min(max(_MIN_FONT_SIZE, int(30 * 0.8)), _MAX_FONT_SIZE)
+
+
+def test_initial_font_size_uses_line_height_not_the_merged_span_when_set() -> None:
+    """A merged multi-line region: `height` (90, spanning 3 merged lines)
+    must NOT seed the font size - `line_height` (one line's real height,
+    14) must, or the whole paragraph would render several times too
+    large."""
+    region = OcrTextRegion(text="a b c", x=0, y=0, width=200, height=90, confidence=90.0, line_height=14)
+    assert _initial_font_size(region) == min(max(_MIN_FONT_SIZE, int(14 * 0.8)), _MAX_FONT_SIZE)
+    # Sanity: using the merged span directly would have given a very
+    # different (much larger) result - confirms the test fixture actually
+    # exercises the distinction, not a coincidence where both paths agree.
+    assert _initial_font_size(region) != min(max(_MIN_FONT_SIZE, int(90 * 0.8)), _MAX_FONT_SIZE)

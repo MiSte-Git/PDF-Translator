@@ -141,6 +141,9 @@ def run_image_job(
         _build_qa_report(
             source, destination, provider_name, target_lang, source_lang, stats,
             ocr_engine_name=ocr_engine_name, inpainting_backend_name=inpainting_backend_name,
+            ocr_language=ocr_language, min_confidence=min_confidence,
+            max_height_ratio=max_height_ratio, protected_terms=protected_terms,
+            max_chars_per_run=max_chars_per_run,
         ),
         encoding="utf-8",
     )
@@ -224,6 +227,7 @@ def _build_correction_qa_report(source: Path, destination: Path, stats: ImageTra
 _INPAINTING_BACKEND_LABELS = {
     "box_overlay": "Box-Overlay (Fläche überdecken, Text einfügen)",
     "cv_inpainting": "Klassisches CPU-Inpainting (OpenCV, Hintergrund rekonstruiert)",
+    "gpu_inpainting": "GPU-Inpainting (LaMa, Hintergrund rekonstruiert)",
 }
 
 
@@ -236,7 +240,26 @@ def _build_qa_report(
     stats: ImageTranslationStats,
     ocr_engine_name: str = "tesseract",
     inpainting_backend_name: str = "box_overlay",
+    ocr_language: str | None = None,
+    min_confidence: float = DEFAULT_MIN_OCR_CONFIDENCE,
+    max_height_ratio: float = DEFAULT_MAX_HEIGHT_RATIO,
+    protected_terms: list[str] | None = None,
+    max_chars_per_run: int | None = None,
 ) -> str:
+    """Build the QA report text for one run_image_job() call.
+
+    Real-user request, 22.08.2026 ("Wir brauchen unbedingt im qa_report.txt
+    auch die Einstellungen mit denen ich es getestet habe"): every setting
+    that actually affects the run's outcome - not just which provider/OCR-
+    engine/backend were picked, but the concrete OCR language override and
+    the two numeric thresholds (min_confidence/max_height_ratio) - is now
+    printed here, so a later look at a real run's qa_report.txt (this
+    function's caller, run_image_job(), already had all of these as local
+    values; they just weren't reaching the report) never requires asking
+    the user "what did you actually run this with". protected_terms/
+    max_chars_per_run are included for the same reason even though they
+    rarely change between runs.
+    """
     backend_label = _INPAINTING_BACKEND_LABELS.get(inpainting_backend_name, inpainting_backend_name)
     lines: list[str] = [
         "Bildübersetzung - QA-Bericht",
@@ -246,7 +269,13 @@ def _build_qa_report(
         f"Anbieter: {provider_name}",
         f"Sprache: {source_lang or 'automatisch erkannt'} -> {target_lang}",
         f"OCR-Engine: {ocr_engine_name}",
+        f"OCR-Sprache (Hinweis an die Engine): {ocr_language or 'automatisch (Standard: eng)'}",
         f"Rückschreibe-Backend: {backend_label}",
+        f"Mindest-OCR-Konfidenz (min_confidence): {min_confidence}",
+        f"Max. Zeilenhöhen-Verhältnis (max_height_ratio): {max_height_ratio}",
+        f"Geschützte Begriffe (protected_terms): "
+        f"{', '.join(protected_terms) if protected_terms else 'keine'}",
+        f"Zeichen-Budget pro Übersetzungslauf (max_chars_per_run): {max_chars_per_run}",
         "",
         "Ergebnis",
         f"  Erkannte Textregionen: {len(stats.regions)}",

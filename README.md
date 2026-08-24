@@ -31,6 +31,19 @@ Text in Bildern (z. B. gescannte Seiten) ist geplant.
   den System-Paketmanager (z. B. `apt install tesseract-ocr` unter
   Debian/Ubuntu, `brew install tesseract` unter macOS) – siehe
   [requirements-ocr.txt](requirements-ocr.txt).
+- Alternativ zwei weitere wählbare OCR-Engines (Phase 3, 23.08.2026), beide
+  mit paragraphenweiser statt zeilenweiser Texterkennung – hilfreich bei
+  dicht gepackten Layouts (siehe Backlog.md):
+  - **Google Cloud Vision** (Cloud) – braucht einen Google-API-Key mit
+    aktivierter Vision API (derselbe Key wie für den Google-Übersetzer
+    kann wiederverwendet werden, wenn beide APIs im selben Google-Cloud-
+    Projekt aktiviert sind).
+  - **PaddleOCR** (lokal, kein Cloud-Zugang nötig) – siehe
+    [requirements-paddleocr.txt](requirements-paddleocr.txt). Lädt beim
+    ersten Lauf automatisch Modelle herunter (normaler Internetzugang
+    nötig). Falls beim Erkennen ein `NotImplementedError` rund um
+    "ConvertPirAttribute2RuntimeAttribute" auftritt: bekannte Regression
+    in PaddlePaddle 3.3.x, siehe requirements-paddleocr.txt.
 - Für optionales GPU-Inpainting (LaMa, Phase 3) zusätzlich eine
   CUDA-fähige GPU – siehe [requirements-gpu.txt](requirements-gpu.txt).
 
@@ -46,6 +59,12 @@ Für optionale OCR-Funktionalität zusätzlich:
 
 ```bash
 pip install -r requirements-ocr.txt
+```
+
+Für die optionale PaddleOCR-Engine (siehe oben) zusätzlich:
+
+```bash
+pip install -r requirements-paddleocr.txt
 ```
 
 ## Start

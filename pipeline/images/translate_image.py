@@ -31,7 +31,13 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from pipeline.images.inpainting import InpaintingBackend, InpaintingError, TextReplacement
-from pipeline.images.ocr import OcrEngine, OcrTextRegion
+from pipeline.images.ocr import (
+    OcrEngine,
+    OcrTextRegion,
+    merge_lines_into_paragraphs,
+    merge_region_group,
+    region_line_height,
+)
 from pipeline.translation.base import TranslationError, TranslationProvider
 from pipeline.translation.protected_terms import protect_terms, restore_terms
 
@@ -89,8 +95,21 @@ def _max_plausible_height(
     constant's docstring). None if there are no such regions to compute a
     median from, so the caller can skip the outlier check entirely rather
     than compare against nothing.
+
+    Uses region_line_height(), not `region.height` directly, for both the
+    median and (in translate_image()'s own filter below) each individual
+    comparison - added 23.08.2026 alongside GoogleVisionOcrEngine/
+    PaddleOcrEngine, the first engines whose recognize() can itself return
+    a region spanning several original lines (see
+    OcrEngine.returns_paragraph_regions's docstring). This check exists to
+    catch a bounding box inflated some OTHER way than genuine multi-line
+    text (an icon/graphic folded into it - see DEFAULT_MAX_HEIGHT_RATIO's
+    docstring), a single-line concept; comparing a legitimate multi-line
+    PARAGRAPH's full `height` against a threshold calibrated for
+    single-line outliers would misfire exactly the cases these two
+    engines exist to get right.
     """
-    heights = [region.height for region in regions if region.confidence >= min_confidence]
+    heights = [region_line_height(region) for region in regions if region.confidence >= min_confidence]
     if not heights:
         return None
     return statistics.median(heights) * max_height_ratio
@@ -255,6 +274,40 @@ def translate_image(
     `stats_callback`, if given, is called after every region reaches a
     final outcome (translated/skipped/failed) with the current cumulative
     `stats`, mirroring the other three formats' live progress support.
+
+    Since 22.08.2026: every region NOT translated (skipped, failed, or
+    never reached due to cancellation) is passed to
+    `inpainting_backend.apply()` as `obstacle_regions` - its original
+    pixels are still visible in the output, so a NEIGHBOURING translated
+    region's text must still avoid growing into it (see that parameter's
+    docstring on InpaintingBackend.apply() and
+    pipeline.images.inpainting._vertical_room_below()).
+
+    Also since 22.08.2026 (verifying the fix above against a real,
+    densely-laid-out infographic showed it wasn't nearly enough - see
+    pipeline.images.ocr.merge_lines_into_paragraphs()'s docstring for the
+    full diagnosis): regions that pass min_confidence/max_height_ratio are
+    no longer translated and redrawn one Tesseract LINE at a time.
+    Consecutive lines recognized as the same wrapped sentence/bullet are
+    merged first (see that function) into ONE translation call (better
+    context too, not just layout) and ONE drawn block, sized against the
+    union of their original bounding boxes. `stats.translated`/
+    `stats.failed` still count in ORIGINAL-line units, not merged blocks
+    - `stats.processed` (translated+skipped+failed) still equals
+    len(regions) whenever the run isn't cancelled partway through,
+    unchanged from before this merge step existed.
+
+    Since 23.08.2026 (GoogleVisionOcrEngine/PaddleOcrEngine, added after
+    comparing Google's own image translation against ours - see
+    Backlog.md): when `ocr_engine.returns_paragraph_regions` is True, the
+    merge step above is skipped entirely - the engine's own recognize()
+    already returned paragraph-grouped regions, so re-running the
+    geometric line-merge heuristic against them would be redundant at
+    best. `max_plausible_height`'s outlier check also uses each region's
+    representative single-line height (pipeline.images.ocr.
+    region_line_height()) rather than its raw `height` for exactly this
+    reason - a legitimate multi-line paragraph must not be mistaken for
+    an icon-inflated bounding box.
     """
     stats = ImageTranslationStats()
 
@@ -273,11 +326,8 @@ def translate_image(
     stats.regions = regions
     max_plausible_height = _max_plausible_height(regions, min_confidence, max_height_ratio)
 
+    eligible: list[OcrTextRegion] = []
     for index, region in enumerate(regions):
-        if _cancelled():
-            stats.cancelled = True
-            break
-
         if region.confidence < min_confidence:
             _notify(
                 f"Textregion {index + 1}/{len(regions)}: uebersprungen "
@@ -287,36 +337,86 @@ def translate_image(
             _report()
             continue
 
-        if max_plausible_height is not None and region.height > max_plausible_height:
+        if max_plausible_height is not None and region_line_height(region) > max_plausible_height:
             _notify(
                 f"Textregion {index + 1}/{len(regions)}: uebersprungen "
                 f"(ungewoehnlich grosse Bounding-Box, vermutlich Icon-/"
-                f"Grafik-Fehllesung - Hoehe {region.height}px, erwartet bis "
-                f"zu {max_plausible_height:.0f}px)"
+                f"Grafik-Fehllesung - Hoehe {region_line_height(region)}px, "
+                f"erwartet bis zu {max_plausible_height:.0f}px)"
             )
             stats.skipped += 1
             _report()
             continue
 
-        _notify(f"Textregion {index + 1}/{len(regions)}...")
+        eligible.append(region)
+
+    # Since 23.08.2026 (GoogleVisionOcrEngine/PaddleOcrEngine): an engine
+    # whose recognize() already returns paragraph-grouped regions skips
+    # merge_lines_into_paragraphs() entirely - see
+    # OcrEngine.returns_paragraph_regions's docstring for why re-running
+    # that geometric heuristic against already-correct paragraphs would be
+    # at best redundant and at worst actively harmful (it could wrongly
+    # fuse two separate, correctly-formed paragraphs that merely sit close
+    # together - its gap threshold is calibrated for single-line gaps).
+    # Each eligible region becomes its own one-element group.
+    engine_returns_paragraphs = getattr(ocr_engine, "returns_paragraph_regions", False)
+    groups = [[region] for region in eligible] if engine_returns_paragraphs else merge_lines_into_paragraphs(eligible)
+    translated_original_ids: set[int] = set()
+
+    for group_index, group in enumerate(groups):
+        if _cancelled():
+            stats.cancelled = True
+            break
+
+        _notify(f"Textblock {group_index + 1}/{len(groups)}...")
+        joined_text = " ".join(region.text for region in group)
         try:
-            protected_text, mapping = protect_terms(region.text, protected_terms)
+            protected_text, mapping = protect_terms(joined_text, protected_terms)
             result = provider.translate(protected_text, target_lang=target_lang, source_lang=source_lang)
             translated_text = restore_terms(result.text, mapping)
         except TranslationError as exc:
             _notify(f"  FEHLER (uebersprungen): {exc}")
-            stats.failed += 1
-            stats.errors.append(f"region{index}: {type(exc).__name__}: {exc}")
+            stats.failed += len(group)
+            stats.errors.append(f"block{group_index}: {type(exc).__name__}: {exc}")
             _report()
             continue
 
         stats.chars_sent += len(protected_text)
-        stats.replacements.append(TextReplacement(region=region, translated_text=translated_text))
-        stats.translated += 1
+        # For an engine_returns_paragraphs group, `group` is always a
+        # single already-correct region (see above) - merge_region_group()
+        # would rebuild it from scratch and, critically, RECOMPUTE
+        # line_height from group[0].height alone (its own docstring: built
+        # for single-LINE Tesseract regions, where height IS the line
+        # height), destroying the multi-line-aware line_height
+        # GoogleVisionOcrEngine/PaddleOcrEngine already computed correctly
+        # at recognize() time. Using the region as-is avoids that.
+        merged_region = group[0] if engine_returns_paragraphs else merge_region_group(group)
+        stats.replacements.append(TextReplacement(region=merged_region, translated_text=translated_text))
+        stats.translated += len(group)
+        translated_original_ids.update(id(region) for region in group)
         _report()
 
+    # Every ORIGINAL region OCR recognized but whose id() never made it
+    # into translated_original_ids (skipped for low confidence/outlier
+    # height, its whole merged group's provider call failed, or never
+    # reached at all because should_cancel fired first) still shows its
+    # ORIGINAL, untouched pixels in the output - `id()`, not equality,
+    # since OcrTextRegion isn't hashable and region objects are reused
+    # as-is (never copied) between `regions` and each merge_lines_into_
+    # paragraphs() group - see InpaintingBackend.apply()'s
+    # `obstacle_regions` parameter docstring (added 22.08.2026, closing
+    # the gap _vertical_room_below() documented until then) for why these
+    # must still count as collision obstacles for the regions that DO get
+    # drawn. Deliberately NOT `{id(r.region) for r in stats.replacements}`
+    # any more - a replacement's `region` is now merge_region_group()'s
+    # brand-new UNION region, whose id() never matches any of `regions`'
+    # original per-line objects at all.
+    obstacle_regions = [region for region in stats.regions if id(region) not in translated_original_ids]
+
     try:
-        inpainting_backend.apply(source_path, stats.replacements, destination_path)
+        inpainting_backend.apply(
+            source_path, stats.replacements, destination_path, obstacle_regions=obstacle_regions
+        )
     except InpaintingError:
         # Re-raised, not swallowed: without a written output file the
         # job cannot claim success, no matter how many regions were

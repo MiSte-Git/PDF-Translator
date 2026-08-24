@@ -97,6 +97,202 @@
   Cloud-Inpainting bleiben laut RoadMap.md offen.
 - [ ] PyInstaller-Bundles für Releases (später, nach stabiler Kernfunktion)
 - [ ] Optional: PyPI-Package
+- [x] Bildübersetzung als eigenständige, in andere Programme einbindbare
+  Schnittstelle bauen (22.08.2026, Klärung mit Michael - Vorgeschichte siehe
+  "Ideen / später bewerten", Eintrag "Cross-Projekt: Bildübersetzung als
+  Basis für TME"). TME läuft aktuell auf demselben Rechner wie
+  PDF-Translator, soll aber später auch eigenständig laufen können - die
+  Schnittstelle ist deshalb von Anfang an sauber konfiguriert und
+  dokumentiert, nicht an interne, noch in Bewegung befindliche
+  PDF-Translator-APIs gekoppelt. Ausdrücklich entkoppelt von der
+  Deployment-Frage weiter unten: solange TME auf demselben Rechner läuft,
+  ist kein PyInstaller/Standalone-Build nötig, nur eine saubere
+  CLI-Schnittstelle.
+
+  Umgesetzt als neues Top-Level-Paket `image_translate_cli/` (nicht unter
+  `pipeline/` oder `ui/` - siehe Paket-Docstring): `cli.py` (zwei
+  Subcommands, `check` und `translate`), `config.py` (versioniertes
+  JSON-Config-Schema, `CONFIG_SCHEMA_VERSION`), `report.py` (versioniertes
+  JSON-Report-Schema, `REPORT_SCHEMA_VERSION`), `CLI.md` (vollständige
+  Dokumentation: Kommandos, Feldreferenz Config/Report, Exit-Codes,
+  Versionierungspolitik, bekannte Grenzen, Subprocess-Aufrufbeispiel für
+  TME). Config enthält nie Zugangsdaten - die werden wie überall im
+  Projekt über `pipeline/credentials.py` aufgelöst.
+
+  Dabei aufgeräumt: `PROVIDER_FACTORIES`/`OCR_ENGINE_FACTORIES`/
+  `INPAINTING_BACKEND_FACTORIES` (+ Verfügbarkeitsprüfungen) lagen bisher
+  in `ui/document_job_common.py` ("UI-facing string key -> Backend-Klasse
+  ist ein UI-Layer-Concern") - genau die Kopplung, die für eine
+  eigenständige Schnittstelle vermieden werden sollte. Nach
+  `pipeline/registry.py` verschoben (reiner Move, keine
+  Verhaltensänderung); `ui/document_job_common.py` re-exportiert
+  unverändert für bestehende Aufrufer (`ui/app.py`, `ui/image_job.py`,
+  `ui/pdf_job.py`, `ui/word_job.py`, `ui/pptx_job.py`, `ui/analysis.py`
+  geprüft - alle importierten Namen bleiben verfügbar). `check`
+  übersetzt das in einen Preflight-Befehl (Provider-Zugangsdaten +
+  OCR-/Inpainting-Backend-Verfügbarkeit, kein API-Aufruf), damit TME einen
+  `translate`-Lauf vorab prüfen kann.
+
+  Nebenbei gefunden und behoben: `pipeline/credentials.py::get_api_key()`
+  listete bei einem `get_deepl_api_key()`-artigen Aufruf dieselbe
+  Umgebungsvariable doppelt in der Fehlermeldung (`env_names` enthielt
+  bereits `key_name.upper()`) - aufgefallen, weil genau diese Meldung jetzt
+  über `check`/den Report nach außen sichtbar ist. Fix: `candidates` per
+  `dict.fromkeys()` dedupliziert, Reihenfolge erhalten.
+
+  End-to-End lokal getestet (Sandbox mit Tesseract, ohne echte
+  Provider-Zugangsdaten): `check` meldet fehlende Zugangsdaten korrekt und
+  gibt Exit-Code 1 zurück; unbekannte `provider`/`schema_version` in der
+  Config geben Exit-Code 2 mit klarer Fehlermeldung; `translate --dry-run`
+  liefert eine Zeichen-/Kostenschätzung ohne Provider-Aufruf;
+  `translate --input`/`--input-dir` erzeugen beide ein korrektes Bild plus
+  einen vollständigen, schema-konformen JSON-Report, inklusive des
+  Falls "eine Textregion schlägt fehl (TranslationError mangels
+  Zugangsdaten), das Bild bleibt trotzdem Status `ok`" - mirrors
+  `translate_image()`s eigene "eine schlechte Region bricht nicht das
+  ganze Bild ab"-Regel.
+
+  Noch offen (nicht blockierend für die Schnittstelle selbst): stabiler
+  `console_scripts`-Entry-Point (`pyproject.toml`) für einen Aufruf ohne
+  `python -m`; echter End-to-End-Test mit TME selbst (bisher nur isoliert
+  gegen synthetische Testbilder verifiziert); `--dry-run`s Schätzung ist
+  bewusst konservativ (siehe CLI.md "Bekannte Grenzen" - wendet
+  `max_height_ratio` nicht an); kein Abbruch-Mechanismus über die
+  CLI-Grenze hinweg (Report-Status `"cancelled"` ist vorgesehen, aber noch
+  nicht auslösbar).
+
+  **Nachtrag (22.08.2026, Michael: "für die Zukunft offen und dynamisch
+  behalten"):** Zwei Fragen dazu geklärt und umgesetzt.
+
+  Provider-Zugangsdaten: `config.json`s `provider`-Feld wählt nur AUS,
+  welcher Anbieter genutzt wird; der API-Key bleibt getrennt und wird wie
+  im Rest des Projekts über `pipeline/credentials.py` aufgelöst
+  (Umgebungsvariable vor OS-Keyring `"pdf-translator"`). Ein Aufrufer wie
+  TME braucht dafür keine eigene Provider-/Credential-Verwaltung für Bilder
+  - er setzt beim Subprocess-Aufruf einfach die passende Umgebungsvariable
+  mit seinem eigenen, bereits konfigurierten Key (dokumentiert in CLI.md,
+  neuer Abschnitt "Zugangsdaten für den Provider").
+
+  Provider-Liste dynamisch statt hartkodiert: vorher war "welcher Provider
+  unterstützt wird" über DREI unabhängige Mappings verstreut
+  (`pipeline/registry.py`s Dict, eine `PricingModel`-Konstante in
+  `pipeline/translation/cost_control.py`, eine dritte Credential-Check-
+  Zuordnung, die in `image_translate_cli/cli.py` neu entstanden wäre) -
+  leicht zu vergessen, und unpassend für "wir wissen noch nicht, welche
+  Provider künftig dazukommen". Umgebaut auf EINE zentrale Registrierung:
+  `pipeline/registry.py::ProviderSpec` (Name + Factory + Pricing +
+  Credential-Check in einem Objekt) und `register_provider()`;
+  `PROVIDER_FACTORIES` wird jetzt live von dort abgeleitet (in-place
+  mutiert, nicht einmalig berechnet - ein Bug in der ersten Fassung dieses
+  Umbaus, bei dem eine spätere Registrierung nicht mehr auftauchte, wurde
+  beim Testen gefunden und behoben). `image_translate_cli/cli.py` verwendet
+  jetzt `get_provider_spec()`/`provider_credential_status()` statt einer
+  eigenen Kopie der Provider-Zuordnung. Ein künftiger fünfter Provider
+  braucht dadurch nur noch eine `TranslationProvider`-Implementierung plus
+  EINEN `register_provider(ProviderSpec(...))`-Aufruf - kein Anfassen von
+  `image_translate_cli/config.py`, `cli.py` oder der Desktop-UI mehr, da
+  alle drei nur noch lesend auf die Registry zugreifen. Getestet: eine zur
+  Laufzeit nachregistrierte Test-Provider-Spec wird von
+  `image_translate_cli/config.py`s Config-Validierung sofort akzeptiert,
+  ohne Codeänderung an `config.py` selbst; bestehende vier Provider
+  weiterhin funktionsfähig (`check`/`translate` erneut end-to-end
+  verifiziert). Details: CLI.md, neuer Abschnitt "Neue Provider
+  hinzufügen".
+
+  **Nachtrag 2 (22.08.2026, Michael: "Ich schicke ein Bild in die CLI,
+  bekomme eine Vorschau um etwaige Korrekturen zu machen und bekomme dann
+  ein übersetztes Bild zurück"):** Frage geklärt, ob der Korrektur-Dialog
+  (`ui/image_correction_dialog.py`) mit ausgelagert werden sollte - Antwort
+  nein für den Dialog selbst (inhärent interaktiv/visuell, jede aufrufende
+  App braucht ohnehin ihre eigene Oberfläche dafür), aber ja für den
+  Mechanismus dahinter: sonst müsste jede App (auch TME), die die
+  Schnittstelle nutzt, das Neu-Rendern korrigierter Regionen selbst
+  nachbauen.
+
+  Umgesetzt: neues drittes Kommando `correct` (kein OCR, kein
+  Provider-Aufruf, kein `--config` nötig) - headless-Äquivalent zu
+  `ui/image_job.py::run_image_correction_job()`. `translate`s Report
+  enthält jetzt pro Bild zusätzlich `regions` (`image_translate_cli/
+  report.py::RegionRecord` - Position, Originaltext, übersetzter Text je
+  erfolgreich übersetzter Region, additives Feld, keine
+  `REPORT_SCHEMA_VERSION`-Erhöhung nötig). Ein Aufrufer entnimmt diese
+  Liste, lässt `translated_text` (optional auch Position/Größe) in seiner
+  eigenen Oberfläche bearbeiten, und übergibt sie unverändert in der Form
+  an `correct --regions` - das rendert gegen die pristine Quelle neu.
+  `correct`s eigener Report enthält wieder eine frische `regions`-Liste,
+  direkt einsetzbar für eine weitere Korrekturrunde.
+
+  End-to-End getestet: `translate` mit Fake-Provider erzeugt eine
+  Region mit Originaltext/übersetztem Text; diese Liste als
+  `--regions`-Datei manuell editiert (übersetzten Text geändert); `correct`
+  rendert exakt den korrigierten Text neu, Report zeigt den korrigierten
+  Stand. Fehlerpfade geprüft: fehlende Quelldatei, fehlerhaftes
+  Regions-JSON (fehlende Pflichtfelder, kein Array), `--source`==`--output`,
+  unbekanntes `--inpainting-backend` - alle mit Exit-Code 2 und klarer
+  Meldung statt Absturz. Bekannte Grenze dokumentiert (CLI.md "Bekannte
+  Grenzen"): `correct` kann nur bereits erfolgreich übersetzte Regionen
+  bearbeiten, keine wegen niedriger OCR-Konfidenz übersprungenen oder
+  fehlgeschlagenen nachträglich hinzufügen - dafür müsste erneut
+  `translate` laufen. Details: CLI.md, neuer Abschnitt "Workflow:
+  Vorschau, Korrektur, Ergebnis" und "`correct` - Bild mit bearbeiteten
+  Regionen neu rendern".
+
+  **Nachtrag 3 (22.08.2026, Michael: "Ich möchte aber gerne die Korrektur
+  Logik mit UI auslagern. Ansonsten muss jede App das gleiche nochmal
+  bauen."):** `correct` (Nachtrag 2) löst nur den Re-Render-Mechanismus,
+  nicht die Korrektur-OBERFLÄCHE selbst - jede aufrufende App müsste die
+  weiterhin eigenständig bauen. Diskutiert (nativ eingebettet via
+  PySide6-Widget vs. lokale Web-UI im Browser); Michael entschied sich für
+  die Browser-Variante, nachdem geklärt war, dass TME auf absehbare Zeit
+  NICHT serverbasiert wird, sondern weiterhin auf demselben Rechner läuft
+  - Auth/Hosting damit vorerst kein Thema.
+
+  Umgesetzt: neues viertes Kommando `review`, das `correct`s Re-Render
+  UND die Korrektur-Oberfläche in einem Aufruf abdeckt. Startet einen
+  lokalen `http.server.ThreadingHTTPServer` (Standard: `127.0.0.1`, kein
+  Netzwerkzugriff von außen, keine Authentifizierung - siehe CLI.md,
+  Abschnitt "review", Unterabschnitt "Sicherheit"), öffnet automatisch
+  einen Browser-Tab mit einer selbstständigen HTML/CSS/JS-Seite (kein
+  Build-Schritt, kein CDN, kein Framework) auf der das Originalbild mit
+  den übersetzten Textregionen als verschiebbare/skalierbare/editierbare
+  Boxen überlagert angezeigt wird (Pointer Events statt reiner
+  Maus-Events - funktioniert damit auch per Touch, relevant falls die
+  iPad-Frage aus dem Deployment-Eintrag unten später wieder aufgegriffen
+  wird). Nach Klick auf "Anwenden" rendert `review` mit exakt demselben
+  `InpaintingBackend.apply()`-Pfad wie `correct` neu; "Abbrechen" beendet
+  ohne Ausgabedatei (Exit-Code 3, neu). Geteilte Regionen-Validierung
+  (`x`/`y`/`width`/`height`/`translated_text` Pflicht) aus `cli.py` in ein
+  neues `image_translate_cli/regions_io.py` gezogen, damit `correct`
+  (Datei-Pfad) und `review` (Browser-POST-Pfad) dieselbe Prüfung teilen
+  statt zweier Kopien, die auseinanderlaufen könnten.
+
+  Bewusst NICHT umgesetzt: Regionen im Browser hinzufügen/löschen (nur
+  Text/Position/Größe der von `translate` gelieferten Regionen editierbar
+  - dieselbe Grenze wie bei `correct`, siehe CLI.md "Bekannte Grenzen"),
+  Live-Neu-Rendering bei jeder Änderung (die Browser-Vorschau ist eine
+  Textbox-Overlay-Annäherung, kein echter Inpainting-Durchlauf pro
+  Tastendruck).
+
+  End-to-End lokal getestet (Sandbox): Server startet, `GET /`/`/api/state`/
+  `/api/image` liefern korrekt (inkl. Content-Type des Bildes);
+  `POST /api/apply` mit gültigem Payload beendet den Prozess mit Exit-Code
+  0, korrektem Report (`"command": "review"`) und neu gerendertem Bild;
+  `POST /api/apply` mit unvollständigem Payload liefert `400` mit
+  Klartext-Fehler UND lässt den Server weiterlaufen (kein Absturz, Nutzer
+  kann im Browser korrigieren und erneut senden); `POST /api/cancel`
+  beendet mit Exit-Code 3, keine Ausgabedatei; `correct` nach dem Umbau
+  (gemeinsames `regions_io.py`) erneut regressionsgetestet - unverändertes
+  Verhalten inkl. Fehlerpfade. Details: CLI.md, neuer Abschnitt "review -
+  Bild interaktiv im Browser korrigieren und neu rendern".
+
+  Beobachtung, direkt relevant für die Deployment-Entscheidung unten (noch
+  NICHT dort umgesetzt, siehe die dortige Ergänzung): der hier gebaute
+  lokale Server + Browser-Ansatz ist etwas anderes als die dort bereits
+  verworfene "Web-App" (die brauchte Hosting/eigene Zugangsdaten-
+  Architektur) - hier läuft der Server nur lokal, keine Internetanbindung
+  nötig, gleiches Vertriebsmodell wie ein normaler Installer heute. Nicht
+  im Rahmen dieses Punkts weiterverfolgt, siehe Vermerk bei
+  "Deployment-Lösung".
 
 ## Ideen / später bewerten
 
@@ -132,6 +328,38 @@
   (z. B. GitHub Actions mit Runnern je Betriebssystem) das übernehmen soll.
   Umsetzung noch nicht begonnen.
 
+  **Klarstellung (22.08.2026):** ausdrücklich entkoppelt von der
+  Bildübersetzungs-Schnittstelle für TME (siehe "Geplant" oben) - TME läuft
+  vorerst auf demselben Rechner und braucht dafür keinen eigenständigen
+  Standalone-Build. Die frühere Überlegung, beide Standalone-Bauten
+  zusammenzulegen, gilt nur, falls TME später tatsächlich eigenständig
+  laufen muss, nicht als aktuelle Abhängigkeit.
+
+  **Wiedervorlage (22.08.2026):** Im Rahmen von `review` (siehe "Geplant"
+  oben, Nachtrag 3 zum Bildübersetzungs-Schnittstelle-Punkt) wurde für die
+  Korrektur-UI ein lokaler HTTP-Server + Browser-Seite gebaut, statt eines
+  nativen PySide6-Dialogs. Das ist NICHT dieselbe Web-App-Option, die am
+  18.08.2026 verworfen wurde (die brauchte Hosting/eine eigene
+  Zugangsdaten-Architektur für mehrere Nutzer) - hier läuft der Server rein
+  lokal (`127.0.0.1`), kein Internet, kein zusätzliches Zugangsdaten-
+  Konzept, gleiches Vertriebsmodell wie ein normaler Installer.
+
+  Das öffnet einen bisher nicht bedachten Weg für die iPad-Frage: Falls die
+  ganze App (nicht nur die Bildkorrektur) irgendwann als lokaler Server +
+  Browser-Oberfläche liefe, könnte die schwere Rechenarbeit (Tesseract,
+  GPU-Inpainting) weiterhin auf einem "echten" Rechner laufen, während JEDES
+  Gerät mit Browser im selben Netz - auch ein iPad - nur als Anzeige/
+  Fernbedienung dient, ohne dass iPadOS selbst den PySide6/Tesseract-Stack
+  tragen müsste. Das wäre eine dritte Option neben "native Installer" und
+  "gehostete Web-App", mit anderen Kompromissen als beide.
+
+  Ausdrücklich NICHT hiermit entschieden: das ist eine Weichenstellung für
+  die GANZE App, nicht nur für die Bildkorrektur, und reißt die
+  18.08.2026-Entscheidung (native Installer-Route) nicht automatisch wieder
+  auf. Bewusst als offener Punkt für eine spätere, eigene Diskussion
+  festgehalten statt sie nebenbei mitzuentscheiden - siehe Michael dazu
+  befragen, sobald die Deployment-Frage wieder aktiv angegangen wird.
+
 - Cross-Projekt: Bildübersetzung als Basis für TME (21.08.2026, Claude per
   Cowork, im Rahmen einer TME-Session geprüft): TME (github.com/MiSte-Git/TME,
   Telegram-Export-Tool desselben Nutzers) hat in seinem eigenen Backlog einen
@@ -162,6 +390,10 @@
   oben mitdenken. Zurückgestellt bis pipeline/images/ hier stabiler ist
   (siehe "Bildübersetzungs-Modul"-Eintrag oben) - noch nicht begonnen, kein
   Umsetzungsdruck von TME-Seite.
+
+  **Update (22.08.2026):** mit Michael besprochen und priorisiert - konkreter
+  nächster Schritt jetzt als aktiver Punkt in "Geplant" oben ("Bildübersetzung
+  als eigenständige, in andere Programme einbindbare Schnittstelle bauen").
 
 ## Zu verifizieren
 - [ ] Word-Pfad: PAGE-Feld in footer1.xml sollte sich bei Neuberechnung automatisch aktualisieren, auch wenn das übersetzte Dokument länger wird als das Original - noch nicht an einem tatsächlich länger werdenden Dokument verifiziert (Word aktualisiert Felder nicht immer automatisch beim programmatischen Schreiben, ggf. muss ein Feld-Update erzwungen werden)
@@ -2678,3 +2910,1028 @@
     Funktionsparameter) - falls sich in weiteren Nutzertests zeigt, dass
     er zu aggressiv oder zu lasch ist, sollte er anpassbar gemacht
     werden.
+- [x] Font-Matching (Familie/Fett/Kursiv) + Hintergrund-Farbverlauf für
+  BoxOverlayBackend (RoadMap.md Phase 3, "...echte Schrifterkennung
+  (Font-Matching) weiterhin offen") - Michael, 22.08.2026, nach einem
+  eigenen Google-Translate-Bildvergleich (Original-Infografik als Foto
+  hochgeladen, Google lieferte layouttreue Übersetzung "in einer
+  Wahnsinns Geschwindigkeit"): "Unser Ansatz hat eine Genauigkeit im
+  Layout von vielleicht 60-70%... die sollten wir so wie auf das von
+  Google bringen." Vorab per Websuche bestätigt: keine offizielle
+  Google-API für Bild-zu-Bild-Übersetzung mit Layout-Rekonstruktion
+  existiert (nur Consumer-App-Feature) - "einfach an Google
+  weiterreichen" damit keine Option, eigene Pipeline verbessern die
+  einzig gangbare Richtung. Michael explizit: "gleich richtig machen,
+  wenn es nicht zwingend den pragmatischen Weg vorher braucht" +
+  klassische Bildverarbeitung statt eines trainierten ML-Font-
+  Klassifikators (keine neue Modell-Abhängigkeit).
+  - Neu: `pipeline/images/font_style.py` - eigenständiges Modul,
+    ausschließlich für Font-Stil-Erkennung zuständig (keine Rückimport-
+    Abhängigkeit von `inpainting.py`, `size` bleibt dafür ein
+    Pflichtparameter statt selbst rückgerechnet zu werden).
+    `load_font(size, bold=, family=, italic=)` ersetzt/verallgemeinert
+    `inpainting.py`s bisheriges `_load_font()` (nur Sans Regular/Bold) um
+    Serif und Kursiv/Oblique, 6-stufige Fallback-Kaskade bis zu Pillows
+    eingebautem Default-Font. `classify_family()`/`classify_bold()`/
+    `classify_italic()`/`estimate_font_style()` nutzen konsequent
+    dieselbe RELATIVE Vergleichsmethodik, die `_estimate_is_bold()`
+    (21.08.2026) für Fett-Erkennung eingeführt hat: denselben
+    Vergleichstext synthetisch in den jeweils in Frage kommenden
+    Varianten rendern, dieselbe Kennzahl an beiden messen, die reale
+    Region der Variante zuordnen, deren synthetischer Wert näher liegt -
+    robust gegen Bild-zu-Bild-Rauschen, weil nur die Reihenfolge zählt,
+    nicht der Absolutwert. Neue Kennzahlen: `_serif_score()`
+    (Zeilen-Ink-Varianz oben/unten vs. Mitte - Serifen erzeugen an den
+    Rändern eine ungleichmäßigere Verteilung), `_slant_ratio()`
+    (Bänder-Schwerpunkt-Regression für Kursiv-Neigung). Reihenfolge in
+    `estimate_font_style()`: Familie -> Fett -> Kursiv, jede Stufe nutzt
+    die vorherige als Vergleichsbasis. Alle drei `InpaintingBackend.apply()`
+    (Box-Overlay/CV/GPU) rufen jetzt `estimate_font_style()` statt des
+    alten `_estimate_is_bold()`; letzteres bleibt als dünner
+    Kompatibilitäts-Wrapper (`family="sans_serif"`) bestehen, bestehende
+    Aufrufer/Tests unverändert lauffähig.
+  - Bewusst NICHT Teil dieser Runde: Monospace-Erkennung (bräuchte
+    zeichenweise statt zeilenweise Segmentierung, die die vorhandene OCR
+    nicht liefert) und echte Font-FAMILIEN-Erkennung ("Arial" vs.
+    "Helvetica" - optisch ohnehin kaum unterscheidbar) - beides als
+    offener Folgepunkt dokumentiert, nicht stillschweigend als erledigt
+    behandelt (siehe RoadMap.md-Eintrag).
+  - Echter Bug gefunden UND gefixt (nicht nur synthetisch konstruiert):
+    ein regulärer pytest-Lauf während der Entwicklung zeigte eine
+    plain-DejaVu-Sans-Testzeile fälschlich als "serif" klassifiziert.
+    Ursache: die REALE, aus der OCR-Box gecroppte Maske hatte spürbaren
+    Leerraum über/unter dem eigentlichen Text (Tesseract-Zeilen-Boxen
+    sind nicht eng an die Glyphen gecroppt), während die SYNTHETISCHEN
+    Vergleichsmasken bereits eng zugeschnitten waren (`ImageDraw.
+    textbbox()`) - dieser Leerraum, nicht die tatsächliche Schriftform,
+    dominierte `_serif_score()`s randbasierte Varianzmessung. Fix: neue
+    `_trim_to_ink_bbox()` schneidet jede Maske vor `_serif_score()`/
+    `_slant_ratio()` auf ihre enge Tinten-Bounding-Box zu (mit einem
+    relativen 8%-Rauschboden statt "jedes Pixel zählt" - einzelne
+    Antialiasing-Randpixel hätten die Bounding-Box sonst weiterhin
+    unvorhersehbar verlängert; auch dieser Rauschboden wurde erst nach
+    einem zweiten, breiteren synthetischen Test nötig). Bewusst NICHT
+    auf `_ink_ratio()`/Fett-Erkennung angewendet - die bestehende
+    Fett-Erkennung funktioniert mit der ungetrimmten Fläche bereits
+    zuverlässig (siehe unten, zwei Gegenversuche mit Trimmen dort haben
+    das Ergebnis nachweislich verschlechtert).
+  - Zwei Verbesserungsversuche gebaut, gemessen und wieder verworfen
+    (dokumentiert statt stillschweigend entfernt, siehe Git-Historie von
+    `font_style.py` falls das erneut aufgegriffen wird): (1) den
+    beobachteten Ink-Ratio-Vergleich in `classify_bold()` ebenfalls auf
+    die getrimmte Maske umzustellen - brach den bestehenden, an einem
+    echten Bild kalibrierten `_estimate_is_bold()`-Test UND
+    verschlechterte eine breitere synthetische Prüfung, sofort wieder
+    zurückgebaut. (2) eine `_calibrate_size()`-Vorstufe, die die vom
+    Aufrufer übergebene (nur grob geschätzte) Vergleichsgröße anhand der
+    beobachteten Tinten-Höhe nachjustiert - verbesserte Familie
+    geringfügig, verschlechterte Kursiv-Erkennung aber messbar, in Summe
+    kein klarer Gewinn, entfernt.
+  - Bekannte, bewusst dokumentierte Grenze (nicht durch obige Versuche
+    gelöst): alle drei `classify_*()`-Funktionen rendern ihre
+    synthetischen Referenzen bei der vom Aufrufer übergebenen Größe -
+    normalerweise `_initial_font_size(region)`, nur eine grobe
+    `region.height * 0.8`-Schätzung. Eine breite synthetische Text/
+    Größe/Stil-Matrix (mehrere Texte x drei Größen x alle Stil-
+    Kombinationen, realistisch verrauschte statt exakt passende
+    Größenschätzung) ergab bei exakt passender Größe 100% Trefferquote,
+    bei realistisch abweichender Schätzung nur rund 60-65% je Achse -
+    siehe `font_style.py`s Moduldoc, Abschnitt "Bekannte Grenze".
+  - Hintergrund-Rekonstruktion: `BoxOverlayBackend` füllte jede Box
+    bisher IMMER einfarbig (ein flacher `draw.rectangle(fill=...)`),
+    selbst wenn die Umgebung sichtbar einen Farbverlauf zeigte -
+    passend zu Michaels "die sollten wir so wie auf das von Google
+    bringen". Neu in `inpainting.py`: `GradientBackground`-Dataclass
+    (Achse vertikal/horizontal, zwei Farb-Stopps), `_sample_background()`
+    sampelt die vier Rand-Streifen (oben/unten/links/rechts) getrennt
+    statt sie wie bisher `_sample_background_color()` zu einer einzigen
+    Durchschnittsfarbe zu mitteln, und erkennt einen Verlauf, sobald die
+    euklidische RGB-Distanz zwischen zwei gegenüberliegenden Streifen
+    `_GRADIENT_DETECTION_THRESHOLD` (18.0, bewusst konservativ - im
+    Zweifel eher die bisherige einfarbige Füllung als ein
+    falscher/unnötiger Verlauf) übersteigt - sonst weiterhin die
+    bisherige einfarbige Füllung (abwärtskompatibel). `_fill_gradient_rect()`
+    füllt zeilen-/spaltenweise per linearer Interpolation (keine neue
+    Abhängigkeit über das bereits vorhandene Pillow hinaus).
+    `_representative_color()` liefert weiterhin eine einzelne Farbe
+    (Mittelpunkt der beiden Stopps) für Textkontrast-Entscheidung und
+    Font-Stil-Schätzung. Bewusst nur horizontale/vertikale Zwei-Stopp-
+    Verläufe, keine diagonalen/radialen (deutlich mehr Sampling-Aufwand
+    für den selteneren Fall) - `CvInpaintingBackend`/`GpuInpaintingBackend`
+    betrifft das nicht, die rekonstruieren Hintergründe (inkl. Verläufe)
+    bereits über echtes Inpainting.
+  - Getestet: neue `tests/test_font_style.py` (31 Tests - `load_font()`-
+    Fallback-Kaskade inkl. eines erzwungenen Total-Fallbacks via
+    monkeypatch, `_trim_to_ink_bbox()` inkl. des Rauschboden-Falls,
+    `_resolve_sample_text()`, alle vier `classify_*()`/
+    `estimate_font_style()` in beide Richtungen je Achse plus Default-
+    Fälle ohne Vergleichstext). Neue Gradient-Tests in
+    `tests/test_image_inpainting.py` (8 Tests - Verlauf-Erkennung
+    vertikal/horizontal, flacher Hintergrund bleibt flach,
+    `_fill_gradient_rect()` direkt gegen Pixelwerte inkl. Monotonie-
+    Check, End-to-End durch `BoxOverlayBackend.apply()` inkl. echtem
+    Tesseract-OCR-Roundtrip). Ein OCR-Roundtrip-Test mit der Region
+    exakt am Helligkeits-Umschlagpunkt des Verlaufs (Luminanz ~128)
+    scheiterte zunächst NICHT wegen eines Rendering-Bugs, sondern weil
+    Tesseracts eigene Binarisierung dort komplett leer zurückkam, obwohl
+    der Text visuell erkennbar blieb (per Bild-Inspektion bestätigt) -
+    Region im Test auf eine eindeutig kontrastreiche Position verschoben,
+    mit Begründung im Test-Docstring dokumentiert statt stillschweigend
+    "repariert". Bestehende `_load_font`/`_estimate_is_bold`/
+    `_sample_background_color`-Importe/Tests in `tests/test_image_
+    inpainting.py` unverändert lauffähig (Kompatibilitäts-Wrapper hält).
+    Gesamter Testlauf am Ende: 102 passed, 1 skipped (GPU-Hardware-
+    abhängiger Test, wie zuvor).
+- **Bildübersetzung/OCR - dekorative Icon-Glyphen als OCR-Wortmüll
+  gefiltert, QA-Bericht zeigt jetzt die tatsächlich benutzten
+  Einstellungen (22.08.2026):** Michael: "Das Ergebnis ist immer noch
+  eher bei 60-70% und immer noch nicht wirklich brauchbar. [...] Ich
+  habe es hier mit echter Hardware getestet und der Option
+  GPU-Inpainting (LaMa), und das schon seit Anfang. Wir brauchen
+  unbedingt im qa_report.txt auch die Einstellungen mit denen ich es
+  getestet habe. Es hört sich so an als wenn wir es noch nie mit der
+  App an einem echtem Bild getestet hätten." - korrigierte damit eine
+  falsche Annahme meinerseits (GPU-Inpainting sei noch ungetestet) und
+  lieferte ein echtes Original ("Spirit - Soul - Meatsuit.jpg") plus
+  die reale, sichtbar verunstaltete Ausgabe UND den echten
+  `qa_report.txt` dieses Laufs (Anbieter=google, OCR=tesseract,
+  Backend=gpu_inpainting, 99 Regionen erkannt, 83 übersetzt, 16
+  übersprungen).
+
+  **Diagnose gegen das echte Bild** (nicht synthetisch konstruiert):
+  ein direkter Tesseract-Lauf gegen das Original zeigte, dass mehrere
+  der auffälligsten Verunstaltungen in der Ausgabe ("©) NATURALLY
+  COLLAPSES / ENDS", "@ \_ THE ESSENCE RETURNS.", ") Spirit/Essence",
+  "© *") NICHT von Übersetzung oder Zurückschreiben kamen, sondern
+  bereits in der OCR-Erkennung entstanden: Tesseract liest kleine
+  dekorative Icon-/Bullet-/Checkbox-Grafiken in der Infografik
+  wiederholt als eigenständige, rein aus Satzzeichen bestehende
+  "Wörter" (z. B. ein Checkbox-Icon → "©)", teils mit hoher
+  Einzel-Konfidenz - "©" wurde mit 94.0 erkannt, obwohl inhaltlich
+  falsch). Diese Symbol-Wörter werden VOR dem eigentlichen Satz in
+  dieselbe Zeile gruppiert, sauber übersetzt (der Übersetzer bekommt
+  ja nur den bereits verunstalteten Text) und landen so mitten im
+  übersetzten Ergebnis. Da `OcrTextRegion.confidence` der
+  ARITHMETISCHE MITTELWERT aller Wort-Konfidenzen einer Zeile ist
+  (`_region_from_word_indices()`), reicht ein einzelnes, hoch
+  bewertetes Fehllese-Symbol-Wort, um den bestehenden
+  `DEFAULT_MIN_OCR_CONFIDENCE`-Schwellwert (40.0) unbemerkt zu
+  passieren - ein einfacher Mittelwert→Minimum-Schwellwert-Tausch
+  wurde geprüft und wieder verworfen: er hätte an echten Daten
+  desselben Bildes neue Fehlalarme erzeugt (z. B. die korrekte
+  Überschrift "SPIRIT - SOUL » MEATSUIT" nur wegen eines harmlosen
+  "»"/"·"-Satzzeichens mit min=35, oder die korrekte Bildunterschrift
+  "Origin Silence." mit min=23).
+
+  Behoben durch einen inhaltsbasierten (nicht konfidenzbasierten)
+  Filter in `pipeline/images/ocr.py`: `_is_decorative_symbol_token()`
+  verwirft ein Tesseract-Wort-Token bereits VOR der Gruppierung zu
+  `OcrTextRegion`s, wenn es AUSSCHLIESSLICH aus Zeichen der neuen
+  `_DECORATIVE_SYMBOL_CHARS`-Menge besteht (an echten Beispielen
+  desselben Bildes kalibriert). Bewusst NICHT enthalten: `+ / - = & >
+  < »` - alle im selben echten Bild an anderer Stelle als legitime,
+  eigenständige Zeichen bestätigt. Eine (block, par, line)-Gruppe, die
+  nach dem Filtern keine Wörter mehr übrig hat, wird schlicht gar
+  keine Region mehr (z. B. die reine "© *"-Zeile verschwindet
+  komplett). Verifiziert direkt gegen das echte Originalbild: Anzahl
+  Regionen 99 → 96, bestätigte Fixes u. a. "@ Contains:" →
+  "Contains:", ") Spirit/Essence" → "Spirit/Essence", "©) NATURALLY
+  COLLAPSES / ENDS" → "NATURALLY COLLAPSES / ENDS". Bewusst NICHT
+  behoben (dokumentierte, absichtliche Lücke): ein Symbol MITTEN in
+  einem echten Wort (z. B. "@SSence" im echten Bild) - deutlich
+  riskanter, ein Token teilweise statt komplett zu verwerfen, bleibt
+  offen.
+
+  **Noch offen, als Ursache identifiziert, aber NICHT in diesem
+  Durchgang behoben:** `translate_image()` übergibt an
+  `InpaintingBackend.apply()` ausschließlich `stats.replacements`
+  (erfolgreich übersetzte Regionen) - übersprungene/fehlgeschlagene
+  Regionen sind für `_vertical_room_below()`s Kollisionsvermeidung in
+  `inpainting.py` komplett unsichtbar, sodass neu eingefügter Text in
+  die noch sichtbaren Original-Pixel einer übersprungenen Region
+  hineinwachsen kann - ein wahrscheinlicher Mitverursacher der
+  optischen Unordnung im gemeldeten Bild. Braucht eine
+  Signaturänderung über alle drei Backends
+  (`BoxOverlayBackend`/`CvInpaintingBackend`/`GpuInpaintingBackend`),
+  `translate_image.py` und `ui/image_job.py` - bewusst als separater,
+  noch nicht umgesetzter Folgepunkt dokumentiert statt nebenbei
+  mitgelöst.
+
+  **QA-Bericht zeigt jetzt die echten Lauf-Einstellungen** (Michaels
+  expliziter Wunsch): `ui/image_job.py::_build_qa_report()` druckt
+  zusätzlich zu Anbieter/Sprache/OCR-Engine/Backend jetzt auch
+  `ocr_language`, `min_confidence`, `max_height_ratio`,
+  `protected_terms` und `max_chars_per_run` - alle bereits vorher als
+  lokale Werte in `run_image_job()` vorhanden, aber bisher nie im
+  Bericht gelandet. Zusätzlich fehlte in
+  `_INPAINTING_BACKEND_LABELS` bisher der Eintrag für
+  `"gpu_inpainting"` - der Bericht zeigte deshalb den rohen internen
+  Schlüssel statt eines lesbaren Labels (genau wie im echten,
+  gemeldeten `qa_report.txt` zu sehen: "Rückschreibe-Backend:
+  gpu_inpainting"), jetzt ergänzt ("GPU-Inpainting (LaMa), Hintergrund
+  rekonstruiert)").
+
+  Getestet: `tests/test_image_ocr.py` um 5 neue Tests erweitert (2
+  reine Unit-Tests für `_is_decorative_symbol_token()`, 3
+  Tesseract-Integrationstests inkl. eines Tests, der ausdrücklich
+  bestätigt, dass der Mixed-Symbol-Fall UNVERÄNDERT bleibt). Vor dem
+  Versand frisch von `tests/test_image_job.py`,
+  `tests/test_image_batch_job.py`, `tests/test_image_correction_job.py`
+  vom Gerät nachgeladen (waren in dieser Sandbox noch nicht vorhanden)
+  und mitlaufen lassen - keine Signatur-Bruchstelle durch die
+  zusätzlichen `_build_qa_report()`-Parameter. Gesamter Testlauf am
+  Ende: 121 passed, 1 skipped (GPU-Hardware-abhängiger Test, wie
+  zuvor; `tests/test_ui_images_mode.py` in dieser Sandbox nicht
+  ausführbar, da `ui/app.py`/Qt hier nicht vorhanden ist - separat auf
+  dem Gerät mit vollem Testlauf zu bestätigen).
+- **Bildübersetzung/OCR - Kollisionsvermeidung für übersprungene/
+  fehlgeschlagene Regionen ergänzt, ECHTE Grenze der Verbesserung
+  direkt am Nutzerbild verifiziert (22.08.2026):** Michael, nachdem er
+  die Frage zum GPU-Inpainting-Status beantwortet bekam: "Ja, bitte."
+  (auf das Angebot, den in der vorherigen Diagnose bereits benannten
+  Folgepunkt anzugehen). Löst den in `_vertical_room_below()`s
+  Docstring bis dahin dokumentierten bekannten Lücke: `translate_image()`
+  übergab an `InpaintingBackend.apply()` bisher ausschließlich
+  `stats.replacements` (erfolgreich übersetzte Regionen) - eine
+  übersprungene (niedrige Konfidenz/Ausreißer-Höhe), fehlgeschlagene
+  (Anbieterfehler) oder wegen `should_cancel` nie erreichte Region zeigt
+  im Ergebnisbild trotzdem weiterhin ihre ORIGINALEN, unveränderten
+  Pixel - war für die Kollisionsvermeidung aber unsichtbar, sodass eine
+  benachbarte übersetzte Region ungehindert in sie hineinwachsen konnte.
+
+  Behoben durch einen neuen `obstacle_regions`-Parameter auf
+  `InpaintingBackend.apply()` (alle drei Implementierungen -
+  `BoxOverlayBackend`/`CvInpaintingBackend`/`GpuInpaintingBackend` -
+  sowie das `Protocol` selbst), den jede `apply()`-Implementierung in
+  die an `_vertical_room_below()` übergebene Regionsliste einfließen
+  lässt, OHNE diese Regionen selbst zu zeichnen oder (bei
+  `CvInpaintingBackend`/`GpuInpaintingBackend`) in die
+  Inpainting-Maske aufzunehmen - eine übersprungene Region bleibt exakt
+  so unangetastet wie zuvor, zählt aber jetzt als echter Nachbar.
+  `translate_image()` berechnet `obstacle_regions` selbst: jede Region
+  aus `stats.regions`, die NICHT (per `id()`, da `OcrTextRegion` nicht
+  hashbar ist und Regionsobjekte zwischen `regions` und
+  `stats.replacements` unverändert wiederverwendet werden) in
+  `stats.replacements` auftaucht - deckt alle drei Ursachen (übersprungen/
+  fehlgeschlagen/durch Abbruch nie erreicht) in einem einzigen,
+  einheitlichen Mechanismus ab, ohne einen weiteren Stats-Feld-Typ
+  einzuführen. `run_image_correction_job()` (der direkte
+  `apply()`-Aufruf des Korrektur-Dialogs) übergibt bewusst weiterhin
+  KEINE `obstacle_regions` - seine `replacements`-Liste ist bereits die
+  vollständige, vom Nutzer freigegebene Endmenge, siehe
+  `InpaintingBackend.apply()`s Docstring für die Begründung.
+
+  Getestet: 9 neue Tests. `tests/test_image_inpainting.py` (3 Tests,
+  `BoxOverlayBackend`) - ein Kontroll-Test reproduziert absichtlich das
+  ALTE Verhalten (ohne `obstacle_regions` überschreibt eine lange
+  übersetzte Zeile eine echte Nachbarzeile - Fixture-Koordinaten UND
+  erwartetes Ergebnis vorab direkt am echten `apply()`-Aufruf verifiziert,
+  nicht nur von Hand durchgerechnet, da `_fit_text()`s diskrete
+  Schriftgrößen-Stufen die tatsächlich gewählte Größe/Zeilenzahl nicht
+  offensichtlich vorhersehbar machen), der zweite Test beweist den Fix am
+  selben Fixture (nur `obstacle_regions` unterschiedlich), der dritte
+  sichert Rückwärtskompatibilität (Aufruf ganz ohne den neuen Parameter).
+  `tests/test_image_cv_inpainting.py` (2 Tests, `CvInpaintingBackend`) -
+  zusätzlich ein expliziter Test, dass eine `obstacle_region` NIE in die
+  `cv2.inpaint()`-Maske aufgenommen wird (ihre Pixel dürfen nicht
+  rekonstruiert werden - nur die Platzierung der ECHTEN Übersetzung darf
+  sich nach ihr richten). `tests/test_translate_image.py` (4 Tests,
+  neuer `_RecordingBackend`, der `apply()`s Argumente ohne echtes
+  Bild-Rendering aufzeichnet) - je ein Test für übersprungen/
+  fehlgeschlagen/durch Abbruch nie erreicht, plus ein Test, dass
+  `obstacle_regions` leer bleibt, wenn alles übersetzt wurde. Gesamter
+  Testlauf am Ende: 130 passed, 1 skipped (vorher 121 passed, 1
+  skipped).
+
+  **Ehrliches Ergebnis nach Verifikation am ECHTEN Nutzerbild (nicht nur
+  synthetisch) - dieser Fix reicht bei diesem Bild NICHT annähernd aus:**
+  ein voller `translate_image()`-Lauf gegen "Spirit - Soul -
+  Meatsuit.jpg" (echtes Tesseract-OCR, `BoxOverlayBackend`, ein
+  Fake-Provider der jedem Text nur " [DE]" anhängt, damit Original vs.
+  Veränderung eindeutig unterscheidbar bleibt) lief fehlerfrei durch (82
+  übersetzt, 14 übersprungen, 0 fehlgeschlagen), aber das Ergebnisbild
+  zeigt weiterhin deutliche Überlappungen - u. a. im rechten
+  "THE CHALICE'S ROLE"/Prozess-Kasten, im "DISTORTION 1s"/"KEY
+  TRUTH"-Bereich, und mehreren Stellen mit dicht gedrängten
+  Aufzählungspunkten. Diagnose: das jetzt behobene Problem
+  (übersetzt-vs-übersprungen) war real, aber NICHT die Hauptursache der
+  von Michael beschriebenen "Boxen überlappen" auf diesem Bild - die
+  sichtbaren Überlappungen entstehen überwiegend zwischen ZWEI
+  ÜBERSETZTEN Regionen, die bereits vorher hätte kollisionsvermieden
+  werden müssen (das war nie Teil der bisher dokumentierten Lücke).
+  `_vertical_room_below()` betrachtet nur die NÄCHSTE Region unterhalb in
+  derselben horizontalen Bande (x-Bereichs-Überlappung) - bei einem
+  dicht gepackten Mehrspalten-Infografik-Layout mit vielen kleinen,
+  eng benachbarten Boxen ist diese Heuristik (kalibriert an einem
+  EINZELNEN früheren Bild, siehe deren Docstring) offenbar nicht mehr
+  ausreichend. Nicht in diesem Durchgang untersucht, klar als nächster
+  Diagnose-Schritt offen: ob die x-Bereichs-"gleiche-Bande"-Prüfung bei
+  diesem Layout falsch positive/negative Nachbarschaften erzeugt, ob die
+  Schrumpf-Untergrenze (`_MIN_FONT_SIZE = 9`) für so viele kurze,
+  dicht stehende Zeilen zu grob ist, oder ob ein grundsätzlich anderer
+  Ansatz (z. B. ALLE Regionen gemeinsam statt nacheinander unabhängig
+  platzieren) für diese Art Layout nötig ist. Screenshot des vollen
+  Testlaufs an Michael geschickt, damit die Einschätzung nicht nur auf
+  Textbeschreibung beruht.
+- **Bildübersetzung/OCR - Absatzweise Zusammenführung eng benachbarter
+  OCR-Zeilen vor der Übersetzung, deutlicher Fortschritt am ECHTEN Bild
+  bestätigt (22.08.2026):** Michael, nach dem ehrlichen Befund oben ("die
+  sichtbaren Überlappungen entstehen überwiegend zwischen zwei
+  übersetzten Regionen"): "Ja, bitte nächsten Punkt angehen."
+
+  **Diagnose** (echten `translate_image()`-Lauf gegen "Spirit - Soul -
+  Meatsuit.jpg" instrumentiert, `_fit_text()`/`_vertical_room_below()`
+  live mitgeloggt, nicht geraten): `pipeline/images/ocr.py` erkennt Text
+  auf TESSERACT-ZEILEN-Ebene - ein `OcrTextRegion` pro physischer Zeile.
+  Ein normaler, über zwei Zeilen umgebrochener Satz ("Operates outside of
+  time" / "and sequence.") wird dadurch als ZWEI unabhängig übersetzte
+  und unabhängig zurückgeschriebene Regionen behandelt, nur durch den
+  ursprünglichen (englischen) Zeilenabstand getrennt - 4 bis 13px im
+  echten Bild. Für eine LÄNGERE deutsche Übersetzung ist das nahezu kein
+  Platz, selbst wenn die jeweils NÄCHSTE Zeile (dank des
+  `obstacle_regions`-Fixes) korrekt als Kollisions-Hindernis erkannt
+  wird - denn diese "nächste Zeile" ist ja selbst Teil desselben Satzes
+  und wird ihrerseits ebenfalls übersetzt und verschoben. Von 82
+  übersetzten Regionen im echten Lauf benötigten 48 mehr Platz, als
+  `_vertical_room_below()` ihnen geben konnte - damit als die
+  dominierende Ursache der noch sichtbaren Überlappungen bestätigt, nicht
+  die vom vorherigen Fix bereits geschlossene Lücke.
+
+  **Fix:** vor der Übersetzung werden aufeinanderfolgende Original-Zeilen,
+  die mit hoher Wahrscheinlichkeit derselbe umgebrochene Satz/dieselbe
+  Aufzählung sind, zu EINER Übersetzungs-/Layout-Einheit
+  zusammengefasst - neu `pipeline/images/ocr.py::merge_lines_into_
+  paragraphs()`/`merge_region_group()`: gleiche Spalte (horizontale
+  Überlappung), ein KLEINER vertikaler Abstand relativ zur eigenen
+  Zeilenhöhe (normaler Zeilenabstand, nicht der größere Abstand vor
+  einer neuen Aufzählung/einem neuen Absatz) UND eine ÄHNLICHE
+  Zeilenhöhe (gleiche Schriftgröße - eine Überschrift direkt gefolgt von
+  einer kleineren Textzeile hat oft ebenfalls einen kleinen Abstand,
+  darf aber niemals zusammengefasst werden; genau dieser Fall wurde am
+  echten Bild als konkreter Fehlversuch gefunden - siehe unten). Wird als
+  EIN Übersetzungsaufruf gesendet (besserer Kontext, nicht nur besseres
+  Layout) und als EIN wortumbrochener Block gegen die UNION der
+  zusammengeführten Bounding-Boxen gezeichnet.
+
+  Neues `OcrTextRegion.line_height`-Feld (Default `None`, rückwärts-
+  kompatibel): eine zusammengeführte Region hat eine `height`, die den
+  GESAMTEN mehrzeiligen Block umspannt (nötig für die
+  Kollisionsvermeidung), aber `pipeline/images/inpainting.py::
+  _initial_font_size()` braucht für eine sinnvolle Start-Schriftgröße die
+  Höhe EINER Zeile, nicht die des ganzen Blocks - sonst würde ein
+  zusammengeführter Absatz in einer viel zu großen Schrift gerendert.
+  `_initial_font_size()` nutzt jetzt `line_height`, wenn gesetzt.
+
+  `translate_image()` zählt `stats.translated`/`stats.failed` weiterhin
+  in ORIGINAL-Zeilen-Einheiten (nicht in zusammengeführten Blöcken) -
+  `stats.processed` bleibt unverändert gleich der Anzahl erkannter
+  Regionen. Die `obstacle_regions`-Berechnung (voriger Fix) wurde
+  entsprechend angepasst: eine zusammengeführte Ersatz-Region ist jetzt
+  ein KOMPLETT NEUES Objekt (nicht mehr identisch mit einer
+  Original-Region), daher wird jetzt über die tatsächlich in einer
+  erfolgreich übersetzten Gruppe enthaltenen Original-Regionen verfolgt,
+  welche Zeilen als Hindernis zählen müssen.
+
+  **Kalibrierung direkt am echten Bild** (nicht geraten): nur Regionen,
+  die bereits `min_confidence` bestehen, kommen als Zusammenführungs-
+  Kandidaten infrage (ungefiltert probiert, führte zu Unsinns-
+  Zusammenführungen mit niedrig-konfidenten OCR-Fehllesungen wie
+  "peepee"/"aE" - verworfen). Abstand-Schwellwert 0.6× eigene Zeilenhöhe
+  und Höhen-Ähnlichkeit min. 0.6 (kleinere/größere Zeilenhöhe) ergaben 18
+  saubere Zusammenführungen aus 82 echten Regionen - jede einzelne
+  manuell geprüft, keine einzige davon fasst inhaltlich unzusammen-
+  gehörige Fragmente zusammen. Ohne die Höhen-Ähnlichkeits-Prüfung wurden
+  zwei konkrete Fehlversuche gefunden und durch diese Prüfung behoben:
+  die kleine Eyebrow-Beschriftung "SPIRIT - SOUL » MEATSUIT" (Höhe 37)
+  wurde fälschlich mit der viel größeren Hauptüberschrift "HOW THE
+  CHALICE RESTORES..." (Höhe 20) direkt darunter zusammengeführt, ebenso
+  die Sidebar-Überschrift "THE CHALICE'S ROLE" (Höhe 28) mit der ersten
+  Aufzählungszeile darunter (Höhe 12) - beide durch die
+  Höhen-Ähnlichkeits-Prüfung jetzt korrekt getrennt gehalten.
+
+  **Ergebnis am echten Bild, vorher/nachher (gleicher Fake-Provider,
+  " [DE]"-Suffix, damit Original vs. Änderung eindeutig bleibt):** 82
+  übersetzte Regionen wurden zu 59 Übersetzungs-/Zeichenblöcken
+  zusammengefasst (18 echte Zusammenführungen). Blöcke, die ihren
+  berechneten Platz überschreiten (`_fit_text()` live mitgeloggt): 48 von
+  82 vorher -> 26 von 59 nachher - eine deutliche, messbare Verbesserung,
+  visuell im Screenshot bestätigt: der komplette linke Hauptbereich (alle
+  drei Aufzählungs-Blöcke unter "SPIRIT/ESSENCE", "SOUL/LEDGER/TIMELINE",
+  "MEATSUIT/BODY/IDENTITY") ist jetzt sauber lesbar ohne Überlappungen,
+  ebenso "THE CHALICE PROCESS"-Kasten rechts (vorher fast komplett
+  unleserlich).
+
+  **Ehrlich weiterhin offen:** einzelne Überlappungen bleiben bestehen,
+  v. a. im dichtesten rechten Randbereich ("THE CHALICE'S ROLE"-Kasten:
+  "Extracts, separates," überlappt weiterhin mit dem nächsten Fragment -
+  vermutlich weil OCR die dazwischenliegenden Wörter "dissolves
+  distortion, and returns what" gar nicht erkannt hat, sodass keine
+  durchgehende Zusammenführung möglich war) und im unteren Zitat-/
+  Banner-Bereich, wo teils auch die OCR-Erkennung selbst schon
+  Fehllesungen produziert (z. B. "Diterton" statt eines echten Worts) -
+  eine Layout-Verbesserung kann eine falsch erkannte Textgrundlage nicht
+  reparieren. Diese verbleibenden Fälle sind eine Mischung aus (a)
+  OCR-Vollständigkeitslücken (fehlende Wörter mitten im Satz) und (b)
+  einem Layout, das schlicht zu dicht gepackt ist, um jede Übersetzung
+  ohne Schriftverkleinerung unter das lesbare Minimum oder ohne
+  Box-Vergrößerung überlappungsfrei unterzubringen - kein Folgepunkt mit
+  einer offensichtlichen nächsten Lösung, eher ein grundsätzliches
+  Limit dieses Ansatzes (Box-Overlay/Inpainting auf Basis der
+  Original-Boxgrößen) bei extrem dichten Infografik-Layouts.
+
+  Getestet: 18 neue Tests. `tests/test_image_ocr.py` (13 Tests, reine
+  Geometrie-Tests ohne Tesseract - u. a. Zusammenführung über 3+ Zeilen,
+  Nicht-Zusammenführung bei großem Abstand/anderer Spalte/anderer
+  Schriftgröße, korrekte Behandlung verschachtelter Spalten-Reihenfolge
+  in der Rohliste, ein deterministischer Konfliktfall wenn zwei Regionen
+  dieselbe Kandidatin beanspruchen). `tests/test_image_inpainting.py` (2
+  Tests für `_initial_font_size()`s `line_height`-Nutzung).
+  `tests/test_translate_image.py` (3 Integrationstests: eine echte
+  Zusammenführung führt zu GENAU EINEM Übersetzungsaufruf mit
+  zusammengefügtem Text, ein Kontroll-Test mit dem bestehenden
+  Zwei-Zeilen-Fixture zeigt weiterhin zwei unabhängige Aufrufe, ein
+  fehlgeschlagener Übersetzungsaufruf einer zusammengeführten Gruppe
+  zählt ALLE ihre Original-Zeilen als fehlgeschlagen). Bestehende Tests
+  angepasst: `_RecordingBackend`-Tests vergleichen jetzt über
+  `dataclasses.replace(..., line_height=...)` statt Objekt-Identität
+  (jede zurückgeschriebene Region ist jetzt ein von
+  `merge_region_group()` neu gebautes Objekt, auch bei Einzel-Zeilen-
+  Gruppen), Fehlermeldungs-Test von "region" auf "block" umbenannt.
+  Gesamter Testlauf am Ende: 148 passed, 1 skipped (vorher 130 passed, 1
+  skipped). Zwei Screenshots (vorher/nachher) an Michael geschickt.
+
+- **Bildübersetzung/OCR - zwei zusätzliche, wählbare OCR-Engines mit
+  echter Absatz-/Layouterkennung (Google Cloud Vision, PaddleOCR),
+  23.08.2026:** Nach dem ehrlichen Befund oben (verbleibende
+  Überlappungen v. a. dichter rechter Bereich/unteres Zitat, "kein
+  Folgepunkt mit einer offensichtlichen nächsten Lösung") fragte
+  Michael: "Bei der Übersetzung des gleichen Bildes von Google haben wir
+  all diese Probleme so gut wie gar nicht. Was nutzt Google da?" Recherche
+  ergab zwei Techniken: GAN-basierte Hintergrundrekonstruktion (dieselbe
+  Kategorie wie unser GPU-Inpainting/LaMa, nur ein größeres Modell) und,
+  wichtiger, dass Googles OCR eine ECHTE, trainierte Absatz-/Layout-
+  Hierarchie liefert (Page → Block → Paragraph → Word → Symbol) statt
+  Tesseracts reiner Zeilengruppierung. Michael: "Wenn wir die Technik
+  hätten plus die Korrekturmöglichkeit hätten wir eine super akzeptable
+  Lösung." Auf "Erst mal prüfen was der Wechsel bedeuten würde" wurden
+  zwei Kandidaten direkt am echten Bild ("Spirit - Soul - Meatsuit.jpg")
+  geprüft, BEVOR irgendein Produktivcode angefasst wurde:
+
+  - `tools/probe_google_vision.py` (Cloud Vision API, DOCUMENT_TEXT_DETECTION)
+    - 58 Absätze erkannt, Ø-Konfidenz 0.96. Läuft über denselben API-Key
+      wie der Google-Übersetzer (Michael bestätigt: "Beide API Cloud
+      Translation und Vision laufen über den Key").
+  - `tools/probe_paddleocr.py` (PP-StructureV3, lokal/Apache-2.0)
+    - 58 Layout-Blöcke erkannt (text 28, image 16, paragraph_title 10,
+      footer 3, doc_title 1).
+
+  Beide gruppierten die vorher problematischen dichten Bereiche (rechter
+  Prozess-Flowchart, "KEY TRUTH"-Kette, unterer "IT'S NOT / IT IS"-Block)
+  sichtbar sauberer als unsere eigene `merge_lines_into_paragraphs()`-
+  Heuristik - direkter Bildvergleich, nicht nur Zahlen. Vision neigte zu
+  zwei zu groben Zusammenfassungen (Titel+Untertitel+Tagline als eine
+  Box, Sidebar-Kopf+Text als eine Box), PaddleOCR wirkte insgesamt einen
+  Tick konsistenter. Auf "Ich würde beide zur Auswahl einbauen." wurden
+  beide implementiert.
+
+  **Architektur:** `pipeline/images/ocr.py`'s `OcrEngine`-Protocol/
+  `pipeline/registry.py`'s `OCR_ENGINE_FACTORIES` waren genau für diesen
+  Fall vorbereitet (Kommentar seit 22.08.2026: "Cloud-OCR-Backend folgt
+  als zweiter Eintrag") - kein Umbau nötig, nur zwei neue Einträge.
+  `GoogleVisionOcrEngine`/`PaddleOcrEngine` liefern beide EIN
+  `OcrTextRegion` pro ABSATZ statt pro Zeile - neues Klassenattribut
+  `OcrEngine.returns_paragraph_regions` (Default `False`, geprüft via
+  `getattr(...)`) sagt `translate_image()`, `merge_lines_into_
+  paragraphs()` für diese Engines KOMPLETT zu überspringen (erneutes
+  Anwenden der Zeilen-Merge-Heuristik auf bereits fertige Absätze hätte
+  im besten Fall nichts gebracht, im schlechtesten Fall zwei echte,
+  separate Absätze fälschlich zusammengezogen - der Abstands-Schwellwert
+  ist für Zeilenabstände kalibriert, nicht für Absatzabstände). Der
+  Ausreißer-Höhen-Filter (`DEFAULT_MAX_HEIGHT_RATIO`) und
+  `_initial_font_size()` nutzen jetzt beide dieselbe neue, zentrale
+  Hilfsfunktion `pipeline.images.ocr.region_line_height()` (vorher zwei
+  duplizierte `line_height if line_height is not None else height`-
+  Stellen) - notwendig, weil jetzt ZWEI verschiedene Quellen mehrzeilige
+  Regionen liefern können (unser eigenes Merge UND diese zwei Engines),
+  nicht mehr nur eine.
+
+  **Zwei echte Daten-Überraschungen, direkt an den echten JSON-Antworten
+  beider Kandidaten gefunden, nicht angenommen:**
+  1. Vision liefert Wort-für-Wort-Symbole korrekt getrennt (leicht zu
+     sauberem, leerzeichengetrenntem Text zu rekonstruieren).
+  2. PP-StructureV3s eigenes `parsing_res_list`-Feld `block_content`
+     klebt alle Wörter OHNE Leerzeichen zusammen
+     ("HOWTHECHALICERESTORESWHATISETERNALLYPURE") - für PP-Structures
+     eigenen Zweck (Layout-zu-Markdown) unproblematisch, für Übersetzung
+     unbrauchbar (wäre als ein Nonsens-Token verschickt worden).
+     `PaddleOcrEngine` nutzt deshalb NICHT `block_content`, sondern
+     verknüpft die korrekt getrennten Zeilen aus dem Pipeline-eigenen
+     Roh-OCR-Ergebnis (`overall_ocr_res`, `rec_texts`/`rec_boxes`) anhand
+     geometrischer Lage (Zeilen-Box-Mittelpunkt innerhalb der Block-Box)
+     zu jedem übersetzbaren Layout-Block. Nur Blöcke mit `block_label`
+     in `{"text", "paragraph_title", "doc_title", "footer"}` werden
+     übersetzt (am echten Bild bestätigte Kategorien) - alles andere
+     (u. a. die 16 "image"-Blöcke im echten Bild) bewusst konservativ
+     ausgeschlossen statt geraten.
+
+  **Ein weiterer, unabhängiger Fund beim ersten echten PaddleOCR-Testlauf
+  auf Michaels Rechner:** `NotImplementedError:
+  ConvertPirAttribute2RuntimeAttribute not support ...` - bestätigte
+  Regression im oneDNN/PIR-CPU-Backend von PaddlePaddle 3.3.x (siehe
+  GitHub-Issues PaddlePaddle/Paddle#77340, PaddlePaddle/PaddleOCR#18162),
+  nicht unser Fehler. Workaround (von Michael selbst erfolgreich
+  angewendet): `pip install "paddlepaddle==3.2.2"`. `requirements-
+  paddleocr.txt` pinnt entsprechend, `PaddleOcrEngine.recognize()` fängt
+  eine solche Inferenz-Exception jetzt sauber als `OcrError` ab statt
+  einen rohen Traceback durchzureichen.
+
+  **UI:** Dropdown übernimmt beide neuen Einträge automatisch (iteriert
+  bereits über `OCR_ENGINE_FACTORIES`, siehe `ui/app.py`) - dabei einen
+  bestehenden Bug am Rande gefunden und mitbehoben: der "Engine nicht
+  verfügbar"-Hinweistext war EIN gemeinsamer String
+  ("ocr_engine.unavailable", auf Tesseract zugeschnitten: "Tesseract
+  wurde nicht gefunden...") für ALLE Engines - für eine nicht verfügbare
+  Google-Vision- oder PaddleOCR-Auswahl wäre das ein irreführender Text
+  gewesen. Jetzt pro Engine ein eigener Schlüssel
+  (`ocr_engine.{name}.unavailable`), generischer Fallback bleibt für
+  einen zukünftigen Eintrag ohne eigenen Text.
+
+  **Getestet:** `tests/test_image_ocr.py` (11 neue Tests: Vision-
+  Absatzaufbau inkl. der "x"/"y"-Schlüssel-fehlt-bei-0-Macke, dekorative
+  Symbol-Filterung, API-Fehler-/Request-Fehler-Behandlung; PaddleOCR-
+  Zeilen-zu-Block-Zuordnung inkl. der block_content-Leerzeichen-Lücke,
+  Label-Whitelist, Pipeline-Caching, saubere Fehlerbehandlung einer
+  Inferenz-Exception). `tests/test_translate_image.py` (3 neue Tests: der
+  Merge-Skip für `returns_paragraph_regions`, dass `line_height` NICHT
+  von `merge_region_group()` überschrieben wird, dass der Ausreißer-
+  Höhen-Filter bei einer echten mehrzeiligen Absatz-Region nicht
+  fälschlich anschlägt). `tests/test_registry.py` (neu, 4 Tests:
+  Registry-Eintrag/Factory/Verfügbarkeits-Dispatch pro Engine-Name).
+  Gesamter Testlauf: 172 passed, 1 skipped (vorher 148 passed, 1
+  skipped) - alle in der Sandbox lauffähigen Testdateien. **Ehrlicher
+  Vorbehalt:** `tests/test_ui_images_mode.py` (prüft u. a. den
+  Dropdown/Hinweistext-Code in `ui/app.py`) konnte in dieser Sandbox
+  NICHT ausgeführt werden - die Sandbox hat nur einen Teil-Checkout ohne
+  `pipeline/pdf` etc., dieser Testdatei fehlt dadurch eine Abhängigkeit
+  zum Import. Die zwei `ui/app.py`-Änderungen (Hinweistext-Schlüssel) sind
+  daher nur durch direkte Code-Prüfung verifiziert, nicht durch einen
+  automatisierten Lauf - bitte bei Gelegenheit einmal `pytest tests/` im
+  vollständigen lokalen Checkout laufen lassen, um das abzusichern.
+  Kein Live-Lauf der beiden neuen Engines gegen ein echtes Bild INNERHALB
+  von `translate_image()` (nur mit Fake-Daten unit-getestet) - Michael
+  hat PaddleOCR bereits über `tools/probe_paddleocr.py` gegen das echte
+  Bild verifiziert, ein echter End-to-End-`translate_image()`-Lauf mit
+  `ocr_engine=paddleocr`/`google_vision` steht noch aus.
+
+## 23.08.2026 - Erster echter `translate_image()`-Lauf mit den zwei neuen OCR-Engines: PaddleOCR-Absturz gefunden und behoben, Google Vision bestätigt gut
+
+  Der oben angekündigte echte End-to-End-Lauf (Michael, direkt aus der
+  App, `Spirit - Soul - Meatsuit.jpg`, GPU-Inpainting/LaMa als
+  Rückschreibe-Backend): drei OCR-Engines nacheinander getestet.
+
+  **Tesseract** (Baseline, "(9)" im Dateinamen, QA-Bericht: 96 Regionen
+  erkannt, 82 übersetzt): zeigt die bereits bekannten, noch offenen
+  Kollisions-/Überlappungsprobleme bei dichtem Layout (siehe RoadMap.md
+  Phase 3) - nichts Neues, keine Regression durch diese Änderung.
+
+  **Google Vision** ("(10)" im Dateinamen, QA-Bericht: 58 Regionen
+  erkannt, 57 übersetzt, 1 übersprungen): lief fehlerfrei durch.
+  Michaels Einschätzung: "echt schon sehr gut", "noch ganz kleine
+  Unstimmigkeiten". Im gelieferten Bild sichtbar: zwei-drei Stellen mit
+  Textüberlappung in eng bemessenen Boxen (u. a. "DIESES MUSTER KANN
+  NICHT AUFRECHTERHALTEN WERDEN" und die Zeile über "VERÄNDERT DIE
+  ZIELGANG") - dieselbe Klasse Kollisionsproblem wie bei Tesseract, nur
+  seltener (deutlich weniger Regionen/Layout dadurch insgesamt
+  sauberer). Kein neuer, engine-spezifischer Fehler - siehe die 4 schon
+  besprochenen Lösungsansätze (Font-Schrumpfen, kaskadierendes Reflow,
+  robustere OCR, reine Transparenz) weiter oben in diesem Dokument für
+  die grundsätzliche Lösung, noch nicht umgesetzt.
+
+  **PaddleOCR: Absturz.**
+  ```
+  Übersetzungslauf fehlgeschlagen: ValueError: The truth value of an
+  array with more than one element is ambiguous. Use a.any() or a.all()
+  ```
+  Ursache gefunden: `PaddleOcrEngine`s eigener Nachverarbeitungscode
+  (`_paddle_ocr_lines()`, `_paddle_block_to_region()`) nutzte
+  `x or []` bzw. `not x`, um ein fehlendes/leeres Feld
+  (`rec_boxes`/`rec_scores`/`block_bbox`) abzufangen - das prüft
+  `bool(x)`. Auf der ECHTEN PP-StructureV3-Pipeline sind diese Felder
+  aber numpy-Arrays, nicht reine Python-Listen (die Fake-Fixtures in
+  `tests/test_image_ocr.py` verwendeten Listen und haben das deshalb
+  nicht gefangen) - numpy verweigert `bool()` für ein Array mit mehr als
+  einem Element genau mit dieser Fehlermeldung. Bugfix: explizite
+  `is None`-Prüfung statt Truthiness-Test an allen vier betroffenen
+  Stellen. Zusätzlich die komplette Nachverarbeitung
+  (`_paddle_ocr_lines()`+Block-Schleife) in `PaddleOcrEngine.recognize()`
+  jetzt in ein eigenes try/except gefasst (analog zum bereits
+  bestehenden try/except um `pipeline.predict()`), damit ein zukünftiger
+  ähnlicher Überraschungsfund als sauberer `OcrError` statt als roher,
+  unabgefangener Traceback durchschlägt.
+
+  Regressionstest ergänzt
+  (`test_paddleocr_recognize_handles_numpy_array_result_fields`), der
+  die Fixture bewusst mit `numpy.array(...)` statt Listen aufbaut -
+  schlägt ohne den Fix nachweislich fehl, ist mit dem Fix grün.
+  `pytest.importorskip("numpy")`, da numpy kein Kern-Requirement ist
+  (kommt transitiv über opencv-python-headless/paddlepaddle mit, beide
+  bereits Voraussetzung für diese Funktion).
+
+  **Getestet:** Gesamter Testlauf danach erneut grün: 173 passed, 1
+  skipped (vorher 172/1, +1 neuer Regressionstest) - weiterhin ohne
+  `tests/test_ui_images_mode.py` (siehe Vorbehalt oben, unverändert
+  offen). Der PaddleOCR-Fix selbst ist damit nur gegen die
+  numpy-Fixture verifiziert, NICHT erneut gegen Michaels echtes Bild -
+  bitte den App-Lauf mit `ocr_engine=paddleocr` gegen
+  `Spirit - Soul - Meatsuit.jpg` einmal wiederholen, um den Fix am
+  echten Fall zu bestätigen.
+
+  **Nachtrag, selber Tag - zweiter Absturz beim Wiederholungslauf:**
+  ```
+  Übersetzungslauf fehlgeschlagen: OcrError: PaddleOCR-Ergebnis konnte
+  nicht verarbeitet werden: 'LayoutBlock' object has no attribute 'get'
+  ```
+  Nächste Schicht derselben Fehlerklasse: `parsing_res_list`'s Einträge
+  sind auf dem ECHTEN, live `pipeline.predict()`-Ergebnis
+  `LayoutBlock`-Objekte mit Feldern als reinen Attributen
+  (`block.block_label`), keine Dicts (`block.get("block_label")`) -
+  wieder etwas, das nur in der über `save_to_json()` serialisierten
+  Fassung (wie von `tools/probe_paddleocr.py` gespeichert und wie die
+  ursprünglichen Test-Fixtures aufgebaut waren) ein Dict ist, auf dem
+  rohen In-Prozess-Objekt aber nicht. `result` und `overall_ocr_res`
+  selbst unterstützen weiterhin `.get()` (der numpy-Fix kam vorher schon
+  so weit ohne AttributeError) - nur die einzelnen Block-Einträge nicht.
+
+  Bugfix: `_paddle_field(obj, key, default=None)` - liest ein Feld
+  gleichermaßen von einem Dict (`.get()`) oder einem Objekt mit
+  Attributen (`getattr()`), an jeder Stelle eingesetzt, wo bisher direkt
+  `block.get(...)` stand. Regressionstest ergänzt
+  (`test_paddleocr_recognize_handles_attribute_based_layout_blocks`),
+  Fixture mit einer eigenen `_FakeLayoutBlock`-Klasse (Attribute statt
+  Dict) statt eines Dicts - schlägt ohne den Fix nachweislich fehl.
+
+  **Getestet:** 174 passed, 1 skipped (vorher 173/1, +1 neuer
+  Regressionstest). Gleicher ehrlicher Vorbehalt wie oben: nur gegen die
+  Fake-Fixture verifiziert, noch nicht erneut gegen Michaels echtes
+  Bild - jetzt zwei verschiedene reale Diskrepanzen zwischen der
+  gespeicherten JSON-Fassung (worauf `PaddleOcrEngine` ursprünglich
+  aufgebaut wurde) und dem rohen In-Prozess-Ergebnisobjekt gefunden
+  (numpy-Arrays UND Attribut-statt-Dict-Objekte) - nicht auszuschließen,
+  dass ein dritter, noch unentdeckter Unterschied beim nächsten
+  Wiederholungslauf auftaucht; das neue try/except um die gesamte
+  Nachverarbeitung (siehe oben) fängt einen solchen Fund aber
+  wenigstens als sauberen `OcrError` statt als rohen Traceback ab.
+
+  **Zwei Rückfragen von Michael dazu, beide beantwortet, kein
+  Code-Fund/keine Änderung nötig:**
+  - "Ist die Rückschreib-Methode bei PaddleOCR/Google Vision
+    irrelevant?" - Nein: `translate_image()` nimmt `ocr_engine` und
+    `inpainting_backend` als zwei komplett unabhängige Parameter
+    entgegen (siehe dessen Signatur) - die OCR-Engine bestimmt NUR wo/
+    was für Text erkannt wird, das Inpainting-Backend bestimmt NUR wie
+    der Originaltext-Bereich vor dem Zurückschreiben rekonstruiert wird.
+    Das GAN-Inpainting, das Googles eigenes Bildübersetzungs-Produkt
+    nutzt (frühere Recherche in diesem Dokument), ist Teil eines ganz
+    anderen Google-Produkts als die hier integrierte Cloud Vision API
+    (reine Texterkennung, kein Inpainting) - wir haben also keine
+    Inpainting-Fähigkeit "mitgeliefert bekommen". Beide
+    Rückschreib-Backends (CPU/klassisch, GPU/LaMa) bleiben für JEDE
+    OCR-Engine-Wahl exakt gleich relevant, nichts zu deaktivieren.
+  - "Können wir bei Google und PaddleOCR auch das Bild korrigieren?" -
+    Ja, unverändert: `ImageCorrectionDialog`
+    (`ui/image_correction_dialog.py`) arbeitet ausschließlich auf den
+    bereits berechneten `replacements` (Text + Box-Geometrie) und ruft
+    beim Anwenden NUR `InpaintingBackend.apply()` erneut auf - kein
+    erneuter OCR-/Provider-/Netzwerk-Aufruf (siehe die Datei-eigene
+    Docstring, Zeile 12: "no OCR/provider/network call involved").
+    Der Korrektur-Dialog ist damit komplett engine-unabhängig und
+    funktioniert für Tesseract-, Google-Vision- und PaddleOCR-Ergebnisse
+    identisch - keine Änderung nötig.
+
+  **Zweiter Nachtrag, selber Tag - dritter Wiederholungslauf (QA-Bericht
+  "(11)"): kein Absturz mehr, aber 0 Textregionen erkannt.** Kein
+  Crash diesmal - der `_paddle_field()`-Fix greift also -, aber
+  `PaddleOcrEngine.recognize()` liefert eine leere Liste zurück
+  ("Erkannte Textregionen: 0", Ergebnisdatei = Original). Mit zwei
+  bereits gefundenen Diskrepanzen zwischen dem JSON-serialisierten
+  Ergebnis (worauf die Engine ursprünglich aufgebaut wurde,
+  tools/probe_paddleocr.py) und dem rohen In-Prozess-Objekt (numpy-
+  Arrays, Attribute statt Dict-Keys) an einem Tag ist ein dritter,
+  ähnlicher Fund wahrscheinlicher als ein Zufall - z. B. ein
+  Feldname, der auf dem Live-Objekt anders heißt als vermutet
+  (`block_label` existiert unter diesem Namen vielleicht gar nicht,
+  `getattr(..., default=None)` liefert dann für JEDEN Block `None`
+  zurück, `None not in _PADDLE_TRANSLATABLE_LABELS` ist wahr für
+  jeden Block -> alle werden übersprungen, ohne Fehler). Statt ein
+  drittes Mal blind zu raten: `tools/probe_paddleocr_shape.py` (neu)
+  geschrieben - druckt die ECHTEN Attribut-/Key-Namen des rohen
+  Live-Ergebnisobjekts direkt (kein Umweg über save_to_json() mehr).
+  Michael gebeten, es einmal laufen zu lassen und die Ausgabe zu
+  teilen, bevor am eigentlichen Code weitergeraten wird.
+
+  **Nebenbefund, keine Änderung vorgenommen:** Der "Korrigieren"-Button
+  fehlte in diesem Lauf in der UI - das ist bestehendes, unverändertes
+  Verhalten (`ui/app.py::_show_job_result()`, Bedingung
+  `any(file_result.stats.replacements for file_result in stats.results)`,
+  identisch für alle drei OCR-Engines und schon vor dieser Änderung so
+  für PDF/Bild), keine Regression durch die neuen Engines. Bei 0
+  gefundenen Regionen gibt es schlicht nichts, dessen Text/Position
+  automatisch korrigierbar wäre. Trotzdem eine echte, vorbestehende
+  Lücke: der Korrektur-Dialog kann auch eine komplett manuell
+  hinzugefügte Box ohne jede OCR-Vorlage anlegen (siehe QA-Bericht-
+  Hinweistext: "das manuelle Hinzufügen einer Box für nicht erkannten
+  Text") - genau der Fall, in dem OCR nichts gefunden hat, ist der
+  Fall, in dem diese Funktion am meisten gebraucht würde, aber der
+  Button ist dann unerreichbar versteckt. Noch nicht behoben (erst mal
+  auf Michaels Rückmeldung dazu gewartet) - müsste die o.g. Bedingung
+  um einen dritten Fall erweitern (0 Regionen, aber Format
+  grundsätzlich korrekturfähig).
+
+  **Dritter Nachtrag, selber Tag - Ursache gefunden über
+  `tools/probe_paddleocr_shape.py`s echte Ausgabe.** Bestätigt genau
+  die vermutete Erklärung: `parsing_res_list[0]` (`LayoutBlock`) hat
+  laut `vars()` die Attribute `label`/`bbox`/`content` - NICHT
+  `block_label`/`block_bbox`/`block_content` (kein `block_id`
+  überhaupt). `_paddle_field()` fragte bisher `getattr(block,
+  "block_label", None)` ab - das existiert auf dem echten Objekt
+  nicht, liefert also für JEDEN Block `None` zurück (kein Fehler -
+  `getattr` mit Default wirft nur, wenn ÜBERHAUPT keine Fallback-Logik
+  besteht), und `None not in _PADDLE_TRANSLATABLE_LABELS` ist für jeden
+  Block wahr -> alle 58 Blöcke übersprungen, 0 Regionen, kein Absturz.
+  Exakt das Verhalten aus QA-Bericht "(11)".
+
+  `overall_ocr_res` bestätigt weiterhin unverändert: bleibt ein Dict
+  mit den ORIGINALEN Schlüsselnamen (`rec_texts`/`rec_scores`/
+  `rec_boxes`) - nur `parsing_res_list`'s Blockeinträge haben dieses
+  zusätzliche Namens-Mapping-Problem.
+
+  Bugfix: `_PADDLE_BLOCK_FIELD_ALIASES = {"block_label": "label",
+  "block_bbox": "bbox", "block_content": "content"}` in `_paddle_field()`
+  - bei einem Dict weiterhin der ursprüngliche "block_*"-Schlüssel
+  (passt zu save_to_json()/den Test-Fixtures), bei einem Objekt der
+  gemappte kurze Attributname (passt zum echten Live-Objekt). Beide
+  Aufrufstellen (`block_label`-Check, `block_bbox`-Lesen) bleiben dabei
+  unverändert - nur `_paddle_field()` selbst wurde angepasst.
+
+  Der bestehende Regressionstest
+  (`test_paddleocr_recognize_handles_attribute_based_layout_blocks`,
+  `_FakeLayoutBlock`) hatte VORHER fälschlich die "block_*"-Namen
+  selbst als Attributnamen verwendet (geraten, ohne echte Daten) -
+  damit bestand er zwar, deckte aber genau diesen Bug nicht auf.
+  Korrigiert auf die jetzt bestätigten echten Attributnamen
+  (`label`/`bbox`/`content`, kein `block_id`) - mit der alten,
+  ungefixten `_paddle_field()`-Logik schlägt der Test jetzt nachweislich
+  fehl (manuell verifiziert), mit dem Fix ist er grün. Lehre daraus für
+  dieses Projekt: eine Fake-Fixture, die aus einer Vermutung statt aus
+  echten Daten gebaut wird, kann genau den Bug verstecken, den sie
+  eigentlich fangen soll - deshalb jetzt zweimal auf echte
+  `tools/probe_paddleocr_shape.py`-Ausgabe statt auf eine dritte
+  Vermutung gewartet.
+
+  **Getestet:** 174 passed, 1 skipped (Testanzahl unverändert - der
+  bestehende Test wurde korrigiert, nicht ein neuer ergänzt). Diesmal
+  ausdrücklich NICHT mehr geraten, sondern gegen die von Michaels
+  eigenem Diagnose-Lauf bestätigten echten Feldnamen gebaut - höhere
+  Zuversicht als bei den beiden Fixes zuvor, aber noch nicht erneut
+  gegen das echte Bild verifiziert. Michael gebeten, `ocr_engine=
+  paddleocr` gegen `Spirit - Soul - Meatsuit.jpg` noch einmal zu
+  starten. Der Korrigieren-Button-Nebenbefund von oben bleibt bewusst
+  zurückgestellt, bis dieser Fix am echten Bild bestätigt ist.
+
+## 23.08.2026 - PaddleOCR-Fix bestätigt (QA-Bericht "(12)"), Korrektur-Dialog: Original nicht mehr lesbar wegen Übersetzungs-Overlay behoben, drei weitere Layout-Befunde dokumentiert
+
+  Michael, nach dem `_paddle_field()`-Alias-Fix: "Wow, das ist schon
+  sehr gut." Der dritte Fix (echte Attributnamen `label`/`bbox`/
+  `content` statt geratener "block_*"-Namen) hat also gegriffen - drei
+  Fixes an einem Tag, jeder auf dem vorherigen aufbauend, aber am Ende
+  läuft PaddleOCR jetzt tatsächlich durch.
+
+  **Korrektur-Dialog: Original hinter Übersetzung nicht lesbar - behoben.**
+  "Bei der Korrektur sieht man leider den Text nicht deutlich, da ja
+  die Übersetzung das Original überlagert." Ursache gefunden in
+  `ui/image_correction_dialog.py::_ResizableRegionItem.paint()`: die
+  Box selbst hat nur eine leicht transparente Füllung (`_FILL_COLOR`,
+  Alpha 40/255), aber der Übersetzungs-VORSCHAUTEXT wird darüber
+  VOLL DECKEND gezeichnet - genau an der Stelle, an der auch der
+  Originaltext im pristinen Hintergrundbild sitzt (dieselbe Box). Bei
+  einer längeren deutschen Übersetzung kollidieren beide sichtbar.
+  Fix: neuer Umschalt-Button "Original anzeigen" in der Canvas-
+  Toolbar (`ImageCorrectionDialog.toggle_original_button`,
+  `_on_toggle_original_visible()`) - blendet den Vorschautext aller
+  Boxen auf einmal aus (Umriss + die schon vorhandene, kaum sichtbare
+  Füllung bleiben), damit das pristine Original klar lesbar wird;
+  erneutes Umschalten zeigt die Vorschau wieder. Neue, manuell hinzu-
+  gefügte Boxen übernehmen den aktuellen Umschalt-Zustand direkt beim
+  Anlegen. Neue i18n-Schlüssel `image_correction.show_original`
+  (DE/EN, Parität geprüft).
+
+  **Getestet:** Kein eigener automatisierter Test (PySide6-Dialog,
+  wie der Rest von `ui/image_correction_dialog.py` bisher ohne
+  GUI-Testinfrastruktur - siehe Backlog frühere Einträge zu
+  `tests/test_ui_images_mode.py`). Stattdessen manuell mit
+  `QT_QPA_PLATFORM=offscreen` instanziiert und den Toggle direkt
+  durchgeschaltet: Ausgangszustand `show_preview=True`, nach
+  "angehakt" `False`, nach "abgehakt" wieder `True` - wie erwartet.
+  Gesamter Testlauf (`tests/`, ohne `test_ui_images_mode.py`)
+  weiterhin 174 passed, 1 skipped - unverändert, da diese Änderung
+  reines UI-Verhalten ohne Pipeline-Logik betrifft. i18n-Test
+  (`test_ui_i18n.py`) bestätigt DE/EN-Schlüsselparität weiterhin
+  gegeben.
+
+  **Drei weitere Befunde aus demselben Lauf, NOCH NICHT behoben -
+  brauchen echte Regionsdaten bzw. sind der bereits bekannte, offene
+  Architektur-Punkt:**
+
+  1. Ein kompletter Abschnitt (die Eingabe-Liste "Thoughts/Emotions/
+     .../Experiences ... recorded as PATTERNS" links Mitte) wurde gar
+     nicht übersetzt. Begründete Vermutung, noch nicht bestätigt:
+     `LayoutParsingResultV2` hat NEBEN `parsing_res_list` eigene
+     Listen für `chart_res_list`/`table_res_list`/`seal_res_list`/
+     `formula_res_list` (siehe die dict-keys aus
+     `tools/probe_paddleocr_shape.py`s Ausgabe) - `PaddleOcrEngine`
+     liest ausschliesslich `parsing_res_list`. Dieser Abschnitt
+     (Icons, Pfeile, kurze Wortgruppen - diagrammartig) könnte vom
+     Layout-Modell als "chart" statt als Text-Block eingeordnet und
+     dadurch komplett übersprungen worden sein, ohne dass das wie ein
+     Fehler aussieht (kein Skip-Grund im QA-Bericht, weil die Engine
+     die Region nie sieht). Noch zu verifizieren.
+  2. Das Kelch-Symbol zwischen den beiden Fusszeilen-Textboxen wurde
+     als Text "AND"/"UND" erkannt und übersetzt über das Icon
+     gerendert. Begründete Vermutung: eine Fehlerkennung der
+     Text-DETEKTION (nicht der Layout-Klassifikation) auf dem Icon
+     selbst, dessen Box zufällig in einen "text"-gelabelten Block
+     fiel. Ebenfalls noch zu verifizieren.
+  3. Die Fusszeile ist unten abgeschnitten, und der Text in der lila
+     "DIE TEMPORÄRE SCHNITTSTELLE"-Box wurde auf 2 Zeilen umgebrochen.
+     Das ist KEIN neuer Bug, sondern eine reale Ausprägung des schon
+     ganz am Anfang dieser Zusammenarbeit besprochenen, noch nicht
+     umgesetzten Problems (die 4 Lösungsansätze weiter oben in diesem
+     Dokument: Font-Schrumpfen [umgesetzt], kaskadierendes Reflow
+     [nicht umgesetzt], robustere OCR [jetzt teilweise durch die neuen
+     Engines], reine Transparenz [nicht umgesetzt]). Code-seitig
+     bestätigt: `pipeline/images/inpainting.py::insert_text()` bricht
+     das Zeichnen einer Zeile nur ab, wenn ihre y-Startposition schon
+     hinter der Bild-Unterkante liegt (`if y >= image_height: break`)
+     - eine Zeile, die knapp DAVOR beginnt, aber deren Glyphen über den
+     Bildrand hinausragen, wird trotzdem gezeichnet und von PIL an der
+     Canvas-Grenze hart abgeschnitten. Das ist der seit
+     `_fit_text()`s Docstring bekannte "_MIN_FONT_SIZE-and-still-
+     overflowing"-Grenzfall, hier real eingetreten. Michaels eigener
+     Vorschlag deckt sich mit dem "kaskadierendes Reflow"-Ansatz von
+     ganz oben: den Text seitlich in nachweislich leeren Raum
+     ausdehnen (links vom linken, rechts vom rechten Fusszeilen-Block,
+     da der Kelch dazwischen nicht bewegt werden muss) statt nur nach
+     unten zu brechen/zu schrumpfen. Nicht umgesetzt - eine
+     grössere, noch zu planende Änderung, keine Ein-Zeilen-Korrektur.
+
+  Michael gebeten, für Fund 1+2 entweder den fehlenden QA-Bericht
+  nachzureichen oder `tools/probe_paddleocr.py` (volles JSON,
+  visualisiertes Bild) noch einmal laufen zu lassen, bevor an diesen
+  beiden Stellen Code geändert wird - echte Daten statt einer dritten
+  Vermutung, nach den zwei vorherigen Fehlschlägen aus genau diesem
+  Grund. Für Fund 3 Rückfrage an Michael, ob das kaskadierende Reflow
+  jetzt priorisiert werden soll.
+
+## 23.08.2026 - Kaskadierendes horizontales Reflow umgesetzt (Fund 3); beide Vermutungen zu Fund 1+2 durch echte Diagnosedaten widerlegt
+
+  Michael: "Ja, bitte und hier die Ausgabe" - erweitertes
+  `tools/probe_paddleocr_shape.py` gegen "Spirit - Soul -
+  Meatsuit.jpg" noch einmal laufen lassen, mit der Bitte, das
+  kaskadierende Reflow (Fund 3 oben) jetzt umzusetzen.
+
+  **Fund 1+2: beide bisherigen Vermutungen widerlegt, kein Fix.**
+  Die echte Ausgabe zeigt: `chart_res_list`, `table_res_list`,
+  `seal_res_list` und `formula_res_list` sind alle LEER (len=0) -
+  die Vermutung, der fehlende Abschnitt sei als "chart" o.ä. in eine
+  dieser Spezial-Listen geroutet worden statt in `parsing_res_list`,
+  ist damit widerlegt. `parsing_res_list` enthält weiterhin genau die
+  58 Blöcke von vorher (`'text': 28, 'image': 16, 'paragraph_title':
+  10, 'footer': 3, 'doc_title': 1`) - dieselbe Verteilung wie beim
+  allerersten Probe-Lauf. Für Fund 2 wurde zusätzlich `overall_ocr_res`
+  nach exakten "and"/"und"/"&"-Treffern unter allen 104 `rec_texts`
+  durchsucht - keiner gefunden. Die Vermutung "Kelch-Icon wurde
+  wörtlich als das Wort 'and' erkannt" ist damit ebenfalls widerlegt.
+  Beide Befunde bleiben also ungeklärt und brauchen einen neuen
+  Diagnoseansatz (z. B. alle 58 Blöcke mit Label+bbox+content
+  vollständig ausgeben, um sie manuell gegen das Originalbild
+  abzugleichen, oder `tools/probe_paddleocr.py`s visualisiertes Bild
+  direkt ansehen) - keine dritte Vermutung ohne weitere echte Daten.
+
+  **Fund 3: kaskadierendes horizontales Reflow, `pipeline/images/
+  inpainting.py`.** Michaels eigene Beobachtung als Grundlage: "Der
+  Text könnte ohne weiteres nach links auf der einen Seite und auf
+  der anderen Seite des Kelches nach rechts erweitert werden. Links
+  und Rechts davon ist nichts." Neue Funktion `_horizontal_room()`
+  spiegelt die Logik von `_vertical_room_below()`, aber auf der
+  x-Achse: sucht unter allen anderen erkannten Regionen die, die sich
+  mit der aktuellen vertikal überlappen ("dieselbe Zeile"), und
+  liefert den freien Platz links/rechts bis zum nächsten Nachbarn
+  ODER bis zum Bildrand (je nachdem, was näher ist) - anders als bei
+  `_vertical_room_below()` gibt es hier KEIN grosszügiges Fallback
+  ohne Nachbarn, der Bildrand ist immer eine harte Grenze.
+  `_fit_text()` nutzt diesen Freiraum als reinen FALLBACK: erst wird
+  wie bisher die Schriftgrösse bis `_MIN_FONT_SIZE` verkleinert; passt
+  der Text danach immer noch nicht in die verfügbare Höhe, wird die
+  Umbruchbreite in Schritten in den freien seitlichen Raum hinein
+  vergrössert (rechts zuerst, links erst wenn rechts ausgeschöpft
+  ist - passend zur Kelch-Situation: rechte Box wächst nach rechts,
+  linke Box nach links, die Mitte bleibt frei). `_draw_fitted_text()`
+  gibt entsprechend zurück, wie weit der Text nach links verschoben
+  gezeichnet werden muss. In allen drei Rückschreibe-Backends
+  (`BoxOverlayBackend`, `CvInpaintingBackend`, `GpuInpaintingBackend`)
+  eingebunden.
+
+  **Bekannte Einschränkung, bewusst in Kauf genommen:** der neu
+  gewonnene seitliche Rand wird NICHT vom Hintergrund-Rekonstruktions-
+  schritt mit abgedeckt (die Inpainting-Maske bzw. die Box-Füllung
+  wird weiterhin nur für die ursprüngliche, kleinere Box berechnet) -
+  sicher ist das nur, wenn dort wirklich nichts anderes im Bild steht,
+  wie von Michael für den Kelch-Fall selbst bestätigt. Für den
+  allgemeinen Fall (Text stösst an eine andere, nicht-erfasste
+  Bildregion) ist das keine vollständige Lösung.
+
+  **Getestet:** 9 neue Tests in `tests/test_image_inpainting.py`
+  (`_horizontal_room()`: keine Nachbarn/Bildrand-Begrenzung, nächster
+  Nachbar links+rechts in derselben Zeile, Nachbar in anderer Zeile
+  wird ignoriert, nie negativ bei Überlappung; `_fit_text()`: kein
+  Offset wenn Schrumpfen allein reicht, Erweiterung zuerst nach
+  rechts ohne Verschiebung, linker Raum erst nach Ausschöpfen des
+  rechten, weiterhin Overflow ohne Absturz wenn kein Raum vorhanden;
+  plus ein Wiring-Test über `BoxOverlayBackend.apply()` per Monkey-
+  patch-Spy, der bestätigt, dass `_horizontal_room()`s Ergebnis
+  tatsächlich bei `_fit_text()` ankommt). `tests/test_image_
+  inpainting.py` allein: 45 passed (vorher 36). Gesamter Testlauf
+  (`tests/`, ohne `test_ui_images_mode.py`): 183 passed, 1 skipped -
+  keine Regressionen in `test_image_cv_inpainting.py` oder
+  `test_image_gpu_inpainting.py`, die dieselben Funktionen indirekt
+  mitnutzen.
+
+  Noch offen: ein echter Lauf gegen das reale Bild (Fusszeile), um zu
+  bestätigen, dass das Abschneiden dadurch tatsächlich behoben ist -
+  bisher nur unit-getestet, nicht am realen Fall verifiziert. Michael
+  gebeten, das zu testen.
+
+## 24.08.2026 - Fund 1+2 endgültig geklärt und behoben: "image"-Blöcke mit echtem Text werden jetzt übersetzt, Icon-Fehlleser (Kelch als "Y", Personen-Icon als "穴") werden herausgefiltert
+
+  Michael: "Lass uns probe_paddleocr.py laufen." Statt einen neuen
+  Lauf zu verlangen, reichte die bereits vorhandene Ausgabe von
+  `tools/probe_paddleocr.py`s letztem echten Lauf (`paddle_probe_out/`,
+  Bild "Spirit - Soul - Meatsuit.jpg") - visualisiertes Bild
+  (`_layout_det_res.jpg`) und volle Ergebnis-JSON. Beide seit dem
+  22.08.2026 offenen Befunde konnten damit ohne weitere Rückfrage an
+  Michael geklärt werden.
+
+  **Fund 1 - Ursache bestätigt.** Der Block "Thoughts/Emotions/
+  Choices/Beliefs/Trauma/Karma/Experiences ... recorded as PATTERNS"
+  ist in der echten JSON als `block_label: "image"` klassifiziert
+  (Bbox [25, 457, 394, 718]), NICHT als "text" - vermutlich wegen der
+  Ledger-/Kugel-Grafik im selben Block. `block_content` enthält aber
+  echten, erkannten Text ('WHERE \nThoughts \n\nEmotions \n\nChoices
+  \n\nBeliefs LEDGER \nTraum...'). `_PADDLE_TRANSLATABLE_LABELS`
+  akzeptierte bisher nur `{"text", "paragraph_title", "doc_title",
+  "footer"}` - der Block wurde also nicht übersehen, sondern durch die
+  Kategorie-Filterung bewusst (aber in diesem Fall fälschlich)
+  verworfen, bevor `_paddle_block_to_region()` überhaupt lief.
+
+  **Fund 2 - Ursache bestätigt, UND ein zweiter, bisher unbemerkter
+  Fall gefunden.** Das Kelch-Icon zwischen den beiden Fusszeilen-Boxen
+  wurde von PP-StructureV3s eigener Zeilen-OCR tatsächlich als der
+  einzelne Buchstabe "Y" gelesen (Konfidenz 0.8409) - die Übersetzung
+  hat "Y" im Satzkontext offenbar als spanisches "und" gedeutet und zu
+  "UND" gerendert. Zusätzlich, direkt in derselben echten JSON
+  gefunden: ein Personen-Icon im "KEY TRUTH"-Kasten (bei "Meatsuit/
+  Body/Identity") wurde als das chinesische Zeichen "穴" gelesen -
+  Konfidenz 0.2849, der NIEDRIGSTE Wert aller 104 echten OCR-Zeilen
+  auf diesem Bild. Bisher unauffällig, nur weil dieser Block ebenfalls
+  als "image" galt und komplett verworfen wurde - mit dem Fix zu Fund
+  1 allein hätte er plötzlich angefangen, ein übersetztes "穴" über das
+  Icon zu zeichnen. Beide Funde sind die zwei niedrigsten Konfidenz-
+  werte aller 104 Zeilen; der niedrigste echte Textwert liegt bei
+  0.9111 - klarer Abstand.
+
+  **Fix, beide Stellen zusammen (`pipeline/images/ocr.py`):**
+  1. `_PADDLE_TRANSLATABLE_LABELS` um `"image"` erweitert. Sicher, weil
+     `_paddle_block_to_region()` weiterhin `None` liefert, wenn keine
+     OCR-Zeile geometrisch in den Block fällt - ein rein grafischer
+     "image"-Block (kein Text) bleibt also unverändert unübersetzt.
+  2. Neuer Filter in `_paddle_ocr_lines()`: OCR-Zeilen mit ≤2 Zeichen
+     UND Konfidenz < 0.90 (`_PADDLE_STRAY_GLYPH_MAX_CHARS`/
+     `_PADDLE_STRAY_GLYPH_MIN_SCORE`) werden vor jedem Block-Matching
+     verworfen - trifft "Y" (0.84) und "穴" (0.28), lässt aber
+     kurzen, sicher erkannten Text wie "OR" (0.9817) unangetastet.
+
+  **Getestet:** 2 neue Tests in `tests/test_image_ocr.py`
+  (`test_paddleocr_recognize_translates_an_image_labeled_block_with_
+  real_text_inside`, `test_paddleocr_recognize_filters_a_stray_icon_
+  glyph_misread_as_short_text` - Letzterer mit allen drei echten
+  Konfidenzwerten "Y"/0.8409, "穴"/0.2849, "OR"/0.9817 nachgebaut).
+  Kommentare der beiden bereits bestehenden "image wird nie zur Region"
+  -Tests präzisiert (gilt weiterhin, aber jetzt weil keine OCR-Zeile
+  im Block liegt, nicht mehr weil "image" pauschal ausgeschlossen
+  ist). `tests/test_image_ocr.py` allein: 42 passed (vorher 40).
+  Gesamter Testlauf (`tests/`, ohne `test_ui_images_mode.py`):
+  185 passed, 1 skipped - keine Regressionen.
+
+  Noch offen: ein echter Lauf gegen das reale Bild, um Fund 1+2 UND
+  das kaskadierende Reflow (Fund 3, siehe Eintrag oben) gemeinsam am
+  tatsächlichen Ergebnis zu bestätigen - bisher nur unit-getestet.

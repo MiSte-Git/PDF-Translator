@@ -907,21 +907,70 @@ Formulierung war hier nicht mehr aktuell.
       Gesamter Testlauf am Ende: 251 passed, 2 skipped.
 - [ ] Gemeinsames Bildmodell für PDF, DOCX, PPTX und einzelne Bilddateien
       definieren.
-- [ ] OCR-Engine auswählen, kapseln und Sprachpakete verwalten.
+- [ ] OCR-Engine auswählen, kapseln und Sprachpakete verwalten - die
+      Kapselung/Auswahl-Seite ist seit 23.08.2026 weitgehend erledigt (drei
+      wählbare, austauschbare Engines über dasselbe `OcrEngine`-Protocol/
+      `OCR_ENGINE_FACTORIES`: Tesseract lokal, sowie neu Google Cloud
+      Vision und PaddleOCR - beide mit echter, trainierter Absatz-/Layout-
+      erkennung statt reiner Zeilengruppierung, nach Vergleich mit Googles
+      eigener Bildübersetzung direkt am echten Infografik-Bild geprüft und
+      auf Michaels Wunsch "Ich würde beide zur Auswahl einbauen." beide
+      umgesetzt - siehe Backlog.md für den vollen Befund inkl. der beiden
+      Diagnose-Skripte tools/probe_google_vision.py/tools/
+      probe_paddleocr.py). Sprachpaket-VERWALTUNG (z. B. Tesseract-
+      Sprachdaten nachinstallieren/verwalten) bleibt weiterhin offen - der
+      `language`-Parameter wird von allen drei Engines entgegengenommen,
+      aber es gibt keine UI, die fehlende Sprachpakete erkennt oder beim
+      Nachinstallieren hilft.
 - [ ] Scan-/Bild-PDFs über einen verpflichtenden OCR-Dokumentpfad verarbeiten.
 - [ ] Optionalen Pfad für eingebettete Bilder klar vom Dokumenttext trennen.
 - [ ] Auswahl „keine“, „einzelne“ oder „alle Bilder“ um Vorschauen und
       Mehrfachauswahl ergänzen.
 - [x] Eigenständige Übersetzung einer oder mehrerer Bilddateien implementieren.
 - [ ] Textregionen, Leserichtung, Schrift, Farbe und Hintergrund erfassen -
-      Textregionen/Farbe/Hintergrund werden bereits erfasst, Leserichtung/
-      echte Schrifterkennung (Font-Matching) weiterhin offen.
+      Textregionen/Farbe/Hintergrund werden bereits erfasst; Schrifterkennung
+      (Font-Matching: Serif/Sans-Serif, Fett, Kursiv) seit 22.08.2026 über
+      pipeline/images/font_style.py per klassischer Bildverarbeitung
+      umgesetzt (siehe Backlog.md) - Monospace-Erkennung und Leserichtung
+      bleiben weiterhin offen, ebenso wie eine echte Font-FAMILIEN-Erkennung
+      ("Arial" vs. "Helvetica") jenseits der Serif/Sans-Kategorie-Ebene.
 - [x] Übersetzten Text mit Inpainting/Maskierung sicher zurückschreiben -
       Grundmechanik seit den drei Backends vorhanden, Überlauf-/Größen-
       Probleme siehe obiger Eintrag; verbleibende OCR-Fehllesungen bei
       komplexen Mehrspalten-/Infografik-Layouts (siehe Backlog.md) sind
       ein bekanntes, noch offenes Restrisiko, kein vollständig gelöstes
-      Problem.
+      Problem. Seit 22.08.2026 (echtes, von Michael gemeldetes Infografik-
+      Bild inkl. GPU-Inpainting-QA-Bericht, siehe Backlog.md): dekorative
+      Icon-/Bullet-Glyphen, die Tesseract fälschlich als eigenständige
+      Symbol-Wörter liest und vor echten Sätzen einfügt, werden jetzt vor
+      der Regionsbildung gefiltert. Ebenfalls seit 22.08.2026: übersprungene/
+      fehlgeschlagene/durch Abbruch nie erreichte Regionen fließen jetzt
+      als `obstacle_regions` in die Kollisionsvermeidung beim
+      Zurückschreiben ein (können nicht mehr von neu eingefügtem Text
+      überwachsen werden). Direkt am selben echten Bild verifiziert - und
+      dabei eine WICHTIGERE, größere Baustelle bestätigt: die sichtbaren
+      Überlappungen in diesem Bild entstehen überwiegend zwischen ZWEI
+      ÜBERSETZTEN Regionen, weil OCR auf Tesseract-ZEILEN-Ebene erkennt -
+      ein über zwei Zeilen umgebrochener Satz wird als zwei unabhängig
+      übersetzte/zurückgeschriebene Regionen behandelt, mit nur dem
+      ursprünglichen (englischen) Zeilenabstand als Platz. Seit demselben
+      Tag behoben: `pipeline/images/ocr.py::merge_lines_into_paragraphs()`
+      fasst eng benachbarte, gleich große Original-Zeilen VOR der
+      Übersetzung zu einer Übersetzungs-/Layout-Einheit zusammen (Details
+      und Kalibrierung siehe Backlog.md). Direkt am echten Bild
+      verifiziert: überschreitende Blöcke 48 von 82 -> 26 von 59, der
+      komplette linke Hauptbereich jetzt sauber lesbar. Ehrlich weiterhin
+      offen: der dichteste rechte Randbereich und der untere Zitatblock
+      zeigen noch Überlappungen - teils weil OCR mitten im Satz Wörter gar
+      nicht erkennt (keine durchgehende Zusammenführung möglich), teils
+      weil das Layout schlicht zu dicht für jede überlappungsfreie
+      Platzierung ohne Schriftverkleinerung unter das lesbare Minimum
+      ist - kein offensichtlicher nächster Lösungsschritt, eher ein
+      grundsätzliches Limit des Box-basierten Ansatzes bei extrem dichten
+      Infografik-Layouts (siehe Backlog.md).
+      Ein Symbol MITTEN in einem echten Wort wird weiterhin nicht
+      erkannt - ebenfalls als bewusst offener Punkt in Backlog.md
+      dokumentiert.
 - [ ] Logos, dekorative Bilder und Hintergründe standardmäßig ausschließen.
 - [ ] Identische, mehrfach eingebettete Bilder deduplizieren, um API- und
       OCR-Kosten nicht mehrfach zu berechnen.
