@@ -4505,3 +4505,68 @@
   Ende der Korrektursitzung). Ausdrücklich nicht Teil dieses oder der
   nächsten Schritte: Installer/CI, PDF/Word/PPTX-Migration, Entfernen
   der bestehenden Qt-App.
+
+  **Update (26.08.2026, direkt im Anschluss) - Schritt 2 abgeschlossen:
+  `webapp/server.py` + `webapp/job_bridge.py`, nur `/api/config` +
+  `/api/analyze`.** Beim Schreiben von `job_bridge.py` fiel auf, dass das
+  bereits ausgelieferte `webapp/settings_store.py` aus Schritt 1 einen
+  falschen Wert hatte: `max_chars` stand dort hart auf `500_000`, geraten
+  anhand einer Beispiel-Struktur statt geprüft. Der echte Wert (aus
+  `pipeline/translation/cost_control.py`) ist
+  `DEFAULT_MAX_CHARS_PER_RUN = 200_000`. Behoben durch Import dieser
+  Konstante statt eines eigenen Literals - `settings_store.py` wird mit
+  diesem Schritt korrigiert erneut ausgeliefert, damit der falsche Wert
+  nicht unbemerkt in Schritt 4 (dem eigentlichen Job-Start) landet.
+
+  `webapp/job_bridge.py` (neu, kein `http.server`-Import, bewusst isoliert
+  testbar von der HTTP-Schicht): `build_config()` liefert alles, was das
+  Formular im Bild-Modus zum Rendern braucht - Anbieterliste
+  (`pipeline.registry.PROVIDER_FACTORIES`), Zugangsdaten-Status je
+  Anbieter (`ui.settings.credential_status()`), OCR-Engine-/Backend-Namen
+  und deren tatsächliche Verfügbarkeit
+  (`pipeline.registry.ocr_engine_available()`/`inpainting_backend_available()`),
+  zuletzt gespeicherter Formular-Stand (`settings_store.load()`).
+  `analyze()` wrappt `ui.analysis.analyze_request()` unverändert (das
+  RoadMap-Leitprinzip - jeder kostenpflichtige Lauf braucht Analyse,
+  Kostenschätzung, ausdrückliche Bestätigung - hängt direkt an dieser
+  einen Funktion, keine eigene Neuberechnung) und gibt bei
+  Validierungsfehlern `{"ok": false, "errors": [...]}` statt einer
+  Exception zurück.
+
+  `webapp/server.py` (neu, `http.server.ThreadingHTTPServer` +
+  `BaseHTTPRequestHandler`, exakt das Muster aus
+  `image_translate_cli/review_server.py`, kein Framework): `create_server(host,
+  port)` bindet und gibt sofort zurück, ohne `serve_forever()` zu
+  blockieren (Aufrufer steuert den Serving-Thread) - `port=0` lässt das
+  Betriebssystem einen freien Port wählen, wie `review_server.py` es
+  heute schon nutzt. Routing bisher nur exakte Pfade (`/api/config` GET,
+  `/api/analyze` POST) - dynamische Pfade wie `/api/jobs/<id>/status`
+  kommen erst in Schritt 4 und brauchen dann eigenes Dispatching.
+
+  Beim Aufbau kam wieder dieselbe Sandbox-Lücke wie schon in früheren
+  Sitzungen zum Vorschein: `ui/models.py`, `pipeline/presentation/` und
+  `pipeline/word/` fehlten im Sandbox-Checkout, obwohl `ui/analysis.py`
+  sie zur Modulzeit importiert. Frisch vom Gerät nachgeladen (unverändert
+  - keine Diffs, nur ergänzt), keine dieser Dateien war Teil dieser
+  Auslieferung.
+
+  **Getestet:** `webapp.server`/`webapp.job_bridge` importieren
+  nachweislich weiterhin ohne `PySide6` (derselbe `sys.meta_path`-Test wie
+  in Schritt 1). Neu: `tests/test_webapp_images_api.py` (6 Tests, echte
+  HTTP-Aufrufe via `urllib.request` gegen einen auf `port=0` gestarteten
+  Server) - deckt `/api/config`s Verfügbarkeitsflags ab,
+  `/api/analyze`s Ablehnung bei leerer/fehlerhafter Quelldateiliste und
+  bei kaputtem JSON-Body, eine 404 auf unbekannte Pfade, und einen
+  echten Ende-zu-Ende-Lauf: `/api/analyze` gegen `demo_1_original.png`
+  mit echtem Tesseract-OCR (kein Mock) - liefert eine reale
+  Kostenschätzung zurück. Gesamter Testlauf (`tests/`, ohne
+  `test_ui_images_mode.py`): 209 passed (vorher 203), 1 skipped - keine
+  Regressionen.
+
+  **Noch offen (Schritte 3-8 laut Plan):** statisches Frontend-Grundgerüst
+  (zunächst im normalen Browser, `python -m webapp.server`, noch kein
+  pywebview), `/api/jobs` (Start/Status/Abbruch/Ergebnis, eigener
+  Hintergrund-Thread statt `QThreadPool`), das Bestätigungs-Gate
+  Ende-zu-Ende inklusive serverseitiger Nachprüfung, der
+  pywebview-Bootstrap mit `create_file_dialog()` statt `QFileDialog`, die
+  QA-Bericht-Anzeige, und zuletzt die `review_server.py`-Übergabe.

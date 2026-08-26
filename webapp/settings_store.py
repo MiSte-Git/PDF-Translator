@@ -31,18 +31,24 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from pipeline.translation.cost_control import DEFAULT_MAX_CHARS_PER_RUN
+
 APP_NAME = "PDF-Translator"
 
 # Mirrors ui/app.py's own defaults: "provider" (SettingsDialog, line 94),
-# "max_chars" (DEFAULT_MAX_CHARS_PER_RUN), "language" (LanguageManager's
-# own "de" default), "last_source_dir"/"last_output_dir" (both "" - an
-# empty string already means "use the current/home directory" throughout
-# ui/app.py's file-dialog calls), and the images-mode subset of
-# form.* (target_lang defaults to "DE" exactly like ui/app.py's
+# "max_chars" (imported from pipeline.translation.cost_control rather
+# than a duplicated literal - a first draft of this file hardcoded
+# 500_000, guessed instead of checked, which drifted from the real
+# DEFAULT_MAX_CHARS_PER_RUN = 200_000; importing it means this can never
+# silently drift again), "language" (LanguageManager's own "de" default),
+# "last_source_dir"/"last_output_dir" (both "" - an empty string already
+# means "use the current/home directory" throughout ui/app.py's
+# file-dialog calls), and the images-mode subset of form.* (target_lang
+# defaults to "DE" exactly like ui/app.py's
 # self.target_lang = QLineEdit("DE")).
 DEFAULTS: dict[str, Any] = {
     "provider": "deepl",
-    "max_chars": 500_000,
+    "max_chars": DEFAULT_MAX_CHARS_PER_RUN,
     "language": "de",
     "last_source_dir": "",
     "last_output_dir": "",
