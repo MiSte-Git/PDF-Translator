@@ -31,7 +31,7 @@ from ui.models import AnalysisResult, EmbeddedImageMode, TranslationMode, Transl
 from ui.pdf_job import PdfJobResult
 from ui.pptx_job import PresentationJobResult
 from ui.settings import credential_status, save_credential
-from ui.theme import palette_colors
+from ui.theme import build_stylesheet, palette_colors
 from ui.word_job import WordJobResult
 from ui.workers import (
     AnalysisWorker,
@@ -283,6 +283,11 @@ class MainWindow(QMainWindow):
         self.start = QPushButton()
         self.start.setEnabled(False)
         self.start.clicked.connect(self._start)
+        # 26.08.2026 - the app's one primary call-to-action gets the solid
+        # green "primary" button treatment (see ui/theme.py's
+        # build_stylesheet() docstring) - every other button keeps the
+        # neutral secondary look, same split as the reference project.
+        self.start.setProperty("cssClass", "primary")
         self.result = QLabel()
         self.result.setWordWrap(True)
         self.result.setStyleSheet("padding: 10px")
@@ -344,8 +349,19 @@ class MainWindow(QMainWindow):
         # into preselect_provider instead of the intended default. The
         # lambda pins the call to zero arguments.
         self.settings_button.clicked.connect(lambda: self._open_settings())
+        # 26.08.2026 - the form used to sit directly in `root`, the only
+        # section of the window WITHOUT a card around it (cost_box/job_box
+        # already were QGroupBoxes). Wrapped in its own card so the whole
+        # window reads as a stack of cards, matching the reference
+        # project's "Modus"/"Dateien"/... sections rather than one card-
+        # less form followed by two cards.
+        self.config_box = QGroupBox()
+        config_layout = QVBoxLayout(self.config_box)
+        config_layout.addLayout(self.form)
         root = QVBoxLayout()
-        root.addLayout(self.form)
+        root.setContentsMargins(20, 20, 20, 20)
+        root.setSpacing(16)
+        root.addWidget(self.config_box)
         root.addWidget(self.cost_box)
         root.addWidget(self.job_box)
         root.addWidget(self.settings_button, alignment=Qt.AlignRight)
@@ -428,6 +444,7 @@ class MainWindow(QMainWindow):
     def retranslate(self) -> None:
         t = self.language.text
         self.setWindowTitle(t("app.title"))
+        self.config_box.setTitle(t("config.group"))
         for index, mode in enumerate(MODE_KEYS): self.mode.setItemText(index, t(MODE_KEYS[mode]))
         for index, key in enumerate(("image.none", "image.selected", "image.all")): self.image_mode.setItemText(index, t(key))
         for label, key in zip(self.form_labels, ("field.mode", "field.source", "field.images", "field.provider", "field.source_language", "field.target_language", "field.protected_terms", "field.ico_mode", "field.exclude_header", "field.exclude_footer", "field.ocr_engine", "field.inpainting_backend")):
@@ -1173,6 +1190,15 @@ def apply_explicit_palette(app: QApplication) -> None:
     palette.setColor(QPalette.Disabled, QPalette.Button, rgb("disabled_button"))
     palette.setColor(QPalette.Disabled, QPalette.Base, rgb("disabled_button"))
     app.setPalette(palette)
+    # 26.08.2026 (Michael: "Das UI gefällt mir so gar nicht [...] Unseres
+    # schaut so staubig, technisch und trocken aus.") - QSS layered ON TOP
+    # of the QPalette above, not instead of it (see ui/theme.py's
+    # build_stylesheet() docstring for why both still coexist). is_dark was
+    # already computed above from the INHERITED palette, before this
+    # function overwrote it - build_stylesheet() must use that same
+    # light-vs-dark decision, not re-derive it from the now-overwritten
+    # app.palette().
+    app.setStyleSheet(build_stylesheet(is_dark))
 
 
 def main() -> int:

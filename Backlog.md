@@ -4109,3 +4109,135 @@
   zu bestätigen: Kelch nicht mehr "UND", Thoughts/Emotions-Bereich
   nicht mehr überzeichnet, Fusszeilen-Reflow (Fund 3) funktioniert wie
   vorgesehen.
+
+## 26.08.2026 - UI-Neugestaltung: helleres, "card"-basiertes Design nach Vorbild des Projekts "Konvertierung Audio-Video" (QSS-Designsystem in ui/theme.py, Re-Styling + Card-Umbau)
+
+  Michael, nachdem der letzte Commit bestätigt war: "Ich würde jetzt
+  gerne das aktuelle erst einmal hinten anstellen und am UI noch was
+  anpassen. Das UI gefällt mir so gar nicht. Kannst Du Dir mal das UI
+  aus dem Projekt Ordner 'Konvertierung Audio-Video' anschauen und
+  sehen ob wir das UI hier gleich aufbauen können. Es ist heller, hat
+  runde Buttons usw. Unseres schaut so staubig, technisch und trocken
+  aus. Danach würde ich gerne die Installer Logik angehen."
+
+  **Untersuchung des Referenzprojekts:** "Konvertierung Audio-Video"
+  ist eine Tauri-App (Rust-Backend + reines HTML/CSS/JS-Frontend,
+  `tauri-app/ui/{index.html,style.css,app.js}`) - technisch komplett
+  anderer Stack als PDF-Translator (PySide6/Qt), Code selbst also
+  nicht übertragbar. Die Designsprache aus `style.css` schon: warmes
+  Off-White (`--bg: #f2f1ec`), weiße Karten mit abgerundeten Ecken
+  (`.card { border-radius: 16px; box-shadow: ... }`), runde Buttons
+  (`border-radius: 10px`), ein grüner Primär-Button (`button.primary`,
+  `--accent: #1f7a5f`) gegenüber beige-grauen Sekundär-Buttons, runde
+  Eingabefelder, eine voll abgerundete Fortschrittsleiste
+  (`border-radius: 999px`).
+
+  **Ursache des "staubig, technisch, trocken"-Eindrucks bestätigt:**
+  PDF-Translator hatte bisher gar kein QSS-Stylesheet - `ui/app.py`
+  baut nur eine explizite `QPalette` (`ui/theme.py`s
+  `DARK_COLORS`/`LIGHT_COLORS`, kontrastgetestet, ursprünglich gebaut
+  gegen einen echten Unlesbarkeits-Bug in manchen Linux-Dark-Mode-
+  Umgebungen). Ohne QSS bekommt jedes Widget Qts kantigen, eckigen
+  Standard-Look - genau das gemeinte Erscheinungsbild.
+
+  **Entscheidung (per Rückfrage an Michael):** Umfang = "Re-Styling +
+  Card-Umbau" (nicht nur Buttons/Felder/Gruppen-Boxen neu einfärben/
+  abrunden, sondern auch das Formular in einen Card-Abschnitt wie im
+  Referenzprojekt umbauen). Schatten = "Einfacher Rahmen" (Michael hat
+  sich explizit gegen echte weiche Schlagschatten entschieden, für die
+  robustere, einfachere native-QSS-Variante ohne
+  `QGraphicsDropShadowEffect`).
+
+  **Umsetzung:**
+  - `ui/theme.py`: neues, von `DARK_COLORS`/`LIGHT_COLORS` getrenntes
+    Token-Set `SURFACE_LIGHT`/`SURFACE_DARK` (bg/card/ink/muted/line/
+    input_bg/button_bg/button_hover/button_text/accent/accent_hover/
+    accent_text als Hex-Strings) plus `RADIUS_CARD`/`RADIUS_CONTROL`/
+    `RADIUS_PILL`. `QPalette` bleibt bestehen und unverändert (steuert
+    weiterhin natives/von QSS nicht erreichbares Chrome wie
+    Datei-Dialoge) - `surface_colors()`/`build_stylesheet(is_dark)`
+    kommen als zusätzliche, separate Schicht obendrauf. Neue
+    `hex_to_rgb()`-Hilfsfunktion, damit die neuen Hex-Token durch
+    dieselbe, bereits getestete `contrast_ratio()`-Funktion laufen wie
+    `DARK_COLORS`/`LIGHT_COLORS` - keine zweite, ungetestete
+    Kontrastrechnung. `accent`/`accent_hover` sind in Light und Dark
+    bewusst identisch: ein zunächst erwogenes helleres Dark-Mode-Grün
+    (`#2f9c79`) erreichte gegen weißen Button-Text nur 3.41:1 (unter
+    der 4.5:1-Grenze, die dieses Modul für jedes andere Paar
+    durchsetzt), `#1f7a5f` (das Light-Grün) erreicht 5.24:1 und
+    funktioniert in beiden Modi. `build_stylesheet()` liefert das
+    komplette QSS für `QGroupBox` (Card-Look: Hintergrund, 1px Rahmen,
+    `border-radius: 14px`, Titel-Styling), `QPushButton` (inkl.
+    `:hover`/`:disabled` und die `[cssClass="primary"]`-Variante für
+    genau den Start-Button), `QLineEdit`/`QTextEdit`/`QComboBox`/
+    `QSpinBox` (abgerundet, umrandet, gepolstert), `QCheckBox`
+    (abgerundete Checkbox mit Akzentfarbe im angehakten Zustand),
+    `QProgressBar` (voll abgerundeter Balken, Akzentfarbe).
+  - `ui/app.py`: `self.start` (der einzige primäre Call-to-Action)
+    bekommt `setProperty("cssClass", "primary")` - jeder andere Button
+    bleibt beim neutralen Sekundär-Look, dieselbe Aufteilung wie im
+    Referenzprojekt ("Start" grün, "Abbrechen"/"Log-Pfad" gedeckt).
+    Das bisher direkt in `root` liegende Formular (`self.form`, als
+    einziger Abschnitt bisher OHNE Card-Rahmen, `cost_box`/`job_box`
+    waren schon `QGroupBox`) steckt jetzt in einer eigenen neuen
+    `self.config_box`-`QGroupBox`, damit das ganze Fenster als
+    einheitlicher Stapel von Cards wirkt statt einem card-losen
+    Formular gefolgt von zwei Cards. `root` bekommt zusätzlich
+    `setContentsMargins(20, 20, 20, 20)`/`setSpacing(16)` für Luft
+    zwischen den Cards. `apply_explicit_palette()` ruft direkt nach
+    `app.setPalette(palette)` jetzt zusätzlich
+    `app.setStyleSheet(build_stylesheet(is_dark))` auf - mit demselben
+    `is_dark`, das schon zuvor aus der GEERBTEN Palette ermittelt
+    wurde (nicht neu aus der inzwischen überschriebenen Palette
+    abgeleitet).
+  - `ui/i18n.py`: neuer Schlüssel `"config.group"` ("Auftrag
+    konfigurieren" / "Configure job") für den Titel der neuen
+    `config_box`-Card, in beiden Katalogen ergänzt und auf
+    Schlüssel-Parität geprüft (`set(CATALOGUES['de']) ==
+    set(CATALOGUES['en'])`, keine Differenz).
+
+  **Geprüft:** `QFormLayout.setRowVisible()` (von `_mode_changed()`
+  für `ico_mode`/`exclude_header`/`exclude_footer`/`ocr_engine`/
+  `inpainting_backend` genutzt) bleibt unberührt davon, dass `self.
+  form` jetzt in einer `QGroupBox` statt direkt in `root` steckt -
+  bestätigt sowohl durch Code-Lektüre als auch dadurch, dass
+  `tests/test_ui_images_mode.py` (`window.form.isRowVisible(...)`)
+  weiterhin exakt dasselbe `self.form`-Attribut anspricht, das nur
+  sein Eltern-Layout gewechselt hat. Kein anderer `ui/*.py`-Dialog
+  setzt ein eigenes, konkurrierendes `QGroupBox`/`QPushButton`-
+  Stylesheet (nur einzelne `QLabel`s mit lokalem `padding`/
+  `font-weight`, die nicht mit Farbe/Radius kollidieren) - das
+  QApplication-weite `setStyleSheet()` kaskadiert also sauber auf
+  alle Fenster/Dialoge (SettingsDialog, Korrektur-Dialoge, ...).
+
+  **Getestet:** alle neuen Farbpaare (Light UND Dark) gegen die
+  bestehende `contrast_ratio()`-Funktion geprüft, WCAG-AA (≥4.5:1)
+  eingehalten: ink-auf-card 17.04/12.02, ink-auf-bg 15.07/13.59,
+  muted-auf-card 5.31/5.74, muted-auf-bg 4.69/6.49, button_text-auf-
+  button_bg 14.09/9.69, button_text-auf-button_hover 11.99/7.92,
+  accent_text-auf-accent 5.24/5.24, accent_text-auf-accent_hover
+  9.10/9.10, ink-auf-input_bg 16.47/13.18 (Light/Dark). Neue Tests in
+  `tests/test_ui_theme.py`: `test_hex_to_rgb_parses_hash_prefixed_hex`,
+  `test_surface_colors_selects_dark_or_light`,
+  `test_surface_colors_meet_wcag_aa_for_text_pairs` (alle neun Paare
+  oben, beide Modi), `test_surface_light_and_dark_share_the_same_
+  accent`, `test_build_stylesheet_returns_qss_for_both_modes`
+  (strukturelle Marker: `QGroupBox`, `QPushButton`,
+  `QPushButton[cssClass="primary"]`, `QLineEdit`, `QCheckBox::
+  indicator`, `QProgressBar`, alle drei Radius-Werte kommen im QSS
+  tatsächlich vor) und `test_build_stylesheet_differs_between_light_
+  and_dark`. `tests/test_ui_theme.py`: 10 passed (vorher 4).
+  `tests/test_ui_i18n.py`: weiterhin 3 passed. Gesamter Testlauf
+  (`tests/`, ohne `test_ui_images_mode.py`): 197 passed, 1 skipped -
+  keine Regressionen.
+
+  **Noch offen:** `test_ui_images_mode.py` selbst kann in dieser
+  Sandbox mangels Display nicht laufen (bekannte, seit längerem
+  bestehende Einschränkung) - Code-Lektüre spricht dagegen, dass der
+  Card-Umbau dort etwas bricht, ein echter Lauf auf Michaels Maschine
+  bestätigt das aber nicht automatisch. Vor allem: das tatsächliche
+  Aussehen wurde in dieser Sitzung nicht visuell geprüft (kein Display
+  im Sandbox) - Michael gebeten, die App zu starten und einen
+  Screenshot zu schicken, damit das Ergebnis gegen die Absicht
+  bestätigt werden kann, bevor es als erledigt gilt. Danach, wie von
+  Michael angekündigt: Installer-Logik als nächstes Thema.
