@@ -1,0 +1,213 @@
+/* Design tokens ported 1:1 from ui/theme.py's SURFACE_LIGHT/SURFACE_DARK
+   and RADIUS_CARD/RADIUS_CONTROL/RADIUS_PILL (26.08.2026 QSS redesign) -
+   see that module's docstring for the full reasoning/reference project.
+   Kept in sync by hand (small, stable token set); if ui/theme.py's
+   values change, update the two blocks below to match. */
+:root {
+    --bg: #f2f1ec;
+    --card: #ffffff;
+    --ink: #1c1c1c;
+    --muted: #6f6b62;
+    --line: #ddd7cc;
+    --input-bg: #fcfbf8;
+    --button-bg: #efe9dc;
+    --button-hover: #e2d7c6;
+    --button-text: #1c1c1c;
+    --accent: #1f7a5f;
+    --accent-hover: #14523f;
+    --accent-text: #ffffff;
+
+    --radius-card: 14px;
+    --radius-control: 9px;
+    --radius-pill: 999px;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #201f1c;
+        --card: #2a2924;
+        --ink: #ece9e2;
+        --muted: #a8a296;
+        --line: #423f37;
+        --input-bg: #232219;
+        --button-bg: #3a382f;
+        --button-hover: #484539;
+        --button-text: #ece9e2;
+        /* accent/accent-hover deliberately unchanged - see ui/theme.py's
+           module comment on why the same green was kept for both themes. */
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.page {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 20px 64px;
+}
+
+header.app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+
+header.app-header h1 {
+    font-size: 18px;
+    margin: 0;
+}
+
+#language-select {
+    width: auto;
+    min-width: 90px;
+}
+
+.card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-card);
+    padding: 16px 16px 14px;
+    margin-bottom: 16px;
+}
+
+.card > h2 {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 0 0 12px;
+    text-transform: none;
+}
+
+.field {
+    margin-bottom: 12px;
+}
+
+.field:last-child {
+    margin-bottom: 0;
+}
+
+.field label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.field .hint {
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 4px;
+}
+
+.field .hint.warning {
+    color: #b5482a;
+}
+
+input[type="text"],
+textarea,
+select {
+    width: 100%;
+    background: var(--input-bg);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-control);
+    padding: 6px 10px;
+    font: inherit;
+}
+
+textarea {
+    resize: vertical;
+    min-height: 64px;
+}
+
+/* Native <select> arrows disappear as soon as appearance is reset - same
+   root cause Michael reported for the Qt QComboBox
+   ("Es fehlen die Pfeile an den Auswahlboxen", 26.08.2026): the browser
+   won't draw its own arrow once the element is otherwise restyled, so one
+   is drawn by hand here too, same border-triangle technique as
+   ui/theme.py's QComboBox::down-arrow fix. */
+select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+        linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: calc(100% - 16px) center, calc(100% - 11px) center;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 30px;
+}
+
+select:disabled {
+    color: var(--muted);
+}
+
+button {
+    font: inherit;
+    font-weight: 600;
+    background: var(--button-bg);
+    color: var(--button-text);
+    border: none;
+    border-radius: var(--radius-control);
+    padding: 8px 16px;
+    cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+    background: var(--button-hover);
+}
+
+button:disabled {
+    color: var(--muted);
+    cursor: default;
+}
+
+button.primary {
+    background: var(--accent);
+    color: var(--accent-text);
+}
+
+button.primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+}
+
+button.primary:disabled {
+    background: var(--button-bg);
+    color: var(--muted);
+}
+
+.result {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+}
+
+.result p {
+    margin: 0 0 8px;
+}
+
+.result ul {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--muted);
+}
+
+.result.hidden {
+    display: none;
+}
+
+.status-line {
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 8px;
+}

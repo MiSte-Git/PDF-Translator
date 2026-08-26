@@ -123,6 +123,44 @@ def test_unknown_path_returns_404(running_server: str) -> None:
     assert payload["ok"] is False
 
 
+def _get_raw(url: str) -> tuple[int, bytes, str | None]:
+    try:
+        with urllib.request.urlopen(url, timeout=5) as response:
+            return response.status, response.read(), response.headers.get("Content-Type")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read(), exc.headers.get("Content-Type")
+
+
+def test_root_serves_index_html(running_server: str) -> None:
+    status, body, content_type = _get_raw(f"{running_server}/")
+    assert status == 200
+    assert content_type is not None and "html" in content_type
+    assert b"<title" in body
+
+
+def test_static_assets_are_served_with_correct_content_type(running_server: str) -> None:
+    status, body, content_type = _get_raw(f"{running_server}/app.js")
+    assert status == 200
+    assert content_type is not None and "javascript" in content_type
+    assert b"loadCatalogue" in body
+
+    status, body, content_type = _get_raw(f"{running_server}/i18n/de.json")
+    assert status == 200
+    assert content_type is not None and "json" in content_type
+    assert json.loads(body)["field.provider"] == "Übersetzungsanbieter"
+
+
+def test_static_path_traversal_is_rejected(running_server: str) -> None:
+    # A request trying to escape webapp/static/ (e.g. reach
+    # webapp/job_bridge.py) must 404, never serve server-side source -
+    # checked by absence of that file's actual content (its own module
+    # docstring text), not just the echoed request path in the error
+    # message (which legitimately contains "job_bridge.py" as text).
+    status, body, _ = _get_raw(f"{running_server}/../job_bridge.py")
+    assert status == 404
+    assert b"HTTP-independent glue" not in body
+
+
 @pytest.mark.skipif(not DEMO_IMAGE.is_file(), reason="demo_1_original.png not present in this checkout")
 def test_analyze_route_runs_a_real_tesseract_pass_over_a_demo_image(running_server: str) -> None:
     # End-to-end proof that this route really wraps ui.analysis.analyze_request()

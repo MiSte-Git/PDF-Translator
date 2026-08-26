@@ -1,0 +1,263 @@
+"use strict";
+
+/* webapp/static/app.js - Schritt 3 (Frontend-Grundgerüst) des Umbaus auf
+ * lokaler Server + pywebview, siehe Backlog.md 26.08.2026 und
+ * /root/.claude/plans/moonlit-humming-brook.md. Deckt GET /api/config
+ * (Formular füllen) und POST /api/analyze (Kostenschätzung anzeigen) ab.
+ * Kein Job-Start (Schritt 4/5), keine native Datei-Auswahl (Schritt 6 -
+ * das Textfeld für Quellpfade unten ist eine bewusste Übergangslösung).
+ *
+ * Kein Framework/Build-Schritt, exakt wie image_translate_cli/review_server.py's
+ * eigenes Frontend und wie im Plan festgehalten ("echte Dateien statt
+ * Python-String" - aber weiterhin ohne Abhängigkeit).
+ */
+
+let catalogue = {};
+let currentLanguage = "de";
+
+function t(key, fallback) {
+  return catalogue[key] !== undefined ? catalogue[key] : (fallback !== undefined ? fallback : key);
+}
+
+async function loadCatalogue(language) {
+  const response = await fetch(`i18n/${language}.json`);
+  if (!response.ok) {
+    throw new Error(`i18n/${language}.json: HTTP ${response.status}`);
+  }
+  catalogue = await response.json();
+  currentLanguage = language;
+  applyCatalogue();
+}
+
+function applyCatalogue() {
+  document.documentElement.lang = currentLanguage;
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    el.textContent = t(el.getAttribute("data-i18n"), el.textContent);
+  });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+    el.setAttribute("placeholder", t(el.getAttribute("data-i18n-placeholder"), el.getAttribute("placeholder") || ""));
+  });
+}
+
+/* Formatiert Python-artige Platzhalter wie "{characters:,}" oder
+ * "{cost:.2f}" innerhalb der aus ui/i18n_data.py exportierten
+ * Vorlagen-Strings (analysis.summary etc.) - die Vorlagen selbst
+ * enthalten diese Format-Spezifikationen wörtlich als Text, siehe
+ * webapp/tools/export_i18n.py. Absichtlich IMMER Komma als
+ * Tausendertrennzeichen (nicht lokal-abhängig) - deckungsgleich mit
+ * Pythons eigenem Standardverhalten für f"{value:,}", das die
+ * bestehende Qt-App auch deutschen Nutzern bereits so anzeigt. */
+function formatTemplate(template, values) {
+  return template.replace(/\{(\w+)(:[^}]+)?\}/g, (match, key, specWithColon) => {
+    if (!(key in values) || values[key] === null || values[key] === undefined) {
+      return "";
+    }
+    const value = values[key];
+    const spec = specWithColon ? specWithColon.slice(1) : null;
+    if (spec === ",") {
+      return Number(value).toLocaleString("en-US");
+    }
+    const floatMatch = spec && spec.match(/^\.(\d+)f$/);
+    if (floatMatch) {
+      return Number(value).toFixed(Number(floatMatch[1]));
+    }
+    return String(value);
+  });
+}
+
+function setOptions(select, entries, availability, hintEl) {
+  select.innerHTML = "";
+  entries.forEach((name) => {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = t(`${select.dataset.i18nPrefix}.${name}`, name);
+    if (availability && availability[name] === false) {
+      option.disabled = true;
+      option.textContent += ` (${t("ocr_engine.unavailable", "nicht verfügbar")})`;
+    }
+    select.appendChild(option);
+  });
+  if (hintEl) {
+    select.addEventListener("change", () => updateAvailabilityHint(select, availability, hintEl));
+    updateAvailabilityHint(select, availability, hintEl);
+  }
+}
+
+function updateAvailabilityHint(select, availability, hintEl) {
+  const current = select.value;
+  if (availability && availability[current] === false) {
+    const key = `${select.dataset.i18nPrefix}.${current}.unavailable`;
+    hintEl.textContent = t(key, t(`${select.dataset.i18nPrefix}.unavailable`, ""));
+  } else {
+    hintEl.textContent = "";
+  }
+}
+
+async function loadConfig() {
+  const response = await fetch("/api/config");
+  const config = await response.json();
+
+  const providerSelect = document.getElementById("provider");
+  providerSelect.dataset.i18nPrefix = "field.provider"; // no per-provider i18n keys today - fall back to the raw name
+  providerSelect.innerHTML = "";
+  config.providers.forEach((name) => {
+    const option = document.createElement("option");
+    option.value = name;
+    const status = t(config.provider_credential_status[name], config.provider_credential_status[name]);
+    option.textContent = `${name} (${status})`;
+    providerSelect.appendChild(option);
+  });
+
+  const ocrSelect = document.getElementById("ocr-engine");
+  ocrSelect.dataset.i18nPrefix = "ocr_engine";
+  setOptions(ocrSelect, config.ocr_engines, config.ocr_engine_available, document.getElementById("ocr-engine-hint"));
+
+  const inpaintingSelect = document.getElementById("inpainting-backend");
+  inpaintingSelect.dataset.i18nPrefix = "inpainting_backend";
+  setOptions(
+    inpaintingSelect,
+    config.inpainting_backends,
+    config.inpainting_backend_available,
+    document.getElementById("inpainting-backend-hint")
+  );
+
+  // Zuletzt gespeicherten Formular-Stand vorbelegen (webapp/settings_store.py) -
+  // dieselbe "nicht erneut eintippen müssen"-Absicht wie ui/app.py's
+  // QSettings-Restore.
+  const saved = config.last_form_state || {};
+  if (saved.provider) providerSelect.value = saved.provider;
+  const form = saved.form || {};
+  if (form.source_lang) document.getElementById("source-language").value = form.source_lang;
+  if (form.target_lang) document.getElementById("target-language").value = form.target_lang;
+  if (form.protected_terms) document.getElementById("protected-terms").value = form.protected_terms;
+  if (form.ocr_engine) ocrSelect.value = form.ocr_engine;
+  if (form.inpainting_backend) inpaintingSelect.value = form.inpainting_backend;
+  updateAvailabilityHint(ocrSelect, config.ocr_engine_available, document.getElementById("ocr-engine-hint"));
+  updateAvailabilityHint(inpaintingSelect, config.inpainting_backend_available, document.getElementById("inpainting-backend-hint"));
+}
+
+function gatherRequestBody() {
+  const sourcePaths = document
+    .getElementById("source-paths")
+    .value.split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const protectedTerms = document
+    .getElementById("protected-terms")
+    .value.split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  return {
+    source_paths: sourcePaths,
+    provider: document.getElementById("provider").value,
+    source_language: document.getElementById("source-language").value.trim() || null,
+    target_language: document.getElementById("target-language").value.trim() || "DE",
+    protected_terms: protectedTerms,
+    ocr_engine: document.getElementById("ocr-engine").value,
+    inpainting_backend: document.getElementById("inpainting-backend").value,
+  };
+}
+
+function renderAnalysisResult(result) {
+  const resultEl = document.getElementById("analysis-result");
+  const summaryEl = document.getElementById("analysis-summary");
+  const warningsEl = document.getElementById("analysis-warnings");
+  const statusEl = document.getElementById("analysis-status");
+  warningsEl.innerHTML = "";
+
+  if (!result.ok) {
+    resultEl.classList.add("hidden");
+    statusEl.textContent = `${t("analysis.failed", "Analyse fehlgeschlagen.")} ${result.errors.join(" ")}`;
+    setStartBlocked(t("start.blocked_no_analysis"));
+    return;
+  }
+
+  const cost = result.cost;
+  const limitState = cost.within_run_limit
+    ? t("analysis.within", "innerhalb")
+    : t("analysis.exceeded", "ÜBERSCHRITTEN");
+  const warningsText = result.warnings.length
+    ? result.warnings.map((key) => t(key, key)).join(" ")
+    : t("analysis.no_warnings", "Keine Analysewarnungen.");
+
+  summaryEl.innerHTML = formatTemplate(t("analysis.summary"), {
+    units: result.units,
+    unit_label: t(result.unit_label, result.unit_label),
+    characters: result.text_characters,
+    images: result.embedded_images,
+    provider: cost.provider,
+    usage: cost.month_usage,
+    free: cost.free_tier,
+    cost: cost.estimated_cost_usd,
+    limit: cost.max_chars_per_run,
+    limit_state: limitState,
+    warnings: warningsText,
+  });
+
+  if (cost.live_usage_available) {
+    const li = document.createElement("li");
+    if (cost.live_character_limit === null) {
+      li.innerHTML = formatTemplate(t("analysis.live_quota_unlimited"), { used: cost.live_characters_used });
+    } else {
+      li.innerHTML = formatTemplate(t("analysis.live_quota"), {
+        used: cost.live_characters_used,
+        limit: cost.live_character_limit,
+        remaining: cost.live_character_limit - cost.live_characters_used,
+      });
+    }
+    warningsEl.appendChild(li);
+  }
+
+  resultEl.classList.remove("hidden");
+  statusEl.textContent = "";
+
+  // /api/jobs (Job-Start) kommt erst in Schritt 4 - bis dahin bleibt der
+  // Start-Button bewusst deaktiviert, auch nach erfolgreicher Analyse.
+  setStartBlocked(t("start.pending"));
+}
+
+function setStartBlocked(message) {
+  document.getElementById("start-button").disabled = true;
+  document.getElementById("start-status").textContent = message;
+}
+
+async function runAnalysis() {
+  const statusEl = document.getElementById("analysis-status");
+  const button = document.getElementById("analyze-button");
+  button.disabled = true;
+  statusEl.textContent = t("analysis.running", "Analyse läuft …");
+  document.getElementById("analysis-result").classList.add("hidden");
+  try {
+    const response = await fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(gatherRequestBody()),
+    });
+    const result = await response.json();
+    renderAnalysisResult(result);
+  } catch (error) {
+    statusEl.textContent = `${t("analysis.failed", "Analyse fehlgeschlagen.")} ${error}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function init() {
+  await loadCatalogue(currentLanguage);
+  await loadConfig();
+  setStartBlocked(t("start.blocked_no_analysis"));
+
+  document.getElementById("language-select").value = currentLanguage;
+  document.getElementById("language-select").addEventListener("change", async (event) => {
+    await loadCatalogue(event.target.value);
+    // Verfügbarkeits-Hinweise und dynamisch erzeugte Texte hängen an der
+    // aktuellen Sprache - Config-getriebene Teile werden nach jedem
+    // Sprachwechsel neu aufgebaut statt nur die statischen data-i18n-
+    // Knoten zu aktualisieren.
+    await loadConfig();
+  });
+
+  document.getElementById("analyze-button").addEventListener("click", runAnalysis);
+}
+
+init();

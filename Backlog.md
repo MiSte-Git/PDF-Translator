@@ -4570,3 +4570,79 @@
   Ende-zu-Ende inklusive serverseitiger Nachprüfung, der
   pywebview-Bootstrap mit `create_file_dialog()` statt `QFileDialog`, die
   QA-Bericht-Anzeige, und zuletzt die `review_server.py`-Übergabe.
+
+  **Update (26.08.2026, direkt im Anschluss) - Schritt 3 abgeschlossen:
+  statisches Frontend-Grundgerüst, geöffnet im normalen Browser
+  (`python -m webapp.server`), noch kein pywebview.** Neu unter
+  `webapp/static/`: `index.html`/`app.css`/`app.js` als echte Dateien
+  (keine Python-String-Konstante wie `review_server.py`s `_PAGE_HTML` -
+  bewusste Entscheidung aus dem Plan, hier isoliert bewiesen), dazu
+  `i18n/de.json` + `i18n/en.json`. Diese beiden JSON-Dateien werden nicht
+  von Hand gepflegt, sondern per neuem `webapp/tools/export_i18n.py` aus
+  `ui/i18n_data.py`s echten `DE`/`EN`-Katalogen exportiert (158 Schlüssel
+  je Sprache) - die Bild-Modus-Formularfelder im Browser verwenden damit
+  exakt dieselben deutschen/englischen Texte wie die Qt-App
+  ("Übersetzungsanbieter", "Rückschreibe-Methode" usw.), keine separat
+  gepflegte Kopie. Bei Änderungen an `ui/i18n_data.py` muss das Skript
+  von Hand erneut laufen (`python -m webapp.tools.export_i18n`) - es gibt
+  bewusst keinen Laufzeit-Import von `ui.i18n_data` im Server-Prozess
+  (Begründung siehe Skript-Docstring), also auch keinen Test, der eine
+  vergessene Neuauslieferung automatisch auffängt.
+
+  `app.css` portiert `ui/theme.py`s `SURFACE_LIGHT`/`SURFACE_DARK`- und
+  Radius-Werte 1:1 als CSS-Custom-Properties (hell per `:root`, dunkel
+  per `prefers-color-scheme: dark` - im Browser gibt es kein QPalette-
+  Äquivalent, daher automatisch statt manuell umschaltbar). Bei den
+  `<select>`-Elementen trat derselbe Effekt auf, den Michael schon bei
+  den Qt-Auswahlboxen gemeldet hatte ("Es fehlen die Pfeile an den
+  Auswahlboxen") - ein `<select>` verliert seinen nativen Pfeil, sobald
+  es umgestylt wird; behoben mit demselben Prinzip wie in
+  `ui/theme.py` (Pfeil selbst gezeichnet statt auf das Standard-Rendering
+  zu vertrauen).
+
+  `webapp/server.py` bedient jetzt neben `/api/*` auch statische Dateien
+  aus `webapp/static/` (`/` → `index.html`, `/app.js` → `app.js`, `/i18n/de.json`
+  → `i18n/de.json` usw.) - mit Pfad-Traversal-Schutz (`unquote()` +
+  `resolve()` + Prüfung, dass das Ergebnis innerhalb von `webapp/static/`
+  bleibt, bevor irgendetwas gelesen wird) und einem eigenen `main()` für
+  `python -m webapp.server`: startet den Server, öffnet die URL im
+  Standardbrowser, blockiert bis Abbruch - ein reiner Entwickler-
+  Einstiegspunkt für diesen Zwischenschritt, nicht der spätere
+  pywebview-Start aus Schritt 6.
+
+  `app.js` (kein Framework, kein Build-Schritt): lädt beim Start den
+  Sprachkatalog und `/api/config`, füllt Anbieter-/OCR-Engine-/
+  Rückschreibe-Methode-Auswahlboxen inklusive Zugangsdaten-/
+  Verfügbarkeits-Hinweisen, belegt das Formular mit dem zuletzt
+  gespeicherten Stand vor (`settings_store.py`), und ruft bei Klick auf
+  "Dokument analysieren und Kosten schätzen" `/api/analyze` auf und
+  rendert das Ergebnis (Kostenschätzung, Warnungen, Live-Kontingent bei
+  DeepL) - mit denselben Platzhalter-Vorlagen wie die Qt-App
+  (`analysis.summary` usw.), dafür ein kleiner Formatierer für Pythons
+  `{wert:,}`/`{wert:.2f}`-Syntax innerhalb der Katalog-Strings. Die
+  Quelldatei-Auswahl ist im Browser noch ein einfaches Textfeld (ein
+  absoluter Pfad pro Zeile, deutlich als Übergangslösung markiert) - ein
+  `<input type="file">` liefert im Browser aus Sicherheitsgründen keinen
+  echten Dateisystempfad, genau der praktische Grund, warum pywebview
+  mit seinem `create_file_dialog()` gewählt wurde (Schritt 6). Der
+  "Übersetzung starten"-Button existiert schon im Layout, bleibt aber
+  bewusst deaktiviert - `/api/jobs` kommt erst in Schritt 4.
+
+  **Getestet:** Gesamter Testlauf (`tests/`, ohne `test_ui_images_mode.py`):
+  212 passed (vorher 209), 1 skipped - keine Regressionen. Neu in
+  `tests/test_webapp_images_api.py`: `/` liefert echtes `index.html` mit
+  korrektem Content-Type, `/app.js`/`/i18n/de.json` werden mit korrektem
+  Content-Type ausgeliefert (inklusive Prüfung des tatsächlichen JSON-
+  Inhalts), ein Pfad-Traversal-Versuch (`/../job_bridge.py`) liefert 404
+  ohne Dateiinhalt preiszugeben. Zusätzlich von Hand geprüft (nicht nur
+  über die Test-Suite): Server real gestartet, `/`, `/app.js`, `/api/config`
+  und ein echter `/api/analyze`-Aufruf gegen `demo_1_original.png` mit
+  echtem Tesseract-OCR - Kostenschätzung kam mit dem korrekten
+  `max_chars_per_run: 200000` zurück (bestätigt den Schritt-2-Fix).
+
+  **Noch offen (Schritte 4-8 laut Plan):** `/api/jobs`
+  (Start/Status/Abbruch/Ergebnis, eigener Hintergrund-Thread), das
+  Bestätigungs-Gate Ende-zu-Ende inklusive serverseitiger Nachprüfung,
+  der pywebview-Bootstrap mit `create_file_dialog()` statt dem
+  Textfeld-Provisorium, die QA-Bericht-Anzeige, und zuletzt die
+  `review_server.py`-Übergabe.

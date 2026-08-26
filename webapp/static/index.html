@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title data-i18n="app.title">Document Translator</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="page">
+  <header class="app-header">
+    <h1 data-i18n="app.title">Document Translator</h1>
+    <select id="language-select" aria-label="Sprache / Language">
+      <option value="de">Deutsch</option>
+      <option value="en">English</option>
+    </select>
+  </header>
+
+  <!-- Bild-Übersetzungs-Modus - erster Pilot des Umbaus auf lokaler
+       Server + pywebview (Backlog.md 26.08.2026, Plan
+       /root/.claude/plans/moonlit-humming-brook.md). Schritt 3: nur das
+       Formular-Grundgerüst + Analyse, noch im normalen Browser. Kein
+       Job-Start hier (Schritt 4/5), keine native Datei-Auswahl (Schritt
+       6 - pywebview's create_file_dialog() ersetzt das Textfeld unten). -->
+  <section class="card" id="config-card">
+    <h2 data-i18n="config.group">Auftrag konfigurieren</h2>
+
+    <div class="field">
+      <label for="source-paths" data-i18n="field.source">Quelle</label>
+      <textarea id="source-paths" placeholder="Ein Bildpfad pro Zeile"></textarea>
+      <span class="hint">
+        Interimslösung bis Schritt 6 (natives Datei-Auswahlfenster über
+        pywebview) - hier vorerst vollständige, lokale Dateipfade
+        eintragen, ein Pfad pro Zeile.
+      </span>
+    </div>
+
+    <div class="field">
+      <label for="provider" data-i18n="field.provider">Übersetzungsanbieter</label>
+      <select id="provider"></select>
+      <span class="hint" id="provider-hint"></span>
+    </div>
+
+    <div class="field">
+      <label for="source-language" data-i18n="field.source_language">Ausgangssprache</label>
+      <input type="text" id="source-language" data-i18n-placeholder="source_language.placeholder">
+    </div>
+
+    <div class="field">
+      <label for="target-language" data-i18n="field.target_language">Zielsprache</label>
+      <input type="text" id="target-language" value="DE">
+    </div>
+
+    <div class="field">
+      <label for="protected-terms" data-i18n="field.protected_terms">Geschützte Begriffe</label>
+      <textarea id="protected-terms" data-i18n-placeholder="protected.placeholder"></textarea>
+    </div>
+
+    <div class="field">
+      <label for="ocr-engine" data-i18n="field.ocr_engine">OCR-Engine</label>
+      <select id="ocr-engine"></select>
+      <span class="hint warning" id="ocr-engine-hint"></span>
+    </div>
+
+    <div class="field">
+      <label for="inpainting-backend" data-i18n="field.inpainting_backend">Rückschreibe-Methode</label>
+      <select id="inpainting-backend"></select>
+      <span class="hint warning" id="inpainting-backend-hint"></span>
+    </div>
+  </section>
+
+  <section class="card" id="analysis-card">
+    <h2 data-i18n="analysis.group">Analyse und Kostenkontrolle</h2>
+    <button type="button" id="analyze-button" data-i18n="analysis.button">
+      Dokument analysieren und Kosten schätzen
+    </button>
+    <div class="result hidden" id="analysis-result">
+      <p id="analysis-summary"></p>
+      <ul id="analysis-warnings"></ul>
+    </div>
+    <p class="status-line" id="analysis-status"></p>
+  </section>
+
+  <section class="card" id="start-card">
+    <button type="button" class="primary" id="start-button" data-i18n="start.button" disabled>
+      Übersetzung starten
+    </button>
+    <p class="status-line" id="start-status" data-i18n="start.blocked_no_analysis">
+      Bitte zuerst „Dokument analysieren und Kosten schätzen“ ausführen.
+    </p>
+  </section>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

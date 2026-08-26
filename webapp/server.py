@@ -18,10 +18,21 @@ ui.analysis before anything here costs money or writes a file. /api/jobs
 from __future__ import annotations
 
 import json
+import mimetypes
+import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import unquote, urlsplit
 
 from webapp import job_bridge
+
+# webapp/static/ - the real HTML/CSS/JS files built in Schritt 3 (see
+# webapp/static/index.html's own docstring comment and Backlog.md
+# 26.08.2026) - deliberately real files, not a Python string constant
+# like image_translate_cli/review_server.py's _PAGE_HTML, per the
+# migration plan's "echte Dateien statt String" decision.
+STATIC_DIR = (Path(__file__).resolve().parent / "static").resolve()
 
 
 def _config_route(_body: None) -> tuple[int, dict[str, Any]]:
@@ -66,13 +77,50 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self) -> None:  # noqa: N802 - stdlib method name
-        handler = _ROUTES_GET.get(self.path)
-        if handler is None:
+    def _send_static_file(self, path: Path) -> None:
+        try:
+            data = path.read_bytes()
+        except OSError:
+            self._send_json(404, {"ok": False, "errors": [f"Datei nicht gefunden: {self.path}"]})
+            return
+        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_static(self) -> None:
+        # "/" -> index.html; everything else maps 1:1 onto webapp/static/,
+        # e.g. "/app.js" -> webapp/static/app.js, "/i18n/de.json" ->
+        # webapp/static/i18n/de.json (see app.js's loadCatalogue()).
+        # unquote() first (a literal "%2e%2e" must resolve the same as
+        # ".." before the traversal check below, not bypass it), then
+        # resolve() and require the result to stay inside STATIC_DIR - a
+        # request for "/../job_bridge.py" must never be served.
+        raw_path = unquote(urlsplit(self.path).path)
+        relative = raw_path.lstrip("/") or "index.html"
+        candidate = (STATIC_DIR / relative).resolve()
+        if candidate != STATIC_DIR and STATIC_DIR not in candidate.parents:
             self._send_json(404, {"ok": False, "errors": [f"Unbekannter Pfad: {self.path}"]})
             return
-        status, payload = handler(None)
-        self._send_json(status, payload)
+        self._send_static_file(candidate)
+
+    def do_GET(self) -> None:  # noqa: N802 - stdlib method name
+        handler = _ROUTES_GET.get(self.path)
+        if handler is not None:
+            status, payload = handler(None)
+            self._send_json(status, payload)
+            return
+        if urlsplit(self.path).path.startswith("/api/"):
+            # An unmatched /api/* path is a routing error, not a missing
+            # static file - answer with the same JSON 404 shape every
+            # other API error uses instead of silently falling through to
+            # static lookup (which would 404 too, but with a confusingly
+            # file-shaped message for what is really an API typo).
+            self._send_json(404, {"ok": False, "errors": [f"Unbekannter Pfad: {self.path}"]})
+            return
+        self._serve_static()
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib method name
         handler = _ROUTES_POST.get(self.path)
@@ -102,3 +150,28 @@ def create_server(host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer
     port selection relies on.
     """
     return ThreadingHTTPServer((host, port), Handler)
+
+
+def main() -> None:
+    """`python -m webapp.server` - Schritt 3's interim entry point: the
+    static frontend opened in the normal system browser, no pywebview
+    yet (that is Schritt 6's webapp/__main__.py bootstrap, which will
+    call into this module's create_server() instead of opening a browser
+    tab). Blocks in serve_forever() until interrupted - a plain
+    developer-facing dev-server run, not how the shipped app will start.
+    """
+    httpd = create_server()
+    port = httpd.server_address[1]
+    url = f"http://127.0.0.1:{port}/"
+    print(f"PDF-Translator (webapp, Schritt 3 - Bild-Modus): {url}")
+    webbrowser.open(url)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
+
+
+if __name__ == "__main__":
+    main()
