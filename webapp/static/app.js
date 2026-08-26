@@ -17,8 +17,14 @@
  * davon, ob hier überhaupt zuvor analysiert wurde - dieses Gate ist
  * Verteidigung in der Tiefe, keine alleinige Kontrolle.
  *
- * Keine native Datei-/Ordner-Auswahl (Schritt 6 - die Textfelder für
- * Quellpfade/Zielordner sind eine bewusste Übergangslösung).
+ * Schritt 6: läuft diese Seite in pywebview (webapp/__main__.py), stellt
+ * es `window.pywebview.api.pick_images()`/`pick_output_dir()` bereit -
+ * echte native OS-Dialoge, die die beiden Textfelder ersetzen (ein
+ * `<input type="file">` kann im normalen Browser aus Sicherheitsgründen
+ * keinen echten Dateisystempfad liefern, siehe webapp/__main__.py's
+ * Api-Klasse). Feature-Erkennung statt Annahme: im normalen Browser
+ * (python -m webapp.server) bleiben die Textfelder die einzige
+ * Möglichkeit, `window.pywebview` existiert dort schlicht nicht.
  *
  * Kein Framework/Build-Schritt, exakt wie image_translate_cli/review_server.py's
  * eigenes Frontend und wie im Plan festgehalten ("echte Dateien statt
@@ -451,6 +457,35 @@ async function runCancel() {
   }
 }
 
+/* Schritt 6 - läuft diese Seite in pywebview, ersetzt window.pywebview.api's
+ * echte native Dialoge die beiden Textfeld-Provisorien. Aufgerufen sowohl
+ * sofort (falls pywebview schon vor diesem Skript bereit war) als auch
+ * über das "pywebviewready"-Event (der übliche, dokumentierte Weg, auf
+ * die Bridge zu warten - sie ist nicht zwingend schon beim Laden der
+ * Seite injiziert).
+ */
+function enableNativeDialogs() {
+  document.getElementById("pick-images-button").classList.remove("hidden");
+  document.getElementById("source-paths-hint").classList.add("hidden");
+  document.getElementById("pick-output-dir-button").classList.remove("hidden");
+  document.getElementById("output-dir-hint").classList.add("hidden");
+}
+
+async function runPickImages() {
+  const selection = await window.pywebview.api.pick_images();
+  if (!selection.length) return; // Dialog abgebrochen - Feld unverändert lassen
+  document.getElementById("source-paths").value = selection.join("\n");
+  // Programmatisches Setzen von .value löst kein "input"-Event aus - der
+  // price-relevant-Feld-Listener unten würde sonst nie feuern.
+  invalidateAnalysis();
+}
+
+async function runPickOutputDir() {
+  const selection = await window.pywebview.api.pick_output_dir();
+  if (!selection) return; // Dialog abgebrochen
+  document.getElementById("output-dir").value = selection;
+}
+
 async function init() {
   await loadCatalogue(currentLanguage);
   await loadConfig();
@@ -471,6 +506,14 @@ async function init() {
   document.getElementById("confirm-checkbox").addEventListener("change", updateStartState);
   document.getElementById("start-button").addEventListener("click", runStart);
   document.getElementById("cancel-button").addEventListener("click", runCancel);
+  document.getElementById("pick-images-button").addEventListener("click", runPickImages);
+  document.getElementById("pick-output-dir-button").addEventListener("click", runPickOutputDir);
+
+  if (window.pywebview) {
+    enableNativeDialogs();
+  } else {
+    window.addEventListener("pywebviewready", enableNativeDialogs);
+  }
 
   // Jede Änderung an einem preisrelevanten Feld entwertet eine
   // vorhandene Analyse - mirrors ui/app.py's _invalidate_analysis()-

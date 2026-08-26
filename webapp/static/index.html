@@ -19,22 +19,29 @@
   <!-- Bild-Übersetzungs-Modus - erster Pilot des Umbaus auf lokaler
        Server + pywebview (Backlog.md 26.08.2026, Plan
        /root/.claude/plans/moonlit-humming-brook.md). Schritt 5: das
-       Bestätigungs-Gate ist jetzt Ende-zu-Ende verdrahtet (Start-Button
-       erst nach erfolgreichem /api/analyze UND angehakter Checkbox
-       nutzbar - serverseitig prüft /api/jobs unabhängig davon noch
-       einmal nach, siehe webapp/job_bridge.py::start_job()). Keine
-       native Datei-/Ordner-Auswahl (Schritt 6 - pywebview's
-       create_file_dialog() ersetzt die beiden Textfelder unten). -->
+       Bestätigungs-Gate ist Ende-zu-Ende verdrahtet (Start-Button erst
+       nach erfolgreichem /api/analyze UND angehakter Checkbox nutzbar -
+       serverseitig prüft /api/jobs unabhängig davon noch einmal nach,
+       siehe webapp/job_bridge.py::start_job()). Schritt 6: wenn diese
+       Seite in pywebview läuft (webapp/__main__.py), ersetzen zwei
+       "...auswählen"-Buttons neben den Textfeldern unten die manuelle
+       Pfadeingabe durch echte native Datei-/Ordner-Dialoge
+       (pywebview.api.pick_images()/pick_output_dir(), siehe app.js) -
+       im normalen Browser (python -m webapp.server) bleiben die
+       Textfelder die einzige Möglichkeit, da ein <input type="file">
+       dort keinen echten Dateisystempfad preisgeben kann. -->
   <section class="card" id="config-card">
     <h2 data-i18n="config.group">Auftrag konfigurieren</h2>
 
     <div class="field">
       <label for="source-paths" data-i18n="field.source">Quelle</label>
       <textarea id="source-paths" placeholder="Ein Bildpfad pro Zeile"></textarea>
-      <span class="hint">
-        Interimslösung bis Schritt 6 (natives Datei-Auswahlfenster über
-        pywebview) - hier vorerst vollständige, lokale Dateipfade
-        eintragen, ein Pfad pro Zeile.
+      <button type="button" id="pick-images-button" class="hidden" data-i18n="dialog.choose_images">
+        Bilder auswählen
+      </button>
+      <span class="hint" id="source-paths-hint">
+        Interimslösung bis pywebview verfügbar ist - hier vorerst
+        vollständige, lokale Dateipfade eintragen, ein Pfad pro Zeile.
       </span>
     </div>
 
@@ -97,10 +104,12 @@
     <div class="field">
       <label for="output-dir" data-i18n="dialog.choose_output_dir">Zielordner wählen</label>
       <input type="text" id="output-dir" placeholder="/pfad/zum/zielordner">
-      <span class="hint">
-        Interimslösung bis Schritt 6 (natives Auswahlfenster über
-        pywebview) - hier vorerst einen vollständigen, lokalen
-        Ordnerpfad eintragen.
+      <button type="button" id="pick-output-dir-button" class="hidden" data-i18n="dialog.choose_output_dir">
+        Zielordner wählen
+      </button>
+      <span class="hint" id="output-dir-hint">
+        Interimslösung bis pywebview verfügbar ist - hier vorerst einen
+        vollständigen, lokalen Ordnerpfad eintragen.
       </span>
     </div>
 

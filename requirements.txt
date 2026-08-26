@@ -4,3 +4,16 @@ requests
 python-docx
 lxml
 PySide6
+# webapp/ (lokaler Server + pywebview, Backlog.md 26.08.2026, Schritt 6):
+# pywebview braucht qtpy, um PySide6/QtWebEngine (oben) als GUI-Backend zu
+# nutzen - explizit erzwungen via gui="qt" in webapp/__main__.py, damit
+# keine zweite, neue GUI-Bibliothek (z. B. GTK) nötig wird.
+pywebview
+qtpy
+# Bekannte Installationsfalle (beim Bauen dieses Schritts angetroffen):
+# pywebviews eigene Abhängigkeit `proxy_tools` hat ein sehr altes
+# setup.py, das an einem von Debian/Ubuntu gepatchten alten `setuptools`
+# (z. B. 68.x) mit "AttributeError: install_layout" scheitert. Falls
+# dieser Fehler beim Installieren auftritt: vorher
+# `pip install --upgrade setuptools` ausführen und danach erneut
+# installieren.

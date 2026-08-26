@@ -114,6 +114,14 @@ header.app-header h1 {
     color: #b5482a;
 }
 
+/* "...auswählen"-Buttons (pywebview.api.pick_images()/pick_output_dir(),
+   Schritt 6) - a small top margin separates them from the textarea/input
+   above without a full field-sized gap; hidden by default, shown only
+   once app.js detects it's actually running inside pywebview. */
+.field button {
+    margin-top: 6px;
+}
+
 input[type="text"],
 textarea,
 select {
@@ -206,7 +214,14 @@ button.primary:disabled {
     color: var(--muted);
 }
 
-.result.hidden {
+/* Generic utility, not just for .result - also toggled on #cancel-button
+   (Schritt 5) and the pywebview pick-buttons/hints (Schritt 6). A bug
+   here would be silent (the element just stays visible instead of
+   erroring), so this MUST stay a plain, unscoped ".hidden" rule rather
+   than something like ".result.hidden" that only matches one element
+   shape - a mistake caught and fixed once already while building
+   Schritt 6, see Backlog.md's entry for that step. */
+.hidden {
     display: none;
 }
 

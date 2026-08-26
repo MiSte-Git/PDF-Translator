@@ -4770,3 +4770,97 @@
   (`webapp/__main__.py`, `create_file_dialog()` ersetzt die beiden
   Textfelder für Quelle/Zielordner), die QA-Bericht-Anzeige, und zuletzt
   die `review_server.py`-Übergabe.
+
+  **Update (26.08.2026, direkt im Anschluss) - Schritt 6 abgeschlossen:
+  pywebview-Bootstrap mit echten nativen Datei-/Ordner-Dialogen.**
+  Neu: `webapp/__main__.py` (`python -m webapp`) - startet
+  `create_server()` wie bisher auf einem Hintergrund-Thread, öffnet aber
+  jetzt statt "Seite im normalen Browser öffnen" (Schritt 3) ein echtes
+  natives `pywebview`-Fenster (`webview.create_window(...)` +
+  `webview.start(gui="qt")`) mit einer kleinen `Api`-Klasse
+  (`pick_images()`/`pick_output_dir()`), die per `js_api=` an das Fenster
+  gebunden und dem Frontend als `window.pywebview.api.*` sichtbar wird.
+  `app.js` erkennt per Feature-Test (`window.pywebview` vorhanden ODER
+  `pywebviewready`-Event abwarten), ob es in pywebview oder einem
+  normalen Browser läuft, und blendet nur dann zwei neue
+  "...auswählen"-Buttons neben den Quell-/Zielordner-Textfeldern ein, die
+  echte OS-Dialoge öffnen (`webview.FileDialog.OPEN`/`.FOLDER`) statt der
+  bisherigen manuellen Pfadeingabe - im normalen Browser (`python -m
+  webapp.server`) bleiben die Textfelder unverändert die einzige
+  Möglichkeit, da ein `<input type="file">` dort keinen echten
+  Dateisystempfad preisgibt.
+
+  Als GUI-Backend wurde bewusst `gui="qt"` gewählt statt GTK: pywebview
+  braucht dafür zusätzlich nur `qtpy` (dünne PySide6/PyQt-Abstraktion),
+  nutzt aber ansonsten dasselbe PySide6/QtWebEngine, das die Qt-App
+  ohnehin schon voraussetzt - keine neue, schwere GUI-Abhängigkeit.
+  `requirements.txt` bekam `pywebview` und `qtpy` dazu, mit einem
+  Kommentarblock zu einer echten, in dieser Sandbox nachgewiesenen
+  Installationsfalle: pywebviews Abhängigkeit `proxy_tools` (einzige
+  verfügbare Version 0.1.0) hat ein sehr altes `setup.py`, das gegen ein
+  neueres, distro-gepatchtes `setuptools` (hier: 68.1.2) mit
+  `AttributeError: install_layout. Did you mean: 'install_platlib'?`
+  fehlschlägt - `--no-build-isolation` behebt das NICHT, da weiterhin das
+  Vorhandene System-`setuptools` genutzt wird. Verifizierter Fix (mit
+  geleertem pip-Cache gegengeprüft, damit kein gecachtes Wheel den realen
+  Fehler verdeckt): vor der Installation `pip install --upgrade
+  "setuptools>=70"` ausführen. Relevant nur, falls Michael beim
+  Einrichten auf seinem echten Rechner denselben Fehler sieht.
+
+  `webapp/__init__.py`s Docstring wurde präzisiert: die Regel "kein
+  PySide6-Import" gilt weiterhin für die HTTP-Schicht selbst
+  (`server.py`, `job_bridge.py`, `settings_store.py` und alles, was diese
+  aus `ui`/`pipeline` mitziehen) - `__main__.py` ist die eine bewusste
+  Ausnahme, da sein einziger Zweck das Öffnen eines nativen GUI-Fensters
+  ist und es damit zwangsläufig über pywebviews eigenes
+  Qt/QtWebEngine-Backend von Qt abhängt. Diese Abhängigkeit bleibt auf
+  `__main__.py` beschränkt - der von dort auf einem Hintergrund-Thread
+  gestartete HTTP-Server selbst bleibt exakt so Qt-frei wie zuvor (erneut
+  per `sys.meta_path`-Sperrtest nachgewiesen, diesmal nur noch gezielt für
+  `webapp.server`/`webapp.job_bridge`, nicht mehr für `webapp.__main__`,
+  das erwartungsgemäß Qt braucht).
+
+  **Echter, im Bugfix endender Fund beim Testen (nicht durch bloßes
+  Lesen des Codes):** Während der Regressionsprüfungen für die zwei neuen
+  Auswahl-Buttons (die wie `#cancel-button` aus Schritt 5 das Muster
+  `class="hidden"` nutzen) fiel auf, dass in `app.css` bislang nur die
+  eng gefasste Regel `.result.hidden { display: none; }` existierte -
+  eine bloße `class="hidden"` ohne die `.result`-Elternklasse hat also
+  NIE gegriffen. Das bedeutet: der Abbrechen-Button aus Schritt 5 war seit
+  dem Versand an Michaels Gerät durchgehend sichtbar, obwohl `app.js`s
+  `classList.add("hidden")`/`.remove("hidden")`-Aufrufe die ganze Zeit
+  korrekt liefen - nur visuell wirkungslos. Behoben durch eine generische,
+  ungebundene `.hidden { display: none; }`-Regel in `app.css`, mit einem
+  erklärenden Kommentar, damit derselbe Fehler nicht bei einem künftigen
+  neuen Element wiederholt wird. Diese Korrektur ist bereits Teil des
+  heute ausgelieferten `app.css`.
+
+  **Getestet:** Neu `tests/test_webapp_main.py` (7 Tests) - `Api.
+  pick_images()`/`pick_output_dir()` gegen ein gefälschtes
+  `webview.active_window()` (Auswahl/Abbruch/kein-Fenster-Fall), sowie ein
+  Test, der `main()` mit gefälschten `webview.create_window()`/`.start()`
+  aufruft und prüft, dass Titel, URL, `js_api`-Instanz und `gui="qt"`
+  korrekt übergeben werden, ohne dass tatsächlich ein Fenster geöffnet
+  wird. Ein echtes natives Datei-/Ordner-Dialogfenster lässt sich in
+  dieser Sandbox nicht per Klick durchsteuern - dieselbe bereits
+  dokumentierte Grenze wie bei `tests/test_ui_images_mode.py`s
+  Qt-Dialogen. Zusätzlich einmal von Hand ein ECHTES pywebview-Fenster
+  unter `xvfb-run` (echtes virtuelles X, nicht `offscreen` - das schlug
+  mit GL/Vulkan-Fehlern fehl) mit echtem QtWebEngine gestartet
+  (`QTWEBENGINE_CHROMIUM_FLAGS="--no-sandbox --disable-gpu"`, nötig weil
+  diese Sandbox als root läuft - auf Michaels echtem Rechner nicht
+  relevant) und per `evaluate_js()` geprüft: Fenstertitel korrekt,
+  `window.pywebview.api.pick_images`/`pick_output_dir` beide als
+  Funktionen vorhanden, alle 4 Anbieter geladen, Start-Button korrekt
+  deaktiviert, und - nach dem CSS-Fix - beide Auswahl-Buttons sichtbar
+  sowie der alte Hinweistext-Hinweis für die Quellpfade korrekt
+  ausgeblendet. Zusätzlich Playwright-Regressionsprüfungen im normalen
+  Browser ergänzt: ohne `window.pywebview` bleiben beide neuen Buttons
+  ausgeblendet und der Interims-Hinweistext sichtbar - das ist exakt der
+  Fall, in dem der oben beschriebene CSS-Fehler beim Abbrechen-Button
+  bisher unbemerkt blieb. Gesamter Testlauf (`tests/`, ohne
+  `test_ui_images_mode.py`): 228 passed (vorher 221), 1 skipped - keine
+  Regressionen.
+
+  **Noch offen (Schritte 7-8 laut Plan):** die QA-Bericht-Anzeige, und
+  zuletzt die `review_server.py`-Übergabe.
