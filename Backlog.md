@@ -4646,3 +4646,66 @@
   der pywebview-Bootstrap mit `create_file_dialog()` statt dem
   Textfeld-Provisorium, die QA-Bericht-Anzeige, und zuletzt die
   `review_server.py`-Übergabe.
+
+  **Update (26.08.2026, direkt im Anschluss) - Schritt 4 abgeschlossen:
+  `/api/jobs` (Start/Status/Abbruch/Ergebnis).** Erste Route mit echten
+  Nebenwirkungen (kostet Anbieter-Budget, schreibt Dateien) - deshalb laut
+  Plan der riskanteste Teil bisher (Thread-Lebenszyklus,
+  Abbruch-Race, State-Konsistenz unter gleichzeitigem Poll+Schreiben) und
+  am gründlichsten getestet.
+
+  `webapp/job_bridge.py::start_job()` prüft VOR dem Start dieselben
+  Fail-Fast-Bedingungen serverseitig noch einmal, die `ui/app.py::_start()`
+  auch prüft - `validation_errors()`, `credential_status()`,
+  `ocr_engine_available()`, `inpainting_backend_available()`. Das ist
+  bewusst redundant zu einem vorherigen `/api/analyze`-Aufruf: das
+  RoadMap-Leitprinzip verlangt die Prüfung vor JEDEM Lauf, nicht nur
+  irgendwann vorher im selben Browser-Tab - ein Client, der direkt
+  `/api/jobs` aufruft ohne vorher zu analysieren, wird genauso abgewiesen.
+  Die eigentliche Verdrahtung im Frontend (Button erst nach erfolgreicher
+  Analyse aktiv) ist Schritt 5, nicht dieser.
+
+  Läuft auf einem eigenen `threading.Thread` (kein `QThreadPool` - `webapp/`
+  hat keine Qt-Event-Loop) und ruft exakt dieselbe `run_image_batch_job()`
+  auf, die auch `ui/workers.py::ImageTranslationWorker` schon verwendet -
+  gleiche kooperative Abbruch-Logik über ein `threading.Event`
+  (`should_cancel`), gleiche Progress-/Stats-/Total-Callbacks, nur per
+  HTTP-Polling statt Qt-Signalen abgefragt (750ms-1s laut Plan). Job-Status
+  liegt komplett im Arbeitsspeicher (kein Neustart-sicherer Zustand - dieselbe
+  "ein lokaler Nutzer, ein Serverprozess"-Annahme wie schon bei
+  `settings_store.py`), immer nur EIN aktiver Lauf gleichzeitig
+  (`_ACTIVE_JOB_ID`) - ein zweiter `/api/jobs`-Aufruf während eines
+  laufenden Jobs wird mit "Ein Lauf ist bereits aktiv." abgelehnt, exakt
+  der ausdrückliche Nicht-Ziel-Punkt des Plans ("kein Mehrfach-Job-Betrieb").
+
+  `webapp/server.py` bekam dafür erstmals dynamisches Routing
+  (`/api/jobs/<id>/status`/`/cancel`/`/result`, per Regex statt einer
+  Templating-Bibliothek - passt zum bestehenden "kein Framework"-Stil).
+
+  **Getestet:** Neue `tests/test_webapp_jobs_api.py` (8 Tests, echte
+  HTTP-Aufrufe, kein Mocking von `webapp.server`/`webapp.job_bridge`
+  selbst): ein voller Ende-zu-Ende-Lauf mit einem echten generierten
+  Testbild, echtem Tesseract-OCR und einem `FakeProvider` (per
+  `monkeypatch` auf `ui.image_job.build_provider` injiziert, exakt wie
+  bereits `tests/test_image_batch_job.py` es für `run_image_batch_job()`
+  selbst tut - `job_bridge.py` bietet bewusst keine `provider=`-Injektion
+  für HTTP-Aufrufer an, ein Web-Client geht immer über die echte
+  Registry), Status-Polling bis "done", Ergebnis-Abruf inkl. echter
+  Ausgabedatei und QA-Bericht auf der Platte; Ablehnung bei leerer
+  Quelldateiliste, fehlendem Zielordner, nicht verfügbarer OCR-Engine
+  (`google_vision` - in dieser Umgebung nachweislich nicht konfiguriert,
+  siehe Schritt-2/3-Testdatei) und fehlendem API-Schlüssel; ein zweiter
+  Job während eines laufenden (mit einem künstlich verlangsamten
+  `FakeProvider`, um die Race deterministisch statt zeitabhängig zu
+  testen) wird abgelehnt; unbekannte Job-IDs und ein Abbruch-Versuch nach
+  Abschluss liefern die erwarteten Fehlermeldungen. Gesamter Testlauf
+  (`tests/`, ohne `test_ui_images_mode.py`): 220 passed (vorher 212), 1
+  skipped - keine Regressionen. `webapp.server`/`webapp.job_bridge`
+  importieren weiterhin nachweislich ohne `PySide6`.
+
+  **Noch offen (Schritte 5-8 laut Plan):** das Bestätigungs-Gate
+  Ende-zu-Ende im Frontend verdrahtet (Start-Button erst nach
+  erfolgreicher Analyse nutzbar, mit gezieltem Test gegen die
+  serverseitige Nachprüfung ohne vorheriges `/api/analyze`), der
+  pywebview-Bootstrap mit `create_file_dialog()`, die QA-Bericht-Anzeige,
+  und zuletzt die `review_server.py`-Übergabe.

@@ -9,16 +9,18 @@ JSON serialization only - all actual logic (which providers exist, what
 an analysis costs) lives in webapp/job_bridge.py and can be tested there
 without any HTTP machinery involved. See job_bridge.py's own docstring.
 
-This module covers /api/config and /api/analyze only (Schritt 2 of the
-migration plan) - both read-only, neither has a side effect, on purpose:
-they prove the HTTP foundation and the reuse of pipeline.registry/
-ui.analysis before anything here costs money or writes a file. /api/jobs
-(which does both) is Schritt 4.
+Schritt 2 added /api/config and /api/analyze (both read-only). Schritt 4
+adds /api/jobs (start a batch translation on a background thread) plus
+its polling/cancel/result companions - the first routes with real side
+effects (spends provider budget, writes files), which is why job_bridge's
+own fail-fast checks (see start_job()'s docstring) matter as much as the
+HTTP plumbing here.
 """
 from __future__ import annotations
 
 import json
 import mimetypes
+import re
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -44,6 +46,26 @@ def _analyze_route(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     return (200 if result.get("ok") else 400), result
 
 
+def _start_job_route(body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    result = job_bridge.start_job(body)
+    return (200 if result.get("ok") else 400), result
+
+
+def _job_status_route(job_id: str) -> tuple[int, dict[str, Any]]:
+    result = job_bridge.job_status(job_id)
+    return (200 if result.get("ok") else 404), result
+
+
+def _job_cancel_route(job_id: str, _body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    result = job_bridge.cancel_job(job_id)
+    return (200 if result.get("ok") else 404), result
+
+
+def _job_result_route(job_id: str) -> tuple[int, dict[str, Any]]:
+    result = job_bridge.job_result(job_id)
+    return (200 if result.get("ok") else 404), result
+
+
 # GET routes take no body; POST routes take the parsed JSON body (a dict -
 # do_POST() below rejects anything else with a 400 before the route ever
 # runs, so handlers can assume `body` is a dict).
@@ -52,14 +74,24 @@ _ROUTES_GET: dict[str, Callable[[None], tuple[int, dict[str, Any]]]] = {
 }
 _ROUTES_POST: dict[str, Callable[[dict[str, Any]], tuple[int, dict[str, Any]]]] = {
     "/api/analyze": _analyze_route,
+    "/api/jobs": _start_job_route,
 }
+
+# Dynamic routes ("/api/jobs/<id>/...") - a plain dict can't express a
+# variable segment, so these are matched separately, checked after the
+# exact-path dicts above miss. Kept to exactly the three shapes Schritt 4
+# needs rather than a general path-templating mechanism - nothing else in
+# this app needs more than that yet.
+_JOB_STATUS_RE = re.compile(r"^/api/jobs/([^/]+)/status$")
+_JOB_CANCEL_RE = re.compile(r"^/api/jobs/([^/]+)/cancel$")
+_JOB_RESULT_RE = re.compile(r"^/api/jobs/([^/]+)/result$")
 
 
 class Handler(BaseHTTPRequestHandler):
-    """Exact-path routing only, matching review_server.py's Handler - no
-    dynamic segments needed yet (/api/jobs/<id>/... arrives in Schritt 4
-    and will need its own dispatch, not added here to keep this step's
-    diff reviewable)."""
+    """Exact-path routing for /api/config, /api/analyze, /api/jobs (POST,
+    starts a job); /api/jobs/<id>/status|cancel|result use the three
+    regexes above instead, matching review_server.py's Handler pattern
+    otherwise (no framework, no path-templating library)."""
 
     server_version = "PDFTranslatorWebapp/0.1"
 
@@ -107,12 +139,23 @@ class Handler(BaseHTTPRequestHandler):
         self._send_static_file(candidate)
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib method name
-        handler = _ROUTES_GET.get(self.path)
+        path = urlsplit(self.path).path
+        handler = _ROUTES_GET.get(path)
         if handler is not None:
             status, payload = handler(None)
             self._send_json(status, payload)
             return
-        if urlsplit(self.path).path.startswith("/api/"):
+        status_match = _JOB_STATUS_RE.match(path)
+        if status_match is not None:
+            status, payload = _job_status_route(status_match.group(1))
+            self._send_json(status, payload)
+            return
+        result_match = _JOB_RESULT_RE.match(path)
+        if result_match is not None:
+            status, payload = _job_result_route(result_match.group(1))
+            self._send_json(status, payload)
+            return
+        if path.startswith("/api/"):
             # An unmatched /api/* path is a routing error, not a missing
             # static file - answer with the same JSON 404 shape every
             # other API error uses instead of silently falling through to
@@ -123,8 +166,10 @@ class Handler(BaseHTTPRequestHandler):
         self._serve_static()
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib method name
-        handler = _ROUTES_POST.get(self.path)
-        if handler is None:
+        path = urlsplit(self.path).path
+        handler = _ROUTES_POST.get(path)
+        cancel_match = None if handler is not None else _JOB_CANCEL_RE.match(path)
+        if handler is None and cancel_match is None:
             self._send_json(404, {"ok": False, "errors": [f"Unbekannter Pfad: {self.path}"]})
             return
         length = int(self.headers.get("Content-Length", 0) or 0)
@@ -137,7 +182,10 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(body, dict):
             self._send_json(400, {"ok": False, "errors": ["Request-Body muss ein JSON-Objekt sein."]})
             return
-        status, payload = handler(body)
+        if handler is not None:
+            status, payload = handler(body)
+        else:
+            status, payload = _job_cancel_route(cancel_match.group(1), body)
         self._send_json(status, payload)
 
 

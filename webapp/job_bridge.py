@@ -10,6 +10,9 @@ function here, serialize the result), all the actual logic lives here.
 """
 from __future__ import annotations
 
+import threading
+import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +24,8 @@ from pipeline.registry import (
     ocr_engine_available,
 )
 from pipeline.translation.cost_control import DEFAULT_MAX_CHARS_PER_RUN
-from ui.analysis import analyze_request
+from ui.analysis import PRICING, analyze_request
+from ui.image_job import ImageBatchJobResult, ImageBatchStats, run_image_batch_job
 from ui.models import EmbeddedImageMode, TranslationMode, TranslationRequest
 from ui.settings import credential_status
 from webapp import settings_store
@@ -137,4 +141,250 @@ def analyze(body: dict[str, Any]) -> dict[str, Any]:
             "live_characters_used": cost.live_characters_used,
             "live_character_limit": cost.live_character_limit,
         },
+    }
+
+
+# --- /api/jobs (Schritt 4) ----------------------------------------------
+#
+# In-memory job state only, no persistence across a server restart - the
+# same "single local user, single server process" assumption the module
+# docstring above already makes for settings_store.py, and the same
+# reasoning image_translate_cli/review_server.py's own in-memory state
+# uses. Runs on a plain threading.Thread (not QThreadPool - webapp/ has
+# no Qt event loop to integrate with) and mirrors
+# ui/workers.py::ImageTranslationWorker exactly: same run_image_batch_job()
+# call, same cooperative threading.Event cancellation, same
+# progress/stats/total callback wiring - just polled via HTTP instead of
+# Qt signals.
+#
+# Only one job may run at a time (RoadMap.md/plan's explicit non-goal:
+# "kein Mehrfach-Job-Betrieb") - enforced by _ACTIVE_JOB_ID below, not by
+# _JOBS itself, so a finished job's status/result stay queryable by id
+# after a new one starts.
+_JOBS_LOCK = threading.Lock()
+_JOBS: dict[str, "_JobState"] = {}
+_ACTIVE_JOB_ID: str | None = None
+
+
+def _snapshot_stats(stats: ImageBatchStats) -> dict[str, Any]:
+    # Copied into plain ints/bools under the lock, never the live
+    # ImageBatchStats object itself - same "snapshot before crossing the
+    # thread boundary" reasoning as ui/workers.py::_copy_image_batch_stats(),
+    # just for a lock instead of a Qt signal.
+    return {
+        "files_processed": stats.files_processed,
+        "files_total": stats.files_total,
+        "translated": stats.translated,
+        "skipped": stats.skipped,
+        "failed": stats.failed,
+        "chars_sent": stats.chars_sent,
+        "cancelled": stats.cancelled,
+    }
+
+
+@dataclass
+class _JobState:
+    id: str
+    request: TranslationRequest
+    output_dir: Path
+    max_chars_per_run: int
+    status: str = "running"  # "running" | "done" | "failed" | "cancelled"
+    progress_message: str = ""
+    stats: dict[str, Any] = field(
+        default_factory=lambda: {
+            "files_processed": 0,
+            "files_total": 0,
+            "translated": 0,
+            "skipped": 0,
+            "failed": 0,
+            "chars_sent": 0,
+            "cancelled": False,
+        }
+    )
+    error: str | None = None
+    result: ImageBatchJobResult | None = None
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+
+
+def start_job(body: dict[str, Any]) -> dict[str, Any]:
+    """Backs POST /api/jobs. Re-runs every one of ui/app.py::_start()'s
+    fail-fast checks server-side (validation_errors(), credential_status(),
+    ocr_engine_available(), inpainting_backend_available()) - the
+    RoadMap.md Leitprinzip ("jeder kostenpflichtige Lauf braucht Analyse,
+    Kostenschätzung und ausdrückliche Bestätigung vor der Ausführung") is
+    NOT satisfied by the frontend having called /api/analyze at some
+    earlier point; a client that skips straight to /api/jobs must be
+    rejected here exactly as if it had never analyzed at all. The actual
+    confirmation-gate WIRING (frontend only enables the button after a
+    successful analyze) is Schritt 5 - this function's checks are the
+    server half of that gate and work standalone already.
+    """
+    global _ACTIVE_JOB_ID
+
+    try:
+        request = _request_from_json(body)
+    except AnalyzeRequestError as exc:
+        return {"ok": False, "errors": [str(exc)]}
+
+    errors = request.validation_errors()
+    if errors:
+        return {"ok": False, "errors": errors}
+    if credential_status(request.provider) == "credential.missing":
+        return {"ok": False, "errors": [f'Kein API-Schlüssel für "{request.provider}" hinterlegt.']}
+    if not ocr_engine_available(request.ocr_engine):
+        return {
+            "ok": False,
+            "errors": [f'OCR-Engine "{request.ocr_engine}" ist auf diesem System nicht verfügbar.'],
+        }
+    if not inpainting_backend_available(request.inpainting_backend):
+        return {
+            "ok": False,
+            "errors": [
+                f'Rückschreibe-Methode "{request.inpainting_backend}" ist auf diesem System nicht verfügbar.'
+            ],
+        }
+
+    output_dir_raw = body.get("output_dir")
+    if not isinstance(output_dir_raw, str) or not output_dir_raw.strip():
+        return {"ok": False, "errors": ["Zielordner fehlt."]}
+    output_dir = Path(output_dir_raw)
+
+    max_chars = body.get("max_chars_per_run")
+    max_chars = int(max_chars) if max_chars else settings_store.load().get("max_chars", DEFAULT_MAX_CHARS_PER_RUN)
+
+    with _JOBS_LOCK:
+        if _ACTIVE_JOB_ID is not None and _JOBS[_ACTIVE_JOB_ID].status == "running":
+            return {"ok": False, "errors": ["Ein Lauf ist bereits aktiv."]}
+        job = _JobState(id=uuid.uuid4().hex, request=request, output_dir=output_dir, max_chars_per_run=max_chars)
+        job.stats["files_total"] = len(request.source_paths)
+        _JOBS[job.id] = job
+        _ACTIVE_JOB_ID = job.id
+
+    def _progress(message: str) -> None:
+        with _JOBS_LOCK:
+            job.progress_message = message
+
+    def _stats(stats: ImageBatchStats) -> None:
+        with _JOBS_LOCK:
+            job.stats = _snapshot_stats(stats)
+
+    def _total(count: int) -> None:
+        with _JOBS_LOCK:
+            job.stats["files_total"] = count
+
+    def _run() -> None:
+        global _ACTIVE_JOB_ID
+        try:
+            result = run_image_batch_job(
+                list(request.source_paths),
+                output_dir,
+                request.provider,
+                PRICING[request.provider],
+                request.target_language,
+                request.source_language,
+                list(request.protected_terms),
+                job.max_chars_per_run,
+                ocr_engine_name=request.ocr_engine,
+                inpainting_backend_name=request.inpainting_backend,
+                progress_callback=_progress,
+                stats_callback=_stats,
+                should_cancel=job.cancel_event.is_set,
+                total_callback=_total,
+            )
+        except Exception as exc:  # noqa: BLE001 - mirrors ImageTranslationWorker.run()'s own catch-all
+            with _JOBS_LOCK:
+                job.status = "failed"
+                job.error = f"{type(exc).__name__}: {exc}"
+        else:
+            with _JOBS_LOCK:
+                job.result = result
+                job.stats = _snapshot_stats(result.stats)
+                job.status = "cancelled" if result.stats.cancelled else "done"
+        finally:
+            with _JOBS_LOCK:
+                if _ACTIVE_JOB_ID == job.id:
+                    _ACTIVE_JOB_ID = None
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"ok": True, "job_id": job.id}
+
+
+def job_status(job_id: str) -> dict[str, Any]:
+    """Backs GET /api/jobs/<id>/status - polled every 750ms-1s by app.js
+    (see the migration plan's "Polling statt SSE/WebSockets"-Entscheidung).
+    Returns a flat dict merging ImageBatchStats' fields directly at the
+    top level (files_processed/files_total/translated/skipped/failed/
+    chars_sent/cancelled) rather than nesting them under a "stats" key -
+    keeps app.js's polling code a single flat read, no path-drilling.
+    """
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if job is None:
+            return {"ok": False, "errors": ["Unbekannter Job."]}
+        return {
+            "ok": True,
+            "status": job.status,
+            "progress_message": job.progress_message,
+            "error": job.error,
+            **job.stats,
+        }
+
+
+def cancel_job(job_id: str) -> dict[str, Any]:
+    """Backs POST /api/jobs/<id>/cancel - mirrors
+    ImageTranslationWorker.request_cancel(): only sets the cooperative
+    threading.Event, does not block waiting for the run to actually stop
+    (run_image_batch_job() polls should_cancel() between files - see that
+    function's own docstring on when cancellation takes effect)."""
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if job is None:
+            return {"ok": False, "errors": ["Unbekannter Job."]}
+        if job.status != "running":
+            return {"ok": False, "errors": ["Lauf ist nicht mehr aktiv."]}
+        job.cancel_event.set()
+        return {"ok": True}
+
+
+def job_result(job_id: str) -> dict[str, Any]:
+    """Backs GET /api/jobs/<id>/result - only meaningful once status is
+    "done"/"cancelled" (a cancelled batch still keeps every file finished
+    before the cancellation, see run_image_batch_job()'s docstring, so its
+    partial file list is real and worth returning too, not just an
+    error). has_correctable_regions mirrors the exact condition
+    ui/app.py's correction-dialog button visibility uses: whether this
+    file's ImageTranslationStats.replacements (successfully translated
+    regions, the same list handed to inpainting_backend.apply()) is
+    non-empty - see pipeline/images/translate_image.py's
+    ImageTranslationStats.replacements docstring.
+    """
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if job is None:
+            return {"ok": False, "errors": ["Unbekannter Job."]}
+        if job.status == "running":
+            return {"ok": False, "errors": ["Lauf ist noch nicht abgeschlossen."]}
+        if job.status == "failed":
+            return {"ok": False, "errors": [job.error or "Lauf fehlgeschlagen."]}
+        result = job.result
+
+    assert result is not None  # status done/cancelled always sets .result, see _run() above
+    files = [
+        {
+            "source": str(item.source_path),
+            "output": str(item.output_path),
+            "qa_report": str(item.qa_report_path),
+            "translated": item.stats.translated,
+            "skipped": item.stats.skipped,
+            "failed": item.stats.failed,
+            "chars_sent": item.stats.chars_sent,
+            "has_correctable_regions": bool(item.stats.replacements),
+        }
+        for item in result.stats.results
+    ]
+    return {
+        "ok": True,
+        "status": job.status,
+        "output_dir": str(result.output_dir),
+        "files": files,
     }
