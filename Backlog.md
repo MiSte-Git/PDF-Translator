@@ -5063,3 +5063,157 @@
   übersetzter Bilder zurück in PDF/Word/PPTX, keine Entfernung der
   bestehenden Qt-App - das bleibt eine separate, künftige Entscheidung,
   kein automatischer Folgeschritt dieses Piloten.
+
+## 26.08.2026 - Erstes echtes Nutzer-Feedback nach dem Umbau: Fortschrittsbalken + "Ordner öffnen"-Button umgesetzt, zwei größere Punkte (Font-Erkennung, Vorschau-Genauigkeit) als offene Entscheidung dokumentiert
+
+  Michael hat die neue Server-+pywebview-App zum ersten Mal gegen ein
+  echtes, komplexes Bild getestet ("Spirit - Soul - Meatsuit.jpg", eine
+  esoterische Infografik mit vielen Textregionen) und detailliertes
+  Feedback gegeben (zwei Screenshots, ein QA-Bericht als Beleg):
+
+  > "Was fehlt ist eine Fortschrittsanzeige. Ich sehe nur in der Shell
+  > das etwas passiert."
+  >
+  > "Ich bin beeindruckt. Es schaut echt gut aus. Die Boxen verändern
+  > ist super handabbar. Wenn man ein einzelnes Bild bearbeitet. Also
+  > für eine Nachbearbeitung super."
+  >
+  > "Aber es fehlt noch die Font Erkenneung. Siehe Bild. Man sieht es
+  > deutlich an der Überschrift. Wenn man noch einen Font Editor bei
+  > der Korrektur noch hätte, wäre super. Schön das die Felder so
+  > transparent sind, dann kann man das Original dahier sehen oder
+  > eben kurz wegschieben."
+  >
+  > "Allerdings wird nach dem Übernehmen das Bild nicht so gespeichert
+  > wie es in der Browservorschau angezeigt wird."
+  >
+  > "Es fehlt auch noch ein Button um den Zielordner, nachdem das Bild
+  > generiert wurde, zu öffnen."
+
+  Auf Rückfrage (drei gezielte Fragen, da die Meldungen mehrdeutig
+  waren) hat Michael präzisiert: er weiß nicht, ob sich der
+  Fortschrittstext im Fenster überhaupt bewegt oder einfach nur zu
+  unauffällig ist; bei der Font-Erkennung wünscht er sich AUTOMATISCHE
+  Erkennung aus dem Bild (nicht nur einen manuellen Font-Editor); bei
+  der Vorschau-Diskrepanz weicht auch Position/Layout ab, nicht nur die
+  Schrift.
+
+  **Umgesetzt (dieser Eintrag):**
+
+  1. Ein unbestimmter ("indeterminate") Fortschrittsbalken
+     (`#job-progress-bar` in `webapp/static/index.html`, bewusst OHNE
+     `value`-Attribut) wird jetzt während eines laufenden Auftrags
+     eingeblendet und danach wieder versteckt (`webapp/static/app.js`s
+     `runStart()`/`finishJob()`). Bewusst kein Prozentwert: echter
+     Fortschritt ist laut `ui/image_job.py::ImageBatchStats`s eigenem
+     Docstring nur auf DATEI-Ebene bekannt, nicht auf Regionen-Ebene -
+     bei einem Ein-Bild-Batch mit vielen OCR-Regionen (genau Michaels
+     Testfall) bliebe ein Prozentwert die ganze Laufzeit über bei 0%
+     "hängen", was irreführender wäre als gar kein Balken. Die bereits
+     vorhandene Detailzeile (`#start-status`,
+     `job.progress_prefix`/"Verarbeite: ...") lief bei Prüfung
+     nachweislich schon vorher korrekt durch (`_notify()` in
+     `pipeline/images/translate_image.py` →
+     `webapp/job_bridge.py`s `_progress()` → `GET .../status` →
+     `renderJobProgress()`) - kein Bug gefunden, nur zu unauffällig; der
+     neue Balken macht die laufende Aktivität jetzt zusätzlich auf den
+     ersten Blick sichtbar, ohne die Detailzeile zu ersetzen.
+
+  2. Ein "Ordner öffnen"-Button (`#open-output-folder-button`, nur unter
+     pywebview sichtbar wie die Datei-/Ordner-Auswahl-Buttons aus
+     Schritt 6) erscheint jetzt neben dem Job-Ergebnis und öffnet
+     `result.output_dir` im Dateimanager des Betriebssystems - neue
+     Methode `Api.open_folder(path)` in `webapp/__main__.py`, da
+     pywebview selbst keinen "vorhandenen Ordner im Dateimanager
+     anzeigen"-Aufruf mitbringt (`create_file_dialog()` öffnet nur
+     Auswahl-Dialoge). Shellt je nach `platform.system()` auf
+     `xdg-open`/`open`/`os.startfile()` aus - dasselbe, was
+     `QDesktopServices.openUrl()` intern für die bestehende Qt-App tut
+     (siehe `ui/app.py::_open_output_folder()`). Fehlerfall (Pfad
+     existiert nicht, Start schlägt fehl) liefert `False` statt eine
+     Exception über die JS-Bridge zu werfen - `app.js` zeigt dann
+     `job.open_folder_failed` in der Statuszeile. Der bereits
+     vorhandene i18n-Schlüssel `job.open_folder` (bisher nur von der
+     Qt-App verwendet) wird für diesen Button wiederverwendet.
+
+  **Beim Bau gefundener und behobener Bug (vor dem Versand, nicht erst
+  bei Michael aufgefallen):** die erste Fassung der CSS-Regeln für
+  beide neuen Elemente setzte `display: block` direkt am ID-Selektor
+  (`#job-progress-bar { display: block; ... }` bzw.
+  `#open-output-folder-button { display: block; ... }`). Eine
+  ID-Selektor-Regel hat eine HÖHERE CSS-Spezifität als die generische
+  Klassen-Regel `.hidden { display: none; }` - unabhängig von der
+  Reihenfolge im Stylesheet hätte das `.hidden` IMMER überstimmt und
+  beide Elemente dauerhaft sichtbar gelassen, exakt dieselbe Art Fehler,
+  die laut `app.css`s eigenem Kommentar schon einmal beim Bau von
+  Schritt 6 passiert ist ("MUSS eine plain, unscoped .hidden-Regel
+  bleiben"). Durch den erweiterten Playwright-Smoke-Test aufgefallen
+  (`assert not page.is_visible("#job-progress-bar")` direkt nach
+  Seitenaufbau schlug fehl), nicht durch manuelles Anschauen. Behoben:
+  `display: block` beim Fortschrittsbalken lebt jetzt unter einem
+  eigenen `#job-progress-bar:not(.hidden)`-Selektor (greift nur, wenn
+  die Klasse ohnehin fehlt - dann gibt es keinen Konflikt mehr mit
+  `.hidden`); beim Ordner-Button wurde die `display`-Angabe ganz
+  entfernt (Buttons sind standardmäßig `inline-block`, und das
+  vorangehende `#job-result-summary` ist ohnehin ein Block-Element - der
+  Button landet also auch ohne eigenes `display` in einer neuen Zeile).
+
+  **Getestet:** `tests/test_webapp_main.py` um 5 Tests für
+  `Api.open_folder()` erweitert (Linux/`xdg-open`,
+  macOS/`open`, Windows/`os.startfile()`, nicht-existierender
+  Pfad, fehlgeschlagener Start) - `subprocess.Popen`/`os.startfile`
+  gemockt, `platform.system()` gemockt, `tmp_path` ist ein ECHTES
+  Verzeichnis (`is_dir()` läuft also real). Gesamter Testlauf
+  (`tests/`, ohne `test_ui_images_mode.py`): 249 passed (vorher 244), 1
+  skipped. `webapp/`-Schicht importiert weiterhin nachweislich ohne
+  `PySide6`.
+
+  Playwright-Smoke-Test (`/tmp/pw_smoke.py`) um Prüfungen für beide
+  neuen Elemente erweitert: Balken startet versteckt, wird sichtbar
+  sobald der Lauf beginnt (bleibt dabei ohne `value`-Attribut =
+  indeterminate), verschwindet wieder sobald der Lauf fertig ist; der
+  "Ordner öffnen"-Button bleibt im normalen (nicht-pywebview) Browser
+  während des GESAMTEN Ablaufs versteckt, auch nachdem `#job-result`
+  selbst sichtbar wird (derselbe Regressionstest-Stil wie die
+  bestehende Schritt-6-Prüfung für die Datei-/Ordner-Auswahl-Buttons).
+  Der einzige Konsolenfehler bleibt das schon dokumentierte harmlose
+  `favicon.ico`-404 (unabhängig reproduziert: sogar eine völlig
+  eigenständige, leere Testseite ohne jeden Bezug zu diesem Projekt löst
+  in dieser Chromium-Version denselben Fehler aus - kein neues Problem).
+
+  **Bewusst NICHT in diesem Eintrag umgesetzt, sondern als offene
+  Entscheidung an Michael zurückgespielt** (siehe Chat-Antwort):
+
+  - **Font-Erkennung/-Editor:** Michael wünscht sich automatische
+    Font-Erkennung aus dem Bild. Eine zuverlässige Schriftart-Erkennung
+    per Bildanalyse bräuchte praktisch einen trainierten Klassifikator
+    (Font-Familie aus einem gerenderten Textausschnitt zu erraten ist
+    ein eigenständiges ML-Problem, keine Kleinigkeit) - ohne einen
+    solchen wäre das Ergebnis unzuverlässig genug, um eher zu verwirren
+    als zu helfen. Realistischere Zwischenschritte (manueller
+    Font-Familie/Größe/Fett/Kursiv-Editor in der Korrektur-Ansicht,
+    oder ein einfacher Hinweistext) wurden vorgeschlagen, aber noch
+    nicht gebaut - Umfang/Aufwand ist mit Michael noch zu klären.
+
+  - **Vorschau weicht von der gespeicherten Datei ab (auch bei
+    Position/Layout, nicht nur Schrift):** Ursache gefunden.
+    `pipeline/images/inpainting.py`s Renderer
+    (`_vertical_room_below()`/`_horizontal_room()`) vergrößert/verschiebt
+    Text-Boxen zur Laufzeit dynamisch, um Kollisionen mit
+    Nachbarregionen zu vermeiden (horizontales Reflow, vertikales
+    Wachstum, Mehrzeilen-Umbruch, Schriftgröße wird an diese DYNAMISCHE
+    Box angepasst, nicht an die rohe OCR-Box). Die
+    Browser-Korrektur-Vorschau (`image_translate_cli/review_server.py`s
+    `_PAGE_HTML`) kennt davon nichts - sie zeigt ausschließlich die
+    ROHE, STATISCHE OCR-Box (`region.x/y/width/height`) als CSS-Box.
+    Das ist keine neue Regression, sondern eine von Anfang an bekannte,
+    dokumentierte Einschränkung (`review_server.py`s eigener Docstring:
+    "Deliberately NOT: ... a live re-rendered preview (would mean
+    re-running InpaintingBackend.apply() on every keystroke; the
+    overlay is a close-enough approximation without that cost)."). Eine
+    wirklich pixelgenaue Vorschau würde bedeuten, die
+    Kollisionsvermeidungs-Logik aus `inpainting.py` in JavaScript
+    nachzubauen (oder bei jeder Änderung serverseitig neu zu rendern) -
+    ein echter, nicht-trivialer Aufwand, noch nicht begonnen. Optionen
+    dazu wurden Michael vorgeschlagen, noch keine Entscheidung
+    getroffen.

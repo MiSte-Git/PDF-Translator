@@ -103,6 +103,7 @@
   "job.hide_report": "QA-Bericht ausblenden",
   "job.idle": "Noch kein Lauf gestartet.",
   "job.open_folder": "Ordner öffnen",
+  "job.open_folder_failed": "Ordner konnte nicht geöffnet werden.",
   "job.open_report": "QA-Bericht öffnen",
   "job.overflow_count": "{count} Überlaufhinweis(e) im QA-Bericht – bitte manuell in PowerPoint/Impress prüfen.",
   "job.overflow_none": "Keine neuen Überlaufrisiken gefunden.",

@@ -18,9 +18,12 @@ for the Qt app's own file dialogs.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import webview
 
+import webapp.__main__ as main_module
 from webapp.__main__ import Api, _IMAGE_FILE_TYPES
 
 
@@ -76,6 +79,68 @@ def test_pick_output_dir_returns_none_when_cancelled(monkeypatch: pytest.MonkeyP
 def test_pick_output_dir_returns_none_without_an_active_window(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(webview, "active_window", lambda: None)
     assert Api().pick_output_dir() is None
+
+
+def test_open_folder_launches_the_platform_opener_on_linux(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Real user feedback (26.08.2026): "Es fehlt auch noch ein Button um
+    den Zielordner ... zu öffnen." - Api.open_folder() shells out to the
+    platform's own file-manager opener (pywebview has no built-in "reveal
+    this existing folder" call, only create_file_dialog()). `tmp_path` is
+    a REAL directory - is_dir() is exercised for real, only the actual
+    process launch is faked.
+    """
+    monkeypatch.setattr(main_module.platform, "system", lambda: "Linux")
+    calls = []
+    monkeypatch.setattr(main_module.subprocess, "Popen", lambda args: calls.append(args))
+
+    result = Api().open_folder(str(tmp_path))
+
+    assert result is True
+    assert calls == [["xdg-open", str(tmp_path)]]
+
+
+def test_open_folder_launches_the_platform_opener_on_macos(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(main_module.platform, "system", lambda: "Darwin")
+    calls = []
+    monkeypatch.setattr(main_module.subprocess, "Popen", lambda args: calls.append(args))
+
+    result = Api().open_folder(str(tmp_path))
+
+    assert result is True
+    assert calls == [["open", str(tmp_path)]]
+
+
+def test_open_folder_launches_the_platform_opener_on_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(main_module.platform, "system", lambda: "Windows")
+    calls = []
+    monkeypatch.setattr(main_module.os, "startfile", lambda path: calls.append(path), raising=False)
+
+    result = Api().open_folder(str(tmp_path))
+
+    assert result is True
+    assert calls == [str(tmp_path)]
+
+
+def test_open_folder_returns_false_for_a_path_that_is_not_a_directory(tmp_path: Path) -> None:
+    missing = tmp_path / "does-not-exist"
+    assert Api().open_folder(str(missing)) is False
+
+    a_file = tmp_path / "photo.png"
+    a_file.write_bytes(b"")
+    assert Api().open_folder(str(a_file)) is False
+
+
+def test_open_folder_returns_false_when_the_launch_itself_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(main_module.platform, "system", lambda: "Linux")
+
+    def _raise(args):
+        raise OSError("xdg-open not found")
+
+    monkeypatch.setattr(main_module.subprocess, "Popen", _raise)
+
+    assert Api().open_folder(str(tmp_path)) is False
 
 
 def test_main_wires_the_server_and_window_together_without_blocking(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -33,7 +33,11 @@ documents for the Qt app's own dialogs).
 """
 from __future__ import annotations
 
+import os
+import platform
+import subprocess
 import threading
+from pathlib import Path
 
 import webview
 
@@ -84,6 +88,38 @@ class Api:
             return None
         selection = window.create_file_dialog(webview.FileDialog.FOLDER)
         return selection[0] if selection else None
+
+    def open_folder(self, path: str) -> bool:
+        """Backs the "Ordner öffnen"-Button shown once a batch run
+        finishes (real user feedback, 26.08.2026: "Es fehlt auch noch ein
+        Button um den Zielordner, nachdem das Bild generiert wurde, zu
+        öffnen.") - mirrors ui/app.py::_open_output_folder()'s
+        QDesktopServices.openUrl(QUrl.fromLocalFile(...)) for
+        ImageBatchJobResult (opens `output_dir` directly, there is no
+        single output file to take the parent of - see that method's own
+        comment). pywebview has no built-in "reveal in file manager" call
+        (create_file_dialog() only opens a picker, it doesn't open an
+        existing folder for browsing), so this shells out to the
+        platform's own opener directly - the same thing
+        QDesktopServices.openUrl() itself does one layer further down on
+        each OS. Returns False (instead of raising into the JS bridge)
+        for a missing/non-directory path or a launch failure, so app.js
+        can show a plain error instead of an uncaught promise rejection.
+        """
+        target = Path(path)
+        if not target.is_dir():
+            return False
+        system = platform.system()
+        try:
+            if system == "Windows":
+                os.startfile(str(target))  # type: ignore[attr-defined]  # noqa: S606 - Windows-only API
+            elif system == "Darwin":
+                subprocess.Popen(["open", str(target)])
+            else:
+                subprocess.Popen(["xdg-open", str(target)])
+        except OSError:
+            return False
+        return True
 
 
 def main() -> None:

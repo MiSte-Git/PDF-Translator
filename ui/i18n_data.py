@@ -162,14 +162,17 @@ DE = {
     "job.pdf_overflow_count": "{count} Block/Blöcke musste(n) wachsen oder schrumpfen, um zu passen – bitte im PDF stichprobenartig prüfen.",
     "job.open_folder": "Ordner öffnen",
     "job.open_report": "QA-Bericht öffnen",
-    # Bild-Modus im Webapp-Frontend (Schritt 7, 26.08.2026): es gibt dort
-    # keine "Ordner öffnen"-Aktion (kein natives Dateisystem-Fenster ohne
-    # zusätzliche pywebview-API), also wird pro Bild sein eigener
-    # QA-Bericht direkt inline ein-/ausgeblendet statt extern geöffnet
-    # (job.open_report/QDesktopServices bleibt der Qt-App vorbehalten,
-    # die dafür ohnehin kein Pendant im Bild-Modus zeigt - siehe
-    # ui/app.py::_show_job_result()). Von der Qt-App nicht verwendet,
+    # Bild-Modus im Webapp-Frontend (Schritt 7, 26.08.2026): pro Bild wird
+    # sein eigener QA-Bericht direkt inline ein-/ausgeblendet statt extern
+    # geöffnet (job.open_report/QDesktopServices bleibt der Qt-App
+    # vorbehalten). "job.open_folder" (oben) wurde ursprünglich nur von
+    # der Qt-App verwendet, seit der Nachbesserung vom 26.08.2026 (realer
+    # Nutzer-Feedback: "Es fehlt auch noch ein Button um den Zielordner
+    # ... zu öffnen.") aber auch vom Webapp-Frontend wiederverwendet -
+    # siehe webapp/__main__.py::Api.open_folder() und app.js's
+    # runOpenOutputFolder(). Von der Qt-App nicht verwendet,
     # genau wie schon dialog.choose_images/job.cancel usw.
+    "job.open_folder_failed": "Ordner konnte nicht geöffnet werden.",
     "job.show_report": "QA-Bericht anzeigen",
     "job.hide_report": "QA-Bericht ausblenden",
     "job.report_load_error": "QA-Bericht konnte nicht geladen werden.",
@@ -372,6 +375,7 @@ EN = {
     "job.open_report": "Open QA report",
     # Images mode in the webapp frontend (Schritt 7, 26.08.2026) - see the
     # matching German comment above for why this differs from the Qt app.
+    "job.open_folder_failed": "Could not open the folder.",
     "job.show_report": "Show QA report",
     "job.hide_report": "Hide QA report",
     "job.report_load_error": "Could not load QA report.",

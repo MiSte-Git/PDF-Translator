@@ -103,6 +103,7 @@
   "job.hide_report": "Hide QA report",
   "job.idle": "No run started yet.",
   "job.open_folder": "Open folder",
+  "job.open_folder_failed": "Could not open the folder.",
   "job.open_report": "Open QA report",
   "job.overflow_count": "{count} overflow note(s) in the QA report – please review manually in PowerPoint/Impress.",
   "job.overflow_none": "No new overflow risks found.",

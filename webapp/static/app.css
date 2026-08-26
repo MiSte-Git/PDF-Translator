@@ -300,3 +300,61 @@ button.primary:disabled {
 #cancel-button {
     margin-left: 8px;
 }
+
+/* Unbestimmter Fortschrittsbalken während eines laufenden Auftrags -
+   siehe index.html's Kommentar dazu, warum bewusst ohne value-Attribut
+   (indeterminate/"barber pole" statt eines Prozentwerts). Reale
+   Nutzer-Rückmeldung 26.08.2026: "Was fehlt ist eine Fortschrittsanzeige.
+   Ich sehe nur in der Shell dass etwas passiert." Farben über die
+   ::-webkit-/::-moz-progress-*-Pseudo-Elemente gesetzt statt der nativen
+   Browser-Voreinstellung (meist blau), damit er zum Karten-Look passt. */
+/* "display: block" lebt bewusst unter :not(.hidden) statt direkt am
+   ID-Selektor: eine ID hat höhere Spezifität als die generische
+   ".hidden"-Regel (siehe deren eigener Kommentar oben, "MUSS eine
+   plain, unscoped .hidden-Regel bleiben") - ein direktes
+   "#job-progress-bar { display: block }" hätte ".hidden"s
+   "display: none" IMMER überstimmt und den Balken permanent sichtbar
+   gelassen (beim Playwright-Smoke-Test genau so aufgefallen). Mit
+   :not(.hidden) greift diese Regel nur, wenn die Klasse ohnehin fehlt -
+   dann gibt es gar keinen Konflikt mit ".hidden" mehr. */
+#job-progress-bar:not(.hidden) {
+    display: block;
+    width: 100%;
+}
+
+#job-progress-bar {
+    height: 6px;
+    margin-top: 10px;
+    border: none;
+    border-radius: var(--radius-pill);
+    overflow: hidden;
+    background: var(--line);
+}
+
+#job-progress-bar::-webkit-progress-bar {
+    background: var(--line);
+    border-radius: var(--radius-pill);
+}
+
+#job-progress-bar::-webkit-progress-value {
+    background: var(--accent);
+    border-radius: var(--radius-pill);
+}
+
+#job-progress-bar::-moz-progress-bar {
+    background: var(--accent);
+}
+
+/* "Ordner öffnen"-Button (nur unter pywebview sichtbar, siehe
+   enableNativeDialogs() in app.js) - eigene Regel nötig, da er direkt
+   unter #job-result-summary steht statt in einem .field-Div (die
+   ".field button"-Regel oben würde hier nicht greifen). Bewusst OHNE
+   eigene "display"-Angabe - siehe #job-progress-bar's Kommentar oben
+   dazu, warum ein direktes "display: block/inline-block" am
+   ID-Selektor ".hidden"s "display: none" überstimmen würde; das
+   vorangehende #job-result-summary ist ohnehin ein Block-Element, der
+   Button landet also auch ohne eigenes "display" automatisch in einer
+   neuen Zeile. */
+#open-output-folder-button {
+    margin-bottom: 8px;
+}

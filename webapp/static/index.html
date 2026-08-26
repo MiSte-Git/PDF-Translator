@@ -41,7 +41,23 @@
        review_server.py's Browser-Korrektur-UI in einem eigenen
        Fenster/Tab öffnet (POST /api/jobs/<id>/files/<index>/correct,
        siehe webapp/review_bridge.py) und den Ausgang abwartet, ohne die
-       Hauptseite selbst zu blockieren. -->
+       Hauptseite selbst zu blockieren. Nachbesserung nach Michaels
+       erstem echten Praxistest (26.08.2026): ein unbestimmter
+       Fortschrittsbalken während eines laufenden Auftrags
+       (#job-progress-bar) und ein "Ordner öffnen"-Button
+       (#open-output-folder-button, nur unter pywebview sichtbar, siehe
+       webapp/__main__.py::Api.open_folder()). -->
+  <!-- Bekannte, ungelöste Einschränkung (Michaels Feedback, siehe
+       Backlog.md): die Korrektur-Vorschau in review_server.py zeigt die
+       ROHE OCR-Boxgröße, nicht die tatsächlich gerenderte Position/
+       Schriftgröße - der echte Renderer (pipeline/images/inpainting.py)
+       vergrößert/verschiebt Boxen dynamisch anhand von Kollisions-
+       vermeidung mit Nachbarregionen (siehe _vertical_room_below()/
+       _horizontal_room()), was die Browser-Vorschau bewusst nicht
+       nachbildet (siehe review_server.py's eigener Docstring, Punkt
+       "kein Live-Rerender"). Absichtlich noch nicht behoben - siehe
+       Backlog.md für die zur Diskussion stehenden Optionen. -->
+
   <section class="card" id="config-card">
     <h2 data-i18n="config.group">Auftrag konfigurieren</h2>
 
@@ -131,12 +147,31 @@
     <button type="button" id="cancel-button" class="hidden" data-i18n="job.cancel">
       Abbrechen
     </button>
+    <!-- Unbestimmter Balken (kein "value"-Attribut) solange ein Lauf
+         aktiv ist - echter Fortschritt ist nur auf Dateiebene bekannt
+         (siehe ui/image_job.py::ImageBatchStats' Docstring), bei einem
+         Ein-Bild-Batch mit vielen OCR-Regionen bliebe ein Prozentwert
+         die ganze Zeit bei 0% "hängen". Realer Nutzer-Feedback
+         (26.08.2026): "Was fehlt ist eine Fortschrittsanzeige. Ich sehe
+         nur in der Shell dass etwas passiert." - dieser Balken plus die
+         bereits vorhandene Detailzeile (#start-status,
+         job.progress_prefix) sollen das im Fenster selbst sichtbar
+         machen. -->
+    <progress id="job-progress-bar" class="hidden" max="100"></progress>
     <p class="status-line" id="start-status" data-i18n="start.blocked_no_analysis">
       Bitte zuerst „Dokument analysieren und Kosten schätzen“ ausführen.
     </p>
 
     <div class="result hidden" id="job-result">
       <p id="job-result-summary"></p>
+      <!-- Ebenfalls realer Nutzer-Feedback: "Es fehlt auch noch ein
+           Button um den Zielordner ... zu öffnen." Nur unter pywebview
+           sichtbar (siehe enableNativeDialogs() in app.js) - ein
+           normaler Browser-Tab kann aus Sicherheitsgründen keinen
+           lokalen Ordner im Dateimanager öffnen. -->
+      <button type="button" id="open-output-folder-button" class="hidden" data-i18n="job.open_folder">
+        Ordner öffnen
+      </button>
       <ul id="job-result-files"></ul>
     </div>
   </section>

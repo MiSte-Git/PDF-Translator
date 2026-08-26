@@ -49,6 +49,7 @@ let lastAnalysis = null; // null, or the last successful /api/analyze response
 let activeJobId = null;
 let pollTimer = null;
 let lastJobResultFiles = []; // Schritt 8: re-rendered in place after a correction applies
+let lastOutputDir = null; // Nachbesserung: Ziel für den "Ordner öffnen"-Button (siehe runOpenOutputFolder())
 
 function t(key, fallback) {
   return catalogue[key] !== undefined ? catalogue[key] : (fallback !== undefined ? fallback : key);
@@ -369,6 +370,12 @@ async function runStart() {
 
   activeJobId = result.job_id;
   document.getElementById("cancel-button").classList.remove("hidden");
+  // Realer Nutzer-Feedback (26.08.2026): "Was fehlt ist eine
+  // Fortschrittsanzeige. Ich sehe nur in der Shell dass etwas passiert."
+  // Kein value-Attribut gesetzt/entfernt hier - das <progress>-Element
+  // bleibt ohne "value" schon durch index.html unbestimmt/animiert,
+  // dieser Aufruf blendet es nur ein.
+  document.getElementById("job-progress-bar").classList.remove("hidden");
   updateStartState();
   pollJobStatus();
 }
@@ -414,6 +421,7 @@ function pollJobStatus() {
 async function finishJob(jobId, status) {
   activeJobId = null;
   document.getElementById("cancel-button").classList.add("hidden");
+  document.getElementById("job-progress-bar").classList.add("hidden");
   const startStatus = document.getElementById("start-status");
 
   if (status.status === "failed") {
@@ -452,8 +460,22 @@ function renderJobResult(result, wasCancelled, jobId) {
   }
   document.getElementById("job-result-summary").textContent = text;
   lastJobResultFiles = result.files;
+  lastOutputDir = result.output_dir;
   renderJobResultFiles(lastJobResultFiles, jobId);
   document.getElementById("job-result").classList.remove("hidden");
+}
+
+/* "Ordner öffnen"-Button (realer Nutzer-Feedback 26.08.2026: "Es fehlt
+ * auch noch ein Button um den Zielordner ... zu öffnen.") - nur unter
+ * pywebview sichtbar (siehe enableNativeDialogs()), ruft
+ * webapp/__main__.py::Api.open_folder() über die JS-Bridge auf. */
+async function runOpenOutputFolder() {
+  if (!lastOutputDir) return;
+  const statusEl = document.getElementById("start-status");
+  const ok = await window.pywebview.api.open_folder(lastOutputDir);
+  if (!ok) {
+    statusEl.textContent = t("job.open_folder_failed", "Ordner konnte nicht geöffnet werden.");
+  }
 }
 
 /* Schritt 7: eine Zeile pro Bild mit einem Button, der dessen eigenen
@@ -661,6 +683,11 @@ function enableNativeDialogs() {
   document.getElementById("source-paths-hint").classList.add("hidden");
   document.getElementById("pick-output-dir-button").classList.remove("hidden");
   document.getElementById("output-dir-hint").classList.add("hidden");
+  // Nur unter pywebview sinnvoll (Api.open_folder() ruft eine native
+  // Bridge-Methode auf, die es im normalen Browser nicht gibt) - bleibt
+  // dort dauerhaft eingeblendet, tatsächlich sichtbar wird der Button
+  // aber erst zusätzlich, sobald #job-result selbst sichtbar ist.
+  document.getElementById("open-output-folder-button").classList.remove("hidden");
 }
 
 async function runPickImages() {
@@ -700,6 +727,7 @@ async function init() {
   document.getElementById("cancel-button").addEventListener("click", runCancel);
   document.getElementById("pick-images-button").addEventListener("click", runPickImages);
   document.getElementById("pick-output-dir-button").addEventListener("click", runPickOutputDir);
+  document.getElementById("open-output-folder-button").addEventListener("click", runOpenOutputFolder);
 
   if (window.pywebview) {
     enableNativeDialogs();
