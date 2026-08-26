@@ -254,6 +254,46 @@ def build_stylesheet(is_dark: bool) -> str:
             border: none;
             width: 22px;
         }}
+        /* 26.08.2026 - Michael, after the first screenshot: "Es fehlen die
+           Pfeile an den Auswahlboxen." Root cause: as soon as a QComboBox
+           gets ANY stylesheet rule (even just border/background above),
+           Qt stops drawing the native platform down-arrow entirely and
+           expects the stylesheet to supply one - an empty
+           QComboBox::down-arrow means no arrow at all, not the default
+           one. Same applies to QSpinBox's up/down buttons below. Drawn as
+           a plain CSS border-triangle (0x0 box, opposite border wide and
+           colored, the other two transparent) instead of an image asset -
+           no bundled icon file needed, and it recolors for free with
+           `muted` in both light and dark mode. */
+        QComboBox::down-arrow {{
+            width: 0;
+            height: 0;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid {c['muted']};
+            margin-right: 10px;
+        }}
+        QComboBox::down-arrow:disabled {{
+            border-top-color: {c['line']};
+        }}
+        QSpinBox::up-button, QSpinBox::down-button {{
+            border: none;
+            width: 18px;
+        }}
+        QSpinBox::up-arrow {{
+            width: 0;
+            height: 0;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-bottom: 5px solid {c['muted']};
+        }}
+        QSpinBox::down-arrow {{
+            width: 0;
+            height: 0;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid {c['muted']};
+        }}
         QLineEdit:disabled, QTextEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{
             color: {c['muted']};
         }}

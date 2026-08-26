@@ -395,6 +395,30 @@
   nächster Schritt jetzt als aktiver Punkt in "Geplant" oben ("Bildübersetzung
   als eigenständige, in andere Programme einbindbare Schnittstelle bauen").
 
+- PDFs zusammenführen / PDFs zwischeneinfügen als neue, von Übersetzung
+  unabhängige Operation (26.08.2026, Michael, im Rahmen der Rückfrage zur
+  fehlenden "Übersetzung gewünscht?"-Checkbox aus dem UI-Redesign): "Ja, so
+  etwas schwebt mir vor. Falls wir nicht zwingend übersetzen wollen. Ich
+  möchte später noch eine Funktion hinzufügen die PDFs zusammenführt und
+  auch noch PDFs zwischeneinfügt. Ist so erst angedacht." Ausdrücklich noch
+  keine feste Spezifikation, nur eine Richtung: die Motivation für eine
+  optionale "keine Übersetzung"-Checkbox im UI ist also nicht in den
+  bestehenden Vorgängen (PPTX/Word/PDF/Bilder übersetzen) zu suchen, sondern
+  in einem oder mehreren NEUEN "Vorgang"-Einträgen (Merge/Insert), die gar
+  keine Übersetzung durchführen. Eine Checkbox "Übersetzung überspringen"
+  in den bestehenden Übersetzungs-Vorgängen selbst einzubauen wäre also
+  vermutlich der falsche Ansatz (dort gibt es ohne Übersetzung nichts zu
+  tun) - naheliegender: Merge/Insert als eigene(r) `mode`-Wert(e) in
+  `ui/app.py`s `self.mode`/`MODE_KEYS`, analog zu den bestehenden Vorgängen,
+  bei denen dann konsequenterweise die ganzen Übersetzungs-spezifischen
+  Formularfelder (Anbieter, Sprachen, geschützte Begriffe, OCR/Inpainting)
+  über `_mode_changed()`/`setRowVisible()` ausgeblendet blieben - kein
+  Bedarf an einer separaten Checkbox. Zurückgestellt, bis Michael das Merge/
+  Insert-Vorhaben konkretisiert (welche Reihenfolge-/Auswahl-UI, ob
+  Seitenbereiche pro Quelldatei wählbar sein sollen, Umgang mit
+  Formatierung/Bookmarks/Metadaten der Ergebnisdatei) - keine Umsetzung
+  begonnen.
+
 ## Zu verifizieren
 - [ ] Word-Pfad: PAGE-Feld in footer1.xml sollte sich bei Neuberechnung automatisch aktualisieren, auch wenn das übersetzte Dokument länger wird als das Original - noch nicht an einem tatsächlich länger werdenden Dokument verifiziert (Word aktualisiert Felder nicht immer automatisch beim programmatischen Schreiben, ggf. muss ein Feld-Update erzwungen werden)
 - [x] Prüfen, ob Link-Annotationen (page.get_links()) nach redact_block()/apply_redactions() auf anderen Blöcken derselben Seite technisch erhalten und weiterhin klickbar bleiben (nicht nur der Link-Text unübersetzt, sondern auch die zugrunde liegende Annotation intakt) – war tatsächlich ein realer Bug, jetzt behoben, siehe "Erledigt" unten (17.08.2026, Punkt 1).
@@ -4241,3 +4265,52 @@
   Screenshot zu schicken, damit das Ergebnis gegen die Absicht
   bestätigt werden kann, bevor es als erledigt gilt. Danach, wie von
   Michael angekündigt: Installer-Logik als nächstes Thema.
+
+## 26.08.2026 - Fehlende Dropdown-Pfeile nach dem Card-Umbau behoben; Michaels Frage nach einer "Übersetzung gewünscht?"-Checkbox geklärt
+
+  Michael, nach zwei Screenshots vom Dark-Mode-Ergebnis (insgesamt
+  bestätigt das Grundbild - Cards, runde Buttons, grüner Start-Button):
+  "Es fehlen die Pfeile an den Auswahlboxen. Und hatten wir nicht auch
+  eine Checkbox ob überhaupt eine Übersetzung gewünscht ist?"
+
+  **Pfeile:** echter, durch die neue QSS eingeführter Regressions-Bug.
+  Sobald eine QComboBox IRGENDEINE Stylesheet-Regel bekommt (hier
+  bereits durch das generische `QLineEdit, QTextEdit, QComboBox,
+  QSpinBox { ... }`-Rahmen-Styling), zeichnet Qt den nativen
+  Dropdown-Pfeil gar nicht mehr - die vorhandene
+  `QComboBox::drop-down { border: none; width: 22px; }`-Regel entfernte
+  zusätzlich den Rahmen um die (unsichtbare) Pfeilfläche, aber ohne
+  einen Ersatzpfeil zu liefern, blieb da schlicht nichts. Gleiches
+  Prinzip betrifft `QSpinBox`s Auf-/Ab-Buttons (im aktuellen UI nicht
+  sichtbar, nur in den Einstellungen - vorsorglich mit behoben, statt
+  denselben Bug erst beim nächsten Öffnen der Einstellungen gemeldet zu
+  bekommen). Fix: `QComboBox::down-arrow`/`QSpinBox::up-arrow`/
+  `QSpinBox::down-arrow` zeichnen den Pfeil als reines CSS-Dreieck
+  (0×0-Box, eine Rahmenseite breit und farbig, die beiden anderen
+  transparent) statt über eine Bild-Ressource - kein zusätzliches
+  Icon-Asset nötig, färbt sich mit `muted` automatisch für Light UND
+  Dark mit ein, `:disabled`-Variante für den Dropdown-Pfeil ergänzt
+  (`line`-Farbe statt `muted`, sichtbar schwächer). Neuer struktureller
+  Test in `tests/test_ui_theme.py::test_build_stylesheet_returns_qss_
+  for_both_modes` prüft jetzt zusätzlich, dass alle drei neuen
+  Pfeil-Selektoren im erzeugten QSS vorkommen - damit ein künftiger
+  Umbau des Stylesheets nicht denselben Fehler unbemerkt wiederholt.
+
+  **Checkbox-Frage:** Code (`ui/app.py`) und Backlog durchsucht - es
+  gibt aktuell nur vier `QCheckBox`-Felder im gesamten UI: `ico_mode`,
+  `exclude_header`, `exclude_footer` (alle drei modusabhängig
+  ein-/ausgeblendet über `setRowVisible()`) und `confirm` ("Analyse und
+  Kostenschätzung geprüft" in der Kostenbox). Keine davon ist oder war
+  je eine generische "Übersetzung ja/nein"-Checkbox, und im gesamten
+  Backlog findet sich kein Eintrag, der je eine solche Checkbox gebaut
+  hätte - der Card-Umbau hat also nichts entfernt, was vorher da war.
+  Bei Michael nachgefragt, was genau gemeint ist (evtl. eine
+  Verwechslung mit `confirm`, oder ein neuer Wunsch, den Übersetzungs-
+  schritt optional komplett überspringen zu können, z. B. nur OCR/Layout
+  ohne echte Übersetzung) - noch offen, keine Änderung vorgenommen, bis
+  das geklärt ist.
+
+  **Getestet:** `tests/test_ui_theme.py`: weiterhin 10 passed (neuer
+  Assert in einem bestehenden Test, keine neue Testfunktion). Noch
+  nicht erneut visuell bestätigt - Michael um einen weiteren
+  Screenshot gebeten.

@@ -108,6 +108,9 @@ def test_build_stylesheet_returns_qss_for_both_modes() -> None:
             "QPushButton",
             'QPushButton[cssClass="primary"]',
             "QLineEdit",
+            "QComboBox::down-arrow",
+            "QSpinBox::up-arrow",
+            "QSpinBox::down-arrow",
             "QCheckBox::indicator",
             "QProgressBar",
         ):
