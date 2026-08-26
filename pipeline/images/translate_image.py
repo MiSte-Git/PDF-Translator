@@ -108,8 +108,20 @@ def _max_plausible_height(
     PARAGRAPH's full `height` against a threshold calibrated for
     single-line outliers would misfire exactly the cases these two
     engines exist to get right.
+
+    24.08.2026: also excludes `not region.translatable` regions (see
+    that field's docstring) - a label-excluded-but-real-text block
+    (e.g. PaddleOcrEngine's "image"-labeled blocks) is never a
+    translation candidate and was never part of this median before it
+    existed as a region at all; letting its often much larger bbox
+    height into the median here would skew the "plausible" threshold
+    for the regions this check actually exists to filter.
     """
-    heights = [region_line_height(region) for region in regions if region.confidence >= min_confidence]
+    heights = [
+        region_line_height(region)
+        for region in regions
+        if region.confidence >= min_confidence and region.translatable
+    ]
     if not heights:
         return None
     return statistics.median(heights) * max_height_ratio
@@ -328,6 +340,22 @@ def translate_image(
 
     eligible: list[OcrTextRegion] = []
     for index, region in enumerate(regions):
+        # 24.08.2026: a region an OcrEngine itself marked untranslatable
+        # (see OcrTextRegion.translatable's docstring) is skipped here
+        # the same way a too-low-confidence region is - never eligible
+        # for translation, but (via the `translated_original_ids`
+        # bookkeeping below, unchanged) still ends up in
+        # `obstacle_regions` so neighbouring regions' collision
+        # avoidance still sees its real, untouched pixels.
+        if not region.translatable:
+            _notify(
+                f"Textregion {index + 1}/{len(regions)}: uebersprungen "
+                f"(Layout-Kategorie nicht fuer Uebersetzung vorgesehen)"
+            )
+            stats.skipped += 1
+            _report()
+            continue
+
         if region.confidence < min_confidence:
             _notify(
                 f"Textregion {index + 1}/{len(regions)}: uebersprungen "

@@ -846,7 +846,7 @@ def test_paddleocr_recognize_skips_a_block_with_no_matching_ocr_line(
     assert engine.recognize(str(source)) == []
 
 
-def test_paddleocr_recognize_translates_an_image_labeled_block_with_real_text_inside(
+def test_paddleocr_recognize_marks_an_image_labeled_block_untranslatable_but_still_returns_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Fund 1 from Michael's QA-Bericht "(12)": "Einmal in der Mitte ganz
@@ -856,11 +856,38 @@ def test_paddleocr_recognize_translates_an_image_labeled_block_with_real_text_in
     the whole "Thoughts/Emotions/.../recorded as PATTERNS" list as
     layout category "image" (probably because of the ledger/sphere
     graphic sharing the block) even though it genuinely contains
-    recognized text - _PADDLE_TRANSLATABLE_LABELS excluded "image"
-    outright, so the block (and its text) was dropped before
-    _paddle_block_to_region() ever ran. Fixed by adding "image" to that
-    set; safe because a block with no OCR line inside it still returns
-    None (see the two tests above, unchanged)."""
+    recognized text. Three attempts, same day:
+
+    1) Added "image" to _PADDLE_TRANSLATABLE_LABELS - DID translate it,
+       but Michael's real next test (QA-Bericht "(13)") came back
+       worse than before: _paddle_block_to_region() joins every
+       matched OCR line into ONE paragraph and draws ONE text blob at
+       the block's bbox - correct for real prose, but this block is 9
+       short, independent icon labels scattered around a graphic, not
+       a paragraph. Joined and translated as one string they became
+       one garbled blob overlapping the neighbouring banner block
+       ("Version 13 ist schlechter als Version 12").
+    2) Reverted "image" from the whitelist the same day, back to the
+       original behaviour: the block, and every OCR line matched
+       inside it, was dropped entirely BEFORE _paddle_block_to_region()
+       even ran - it never became an OcrTextRegion at all.
+    3) That turned out to be its own, WORSE regression (QA-Bericht
+       "(15)", Michael: "Das ist jetzt noch schlimmer als das
+       vorherige. Die Font stimmen gar nicht mehr usw."):
+       translate_image.py's `obstacle_regions` collision-avoidance
+       (built 22.08.2026) only protects regions that exist in
+       `stats.regions` in the first place - since this block never
+       became one, 23.08.2026's horizontal-reflow feature
+       (pipeline.images.inpainting._horizontal_room()) saw "no
+       obstacle there" and expanded NEIGHBOURING regions' text
+       sideways straight over the block's still-visible English text.
+
+    Fixed properly this time: the block IS still returned as a region
+    (so obstacle_regions sees it and neighbouring regions' reflow
+    respects its real extent), but marked `translatable=False` (see
+    that field's docstring) so translate_image.py's eligibility loop
+    still never sends it for translation. See Backlog.md, 24.08.2026,
+    for the fuller writeup of all three attempts."""
     source = tmp_path / "irrelevant.png"
     _build_blank_image(source)
     monkeypatch.setattr("pipeline.images.ocr.paddleocr_available", lambda: True)
@@ -890,7 +917,9 @@ def test_paddleocr_recognize_translates_an_image_labeled_block_with_real_text_in
     regions = engine.recognize(str(source))
 
     assert len(regions) == 1
+    assert regions[0].translatable is False
     assert regions[0].text == "Thoughts Emotions ...recorded as PATTERNS"
+    assert (regions[0].x, regions[0].y, regions[0].width, regions[0].height) == (25, 457, 369, 261)
 
 
 def test_paddleocr_recognize_filters_a_stray_icon_glyph_misread_as_short_text(

@@ -299,6 +299,46 @@ def test_translate_image_height_outlier_check_ignores_low_confidence_regions(tmp
     assert provider.calls == ["Real Text", "Other Real Text"]
 
 
+def test_translate_image_height_outlier_check_ignores_untranslatable_regions(tmp_path: Path) -> None:
+    """24.08.2026 - same reasoning as the low-confidence test above, for
+    the OTHER kind of region excluded from translation: a `translatable
+    =False` region (see that field's docstring) is typically a whole
+    graphic-heavy layout block with a much larger bounding box than a
+    real text line's - e.g. PaddleOcrEngine's "Thoughts/Emotions/..."
+    "image" block is 261px tall against ~20px real text lines on the
+    same image. Its height must not pull the median (and therefore the
+    outlier threshold) up, or genuinely bad OCR reads elsewhere on the
+    same image would slip past the height filter."""
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+
+    regions = [
+        OcrTextRegion(text="Real Text", x=20, y=20, width=150, height=24, confidence=90.0),
+        OcrTextRegion(text="Other Real Text", x=20, y=60, width=150, height=22, confidence=90.0),
+        # High confidence, but excluded from translation - a large,
+        # genuine layout block, not a text line. Must not raise the
+        # median used to judge the icon-blob outlier below.
+        OcrTextRegion(
+            text="Thoughts Emotions ...recorded as PATTERNS",
+            x=20, y=95, width=369, height=261, confidence=95.0, translatable=False,
+        ),
+        # An icon merged into this "line", same as
+        # test_translate_image_skips_region_with_outlier_height above.
+        OcrTextRegion(text="Icon Blob", x=20, y=400, width=150, height=200, confidence=85.0),
+    ]
+    provider = _CountingProvider()
+
+    stats = translate_image(
+        str(source), str(destination), _StubOcrEngine(regions), BoxOverlayBackend(),
+        provider, [], target_lang="de", min_confidence=40.0, max_height_ratio=3.5,
+    )
+
+    assert stats.translated == 2
+    assert stats.skipped == 2  # the untranslatable region + the icon-blob outlier
+    assert provider.calls == ["Real Text", "Other Real Text"]
+
+
 def _make_replacement(text: str, translated_text: str) -> TextReplacement:
     region = OcrTextRegion(text=text, x=20, y=20, width=150, height=24, confidence=95.0)
     return TextReplacement(region=region, translated_text=translated_text)
@@ -566,6 +606,50 @@ def test_translate_image_passes_cancelled_remainder_as_obstacles(tmp_path: Path)
     assert len(replacements) == 1
     assert replacements[0].region == dataclasses.replace(regions[0], line_height=regions[0].height)
     assert obstacle_regions == [never_reached_region]
+
+
+def test_translate_image_passes_untranslatable_region_as_an_obstacle_and_never_sends_it(tmp_path: Path) -> None:
+    """24.08.2026 - real-world regression (QA-Bericht "(15)", Michael:
+    "Das ist jetzt noch schlimmer als das vorherige. Die Font stimmen
+    gar nicht mehr usw."): PaddleOcrEngine can now return a region with
+    `translatable=False` (see that field's docstring - a label-
+    excluded-but-real-text layout block, e.g. an "image"-labeled
+    block). Before this fix such a block simply never became a region
+    at all, which meant it was invisible to the very obstacle_regions
+    mechanism the three tests above exist to cover - a neighbouring
+    region's horizontal reflow (pipeline.images.inpainting.
+    _horizontal_room()) could then expand straight over its still-
+    visible original text. Must never reach the translation provider
+    (_CountingProvider records every text it actually saw - asserted
+    below) and must still end up in obstacle_regions, exactly like a
+    low-confidence or failed region."""
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    destination = tmp_path / "out.png"
+
+    untranslatable_region = OcrTextRegion(
+        text="Thoughts Emotions ...recorded as PATTERNS",
+        x=20, y=70, width=150, height=24, confidence=95.0, translatable=False,
+    )
+    regions = [
+        OcrTextRegion(text="Hello World", x=20, y=20, width=150, height=24, confidence=90.0),
+        untranslatable_region,
+    ]
+    backend = _RecordingBackend()
+    provider = _CountingProvider()
+
+    stats = translate_image(
+        str(source), str(destination), _StubOcrEngine(regions), backend,
+        provider, [], target_lang="de",
+    )
+
+    assert stats.skipped == 1
+    assert stats.translated == 1
+    assert provider.calls == ["Hello World"]  # the untranslatable region's text never sent
+    [(replacements, obstacle_regions)] = backend.calls
+    assert len(replacements) == 1
+    assert replacements[0].region == dataclasses.replace(regions[0], line_height=regions[0].height)
+    assert obstacle_regions == [untranslatable_region]
 
 
 def test_translate_image_obstacle_regions_empty_when_everything_translated(tmp_path: Path) -> None:

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import base64
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as _dataclass_replace
 from typing import Protocol, runtime_checkable
 
 
@@ -61,7 +61,33 @@ class OcrTextRegion:
     single-line regions) means "this region already IS one line, use
     `height` directly", so every existing caller/test that never
     supplies this field keeps working unchanged.
-    """
+
+    `translatable` (24.08.2026, default True) - False marks a region
+    that pipeline.images.translate_image must NEVER send for
+    translation, but whose ORIGINAL pixels are genuinely there and
+    must still be protected as a collision obstacle for neighbouring
+    regions (pipeline.images.inpainting._vertical_room_below()/
+    _horizontal_room()). Added for PaddleOcrEngine's "image"-labeled
+    layout blocks with real OCR'd text inside (see
+    _PADDLE_TRANSLATABLE_LABELS's docstring for the 24.08.2026 "added,
+    then reverted" story) - excluding such a block from
+    _PADDLE_TRANSLATABLE_LABELS used to mean it never became an
+    OcrTextRegion AT ALL, so translate_image.py's `obstacle_regions`
+    mechanism (built 22.08.2026 for exactly this "don't grow text over
+    real content" purpose) never even saw it. That gap is what let the
+    23.08.2026 horizontal-reflow feature (pipeline.images.inpainting.
+    _horizontal_room()) expand a NEIGHBOURING region's text sideways
+    straight over the Thoughts/Emotions list's still-visible English
+    text once "image" was excluded again (QA-Bericht "(15)", Michael:
+    "Das ist jetzt noch schlimmer als das vorherige. Die Font stimmen
+    gar nicht mehr usw.") - `regions = [25,457,394,718]`'s block was
+    invisible to every collision check, not just to translation.
+    `translatable=False` keeps the region OUT of translation (see
+    translate_image()'s eligibility loop) while keeping it IN
+    `stats.regions`/`obstacle_regions`, so this failure mode cannot
+    repeat for the next excluded-but-real-text block found. Every
+    other engine/every existing caller leaves this at its True default
+    and is unaffected."""
 
     text: str
     x: int
@@ -70,6 +96,7 @@ class OcrTextRegion:
     height: int
     confidence: float
     line_height: int | None = None
+    translatable: bool = True
 
 
 def region_line_height(region: OcrTextRegion) -> int:
@@ -376,49 +403,71 @@ class GoogleVisionOcrEngine:
 # image with one of those other categories confirms it should be
 # translated as plain text too.
 #
-# 24.08.2026: "image" added after Michael's QA-Bericht "(12)" ("Einmal
-# in der Mitte ganz links, da ist ein kompletter Teil gar nicht
-# übersetzt") turned out to be exactly this - on the real run
-# (tools/probe_paddleocr.py, "Spirit - Soul - Meatsuit.jpg"), the whole
-# "Thoughts/Emotions/.../recorded as PATTERNS" list was classified
-# "image" (label 22.08.2026: text 28, image 16, paragraph_title 10,
-# footer 3, doc_title 1) - presumably because of the ledger/sphere
-# graphic sharing the block - even though PP-StructureV3's own
-# block_content for it clearly contains recognized text
-# ('WHERE \nThoughts \n\nEmotions \n\nChoices \n\nBeliefs LEDGER
-# \nTraum...', confirmed via the real result JSON). Safe to widen:
-# _paddle_block_to_region() already returns None for a block with no
-# OCR lines matched inside it, so a genuinely graphical "image" block
-# (no text) still produces nothing - this only activates "image"
-# blocks that truly contain OCR'd text. See
-# _PADDLE_STRAY_GLYPH_MAX_CHARS below for why this alone would have
-# introduced a NEW bug (a mistranslated icon) without that second
-# change.
-_PADDLE_TRANSLATABLE_LABELS = frozenset({"text", "paragraph_title", "doc_title", "footer", "image"})
+# 24.08.2026: "image" was ADDED, then REVERTED the same day after a
+# real regression. Michael's QA-Bericht "(12)" ("Einmal in der Mitte
+# ganz links, da ist ein kompletter Teil gar nicht übersetzt") traced
+# to the "Thoughts/Emotions/.../recorded as PATTERNS" list being
+# classified "image" (presumably the ledger/sphere graphic sharing the
+# block) despite genuinely containing OCR'd text - so "image" was
+# added here to translate it. That DID work label-wise, but the real
+# QA-Bericht "(13)" run Michael tried it against came back worse than
+# "(12)", not better ("Version 13 ist schlechter als Version 12"):
+# _paddle_block_to_region() joins EVERY OCR line matched inside a
+# block into ONE paragraph and renders it as ONE text blob at the
+# block's bbox - fine for a real paragraph, but this particular block
+# is not prose: it is 9 short, independent labels ("Thoughts",
+# "Emotions", "Choices", ... "PATTERNS") scattered around a circular
+# graphic. Joined and translated as one string, they became one
+# garbled blob ("WO Gedanken Emotionen Entscheidungen BUCH GEDANKEN
+# TRAUMA Karma Erfahrungen ...aufgezeichnet als MUSTER") rendered on
+# top of the neighbouring "WHERE EXPERIENCES..." banner block (both
+# blocks start at the same y=457) - confirmed from Michael's actual
+# screenshot of the "(13)" output. Leaving the block in English
+# (the pre-fix behaviour) was more readable than this. Reverted back
+# to excluding "image" until there is a real per-LINE rendering path
+# for this kind of block (each of the 9 labels drawn at its OWN
+# original position, not joined into one paragraph) - see Backlog.md,
+# 24.08.2026, for the fuller writeup and the region-count arithmetic
+# that confirmed this diagnosis (v12's 42 regions included the
+# chalice-icon "Y" as its own bogus footer region; v13's 42 = that
+# region correctly dropped by the filter below, minus one, plus this
+# now-reverted "image" region, plus one - net unchanged, which is
+# exactly why the total looked identical in both QA reports despite
+# two real, opposite-direction changes underneath).
+_PADDLE_TRANSLATABLE_LABELS = frozenset({"text", "paragraph_title", "doc_title", "footer"})
 
 # 24.08.2026: two of PP-StructureV3's own per-line OCR results turned
 # out to be small decorative icons misread as a short, spurious text
-# token rather than a bug on our side - found via the same real result
-# JSON referenced above, Michael's QA-Bericht "(12)": "Das Kelch Symbol
-# zwischen den beiden Text boxen wird als 'UND' interpretiert."
-#   - the chalice icon between the two footer boxes: OCR'd as the
-#     single letter "Y" (confidence 0.8409). The translation step
-#     apparently read the stray "Y" in its sentence context as the
-#     Spanish word for "and" and rendered "UND".
+# token rather than a bug on our side - found via the real result JSON
+# for "Spirit - Soul - Meatsuit.jpg", Michael's QA-Bericht "(12)": "Das
+# Kelch Symbol zwischen den beiden Text boxen wird als 'UND'
+# interpretiert."
+#   - the chalice icon between the two footer boxes: its OWN separate
+#     "footer"-labeled block (bbox roughly 32x30px, clearly icon-
+#     sized, not a text line), OCR'd as the single letter "Y"
+#     (confidence 0.8409) - "footer" was ALWAYS in
+#     _PADDLE_TRANSLATABLE_LABELS, so this became its own real,
+#     bogus, translated region even before the "image" experiment
+#     above. The translation step apparently read the stray "Y" in
+#     its sentence context as the Spanish word for "and" and rendered
+#     "UND".
 #   - a person icon in the "KEY TRUTH" box (the "Meatsuit/Body/
 #     Identity" row's icon): OCR'd as the Chinese character "穴"
 #     (confidence 0.2849 - the LOWEST of all 104 real OCR lines on
-#     that image; not previously reported, because its block happened
-#     to be labeled "image" and was skipped wholesale before the
-#     change above - it would have started rendering a mistranslated
-#     "穴" over that icon once "image" became translatable, had this
-#     filter not been added at the same time).
+#     that image). This one's block was labeled "image" and so was
+#     already excluded by the whitelist above both before and after
+#     today's revert - this filter is what would have kept it safe
+#     had "image" stayed whitelisted, and still protects it (and any
+#     other icon caught inside a normally-translatable block) now
+#     that "image" is excluded again.
 # Both are short (1 character) AND clearly below the confidence of any
 # real text line on that image (the lowest genuine text line scored
 # 0.9111) - filtered out by combining a max-length and a min-score
 # check so real short text (e.g. "OR", confidence 0.9817) is left
 # alone. Applied in _paddle_ocr_lines() so it protects every
-# translatable block, not just the two found here.
+# translatable block, not just the two found here. Unlike the "image"
+# experiment above, real-world testing (QA-Bericht "(13)") did not
+# turn up any downside from this filter - keeping it.
 _PADDLE_STRAY_GLYPH_MAX_CHARS = 2
 _PADDLE_STRAY_GLYPH_MIN_SCORE = 0.90
 
@@ -659,11 +708,19 @@ class PaddleOcrEngine:
             ocr_lines = _paddle_ocr_lines(result.get("overall_ocr_res") or {})
             regions: list[OcrTextRegion] = []
             for block in result.get("parsing_res_list") or []:
-                if _paddle_field(block, "block_label") not in _PADDLE_TRANSLATABLE_LABELS:
-                    continue
                 region = _paddle_block_to_region(block, ocr_lines)
-                if region is not None:
-                    regions.append(region)
+                if region is None:
+                    continue
+                # 24.08.2026: a label-excluded block that genuinely has
+                # OCR'd text (see OcrTextRegion.translatable's
+                # docstring) is still returned, marked untranslatable,
+                # so it stays visible to translate_image.py's
+                # obstacle_regions collision-avoidance instead of
+                # disappearing from every collision check the way it
+                # did before this field existed.
+                if _paddle_field(block, "block_label") not in _PADDLE_TRANSLATABLE_LABELS:
+                    region = _dataclass_replace(region, translatable=False)
+                regions.append(region)
         except Exception as exc:
             raise OcrError(f"PaddleOCR-Ergebnis konnte nicht verarbeitet werden: {exc}") from exc
         return regions

@@ -24,6 +24,8 @@ tests/fixtures/*.pdf
 tests/output/
 tools/output/
 /output/
+*.log
+*.mbtree
 
 # Generated translation/comparison outputs (manual scripts, tools/compare_providers.py)
 *_DE_*.pdf

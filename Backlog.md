@@ -3935,3 +3935,177 @@
   Noch offen: ein echter Lauf gegen das reale Bild, um Fund 1+2 UND
   das kaskadierende Reflow (Fund 3, siehe Eintrag oben) gemeinsam am
   tatsächlichen Ergebnis zu bestätigen - bisher nur unit-getestet.
+
+## 24.08.2026 - Fund 1 ("image"-Block übersetzen) noch am selben Tag zurückgerollt: echter Test zeigte eine Verschlechterung statt Verbesserung; Fund 2 (Kelch-Icon) bestätigt korrekt behoben
+
+  Michael, nach dem echten Testlauf mit dem obigen Fix: "Version 13
+  ist schlechter als Version 12", dazu vier Screenshots von QA-Bericht
+  "(13)" und die QA-Berichte "(12)" und "(13)" im Volltext. Ein
+  klarer, unmittelbarer Fall für das Projekt-Prinzip "echte Daten vor
+  weiterer Theorie" - beide Berichte zeigen "Erkannte Textregionen:
+  42" (identisch!), aber "Gesendete Zeichen: 2109" (12) vs. "2201"
+  (13) - 92 Zeichen mehr trotz gleicher Regionenzahl. Das allein zeigt
+  schon: es wurde nicht einfach nur mehr übersetzt, es wurde etwas
+  ANDERS gruppiert.
+
+  **Die Region-Arithmetik klärt es vollständig, ohne dass ein neuer
+  Diagnoselauf nötig war:** In (12) war der Kelch-Icon-Fehlleser "Y"
+  bereits eine EIGENE, echte "footer"-Region (dieses Label war schon
+  immer erlaubt) - genau DAS war die Ursache für das "UND" im
+  Fusszeilenbereich, nicht ein Zusammenspiel mit dem Text drumherum.
+  In (13) fällt diese Region durch den neuen Konfidenz-Filter weg
+  (-1), aber die "Thoughts/Emotions/..."-Liste wird durch die
+  "image"-Erweiterung neu zu einer Region (+1) - macht netto wieder
+  42, exakt wie beobachtet. Diese Rechnung bestätigt beide Funde
+  unabhängig voneinander, ohne Vermutung.
+
+  **Fund 2 (Kelch als "UND"): korrekt behoben.** Die "Y"-Region fällt
+  jetzt weg, der Konfidenz-Filter wirkt wie geplant.
+
+  **Fund 1 (Thoughts/Emotions-Liste): technisch übersetzt, aber
+  sichtbar schlechter.** Michaels Screenshot von (13) zeigt an der
+  Stelle der Liste einen verwaschenen, überlappenden Textblock ("WO
+  Gedanken Emotionen Entscheidungen BUCH GEDANKEN TRAUMA Karma
+  Erfahrungen ...aufgezeichnet als MUSTER"), der über den
+  benachbarten Banner-Block ("WHERE EXPERIENCES..." / y=457, exakt
+  dieselbe Starthöhe wie der Listen-Block) hinweg gezeichnet wird.
+  Ursache: `_paddle_block_to_region()` fügt ALLE im Block liegenden
+  OCR-Zeilen zu EINEM Absatz zusammen und zeichnet EINEN Textblock an
+  der Block-Bbox. Das passt für echten Fliesstext - dieser Block ist
+  aber kein Fliesstext, sondern 9 kurze, unabhängige Icon-Labels
+  ("Thoughts", "Emotions", ... "PATTERNS"), die um eine Kreisgrafik
+  verteilt sind. Zusammengefügt und als ein String übersetzt/gezeichnet
+  ergibt das Kauderwelsch - schlechter lesbar als der unübersetzte
+  Originaltext davor. Michaels Einschätzung "schlechter" ist also
+  korrekt und mit dem Screenshot direkt nachvollziehbar.
+
+  **Fix: nur Fund 1 zurückgerollt, Fund 2 bleibt.**
+  `_PADDLE_TRANSLATABLE_LABELS` wieder auf `{"text", "paragraph_title",
+  "doc_title", "footer"}` (ohne "image") - der Konfidenz-Filter
+  (`_PADDLE_STRAY_GLYPH_MAX_CHARS`/`_MIN_SCORE`) bleibt unverändert,
+  er hat sich im echten Test bewährt und keinen Nachteil gezeigt.
+  Beide Codestellen mit ausführlichem Kommentar versehen, WARUM
+  "image" absichtlich (wieder) ausgeschlossen ist - damit das nicht
+  versehentlich ein drittes Mal ohne Lösung für das eigentliche
+  Problem (pro-Zeile-Rendering statt Block-Zusammenfassung) versucht
+  wird.
+
+  **Richtiger Fix für Fund 1, noch nicht umgesetzt:** jede der 9
+  kurzen OCR-Zeilen innerhalb eines "image"-Blocks müsste als EIGENE
+  kleine Region an ihrer EIGENEN ursprünglichen Position übersetzt und
+  gezeichnet werden, statt zu einem Absatz zusammengefasst zu werden -
+  deutlich näher am Originaldesign, aber eine grössere Änderung
+  (eigene Zeilen-zu-Region-Logik nur für bestimmte Layoutkategorien,
+  vermutlich mit eigener Kollisionsvermeidung). Nicht heute umgesetzt -
+  Fund 1 bleibt vorerst so wie vor dem 23.08.2026: Block wird
+  übersprungen, Original bleibt auf Englisch sichtbar.
+
+  **Getestet:** `test_paddleocr_recognize_translates_an_image_labeled_
+  block_with_real_text_inside` umbenannt/umgedreht zu
+  `test_paddleocr_recognize_still_excludes_an_image_labeled_block_
+  even_with_real_text_inside` (pinnt jetzt das zurückgerollte
+  Verhalten, mit vollständiger Dokumentation der Historie im
+  Docstring statt stillem Umschreiben). Der Stray-Glyph-Test bleibt
+  unverändert gültig (Ergebnis identisch, ob der "穴"-Block durch
+  Label-Ausschluss oder durch den Konfidenz-Filter rausfällt).
+  `tests/test_image_ocr.py` allein: weiterhin 42 passed. Gesamter
+  Testlauf (`tests/`, ohne `test_ui_images_mode.py`): 185 passed,
+  1 skipped - keine Regressionen.
+
+  Michael gebeten, im nächsten echten Testlauf zu bestätigen, dass (a)
+  der Kelch nicht mehr als "UND" erscheint und (b) die Thoughts/
+  Emotions-Liste wieder wie vor dem 23.08.2026 aussieht (unübersetzt,
+  aber nicht mehr verwaschen/überlappend) - und ob die eigentliche
+  Übersetzung dieser Liste (der grössere, noch offene Fix von oben)
+  priorisiert werden soll.
+
+## 24.08.2026 - Der Revert von eben war selbst die Ursache einer NEUEN, schlimmeren Regression: "image"-Block war komplett unsichtbar für die Kollisionsvermeidung; jetzt als Hindernis-Region ohne Übersetzung geführt
+
+  Michael, nach dem echten Testlauf mit dem Revert: "Das ist jetzt
+  noch schlimmer als das vorherige. Die Font stimmen gar nicht mehr
+  usw.", dazu Screenshot und QA-Bericht "(15)". Screenshot zeigt: die
+  Beschriftung "Enthält:" liegt jetzt weit links, direkt über
+  "Emotions"; die Bullet-Zeile "Alle MUSTER über alle Fleischanzüge
+  hinweg..." zieht sich quer über fast die ganze Breite des Abschnitts
+  und überlappt "Choices"/"Beliefs". QA-Bericht: "Erkannte
+  Textregionen: 41" (genau -1 gegenüber (12)/(13)s 42 - exakt der
+  erwartete Effekt des Reverts, die Kelch-"Y"-Region ist weg, keine
+  neue Region kam dazu). Die Regionenzahl allein sah also "richtig"
+  aus - das eigentliche Problem lag wo anders.
+
+  **Ursache (dritte Runde am selben Tag):** `translate_image.py`s
+  `obstacle_regions`-Mechanismus (gebaut 22.08.2026 GENAU für "eine
+  Nachbar-Region darf nicht über echten, sichtbaren Originalinhalt
+  wachsen") wird aus `stats.regions` gespeist - der Liste, die
+  `ocr_engine.recognize()` zurückgibt. Der Revert von eben liess den
+  "image"-Block (und jede seiner OCR-Zeilen) komplett VOR
+  `_paddle_block_to_region()` fallen - er wurde nie ein
+  `OcrTextRegion`-Objekt, tauchte also auch nie in `stats.regions`
+  auf. Das erst am 23.08.2026 gebaute kaskadierende horizontale
+  Reflow (`_horizontal_room()`) sieht dort also "kein Hindernis, freie
+  Bahn bis zum Bildrand" - und lässt Nachbar-Regionen (die "Enthält:"-
+  Übersetzung, die Bullet-Punkte) ungehindert über den eigentlich noch
+  sichtbaren, unübersetzten Thoughts/Emotions-Text wachsen. Das war
+  VORHER (vor dem 23.08.2026, als es noch kein Reflow gab) nie ein
+  Problem - der Bug entsteht erst durch das Zusammenspiel der beiden
+  heute/gestern gebauten Features, keines der beiden für sich allein
+  genommen ist fehlerhaft.
+
+  **Verifiziert vor dem Fix, mit den echten Bbox-Werten aus der
+  JSON:** `_horizontal_room()` auf die Bullet-Region ohne den
+  Thoughts-Block als Hindernis angewendet liefert `left_room = 462`
+  (praktisch bis zum Bildrand) - mit dem Thoughts-Block als Hindernis
+  `left_room = 68` (korrekt an dessen rechter Kante begrenzt). Das
+  bestätigt die Diagnose exakt, ohne dass ein weiterer echter Testlauf
+  nötig war.
+
+  **Fix: die Region bleibt bestehen, wird aber als nicht-übersetzbar
+  markiert, statt ganz zu verschwinden.** Neues Feld `OcrTextRegion.
+  translatable: bool = True` (`pipeline/images/ocr.py`) - jeder
+  andere Aufrufer/jedes bestehende Fixture lässt es unangetastet auf
+  True. `PaddleOcrEngine.recognize()` baut jetzt für JEDEN Block eine
+  Region (sofern OCR-Zeilen matchen), und markiert sie erst danach
+  `translatable=False`, falls das Label nicht in
+  `_PADDLE_TRANSLATABLE_LABELS` steht (`dataclasses.replace()`, da
+  `OcrTextRegion` frozen ist). `translate_image.py`s Eligibility-
+  Schleife überspringt eine `translatable=False`-Region genauso wie
+  eine mit zu niedriger Konfidenz (neuer `stats.skipped`-Zweig,
+  eigene Logmeldung "Layout-Kategorie nicht für Übersetzung
+  vorgesehen") - sie erreicht nie den Übersetzer, landet aber (über
+  das bereits bestehende `translated_original_ids`-Bookkeeping, ohne
+  jede Änderung dort) ganz normal in `obstacle_regions`.
+  `_max_plausible_height()`s Median-Berechnung ebenfalls um
+  `and region.translatable` ergänzt - ein grossflächiger, absichtlich
+  unübersetzter Block (261px hoch gegenüber ~20px echten Textzeilen)
+  darf den Ausreisser-Schwellwert für die Bounding-Box-Grössenprüfung
+  nicht nach oben verzerren. QA-Bericht-Text in `ui/image_job.py` um
+  den dritten Übersprungs-Grund ergänzt, damit er ehrlich bleibt.
+
+  **Getestet:** `test_paddleocr_recognize_still_excludes_an_image_
+  labeled_block_even_with_real_text_inside` (voriger Eintrag) ersetzt
+  durch `test_paddleocr_recognize_marks_an_image_labeled_block_
+  untranslatable_but_still_returns_it` (prüft `translatable is
+  False`, Text und Bbox der zurückgegebenen Region - mit vollständiger
+  Drei-Versuche-Historie im Docstring, damit niemand das morgen ein
+  viertes Mal falsch macht). Zwei neue Tests in
+  `tests/test_translate_image.py`: `test_translate_image_passes_
+  untranslatable_region_as_an_obstacle_and_never_sends_it` (Provider
+  sieht den Text nie, Region landet trotzdem in `obstacle_regions`)
+  und `test_translate_image_height_outlier_check_ignores_
+  untranslatable_regions` (grosser untranslatable Block verzerrt die
+  Ausreisser-Median-Berechnung nicht, ein echter Icon-Blob-Ausreisser
+  wird trotzdem weiterhin erkannt). `tests/test_image_ocr.py`
+  weiterhin 42 passed. `tests/test_translate_image.py`: 31 passed
+  (vorher 29). Gesamter Testlauf (`tests/`, ohne
+  `test_ui_images_mode.py`): 187 passed, 1 skipped - keine
+  Regressionen.
+
+  Noch offen, unverändert gegenüber dem letzten Eintrag: der
+  eigentliche, grössere Fix für Fund 1 (jede der 9 kurzen Icon-Zeilen
+  einzeln an ihrer Originalposition übersetzen statt als ein Block
+  zusammengefasst) - die Liste bleibt bis dahin unübersetzt (Englisch)
+  sichtbar, jetzt aber korrekt als Hindernis respektiert statt
+  überzeichnet zu werden. Michael gebeten, einen weiteren echten Lauf
+  zu bestätigen: Kelch nicht mehr "UND", Thoughts/Emotions-Bereich
+  nicht mehr überzeichnet, Fusszeilen-Reflow (Fund 3) funktioniert wie
+  vorgesehen.

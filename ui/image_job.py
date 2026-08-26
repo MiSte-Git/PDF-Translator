@@ -280,8 +280,9 @@ def _build_qa_report(
         "Ergebnis",
         f"  Erkannte Textregionen: {len(stats.regions)}",
         f"  Regionen übersetzt: {stats.translated}",
-        f"  Regionen übersprungen (niedrige OCR-Konfidenz oder unplausibel "
-        f"große Bounding-Box): {stats.skipped}",
+        f"  Regionen übersprungen (niedrige OCR-Konfidenz, unplausibel "
+        f"große Bounding-Box oder Layout-Kategorie nicht für Übersetzung "
+        f"vorgesehen): {stats.skipped}",
         f"  Regionen fehlgeschlagen: {stats.failed}",
         f"  Gesendete Zeichen: {stats.chars_sent}",
     ]
