@@ -360,6 +360,108 @@
   festgehalten statt sie nebenbei mitzuentscheiden - siehe Michael dazu
   befragen, sobald die Deployment-Frage wieder aktiv angegangen wird.
 
+  **Update (26.08.2026) - Abhängigkeitsstrategie für den Installer
+  geklärt, Umsetzung weiterhin nicht begonnen:** Michael, zum Einstieg:
+  "Jetzt zum Installer. Wo stehen wir da?" - Rückfrage ergab, dass er
+  zuerst die Abhängigkeitsfrage ausgearbeitet haben möchte, bevor
+  irgendetwas gebaut wird (siehe unten für den vollen Rechercheteil).
+
+  Ausgangslage aus der Recherche: Auto-Erkennung + Inline-Hinweis für
+  fehlende optionale Abhängigkeiten ist bereits vollständig gebaut und
+  läuft unabhängig davon, ob die App aus dem Quellcode oder als
+  gebündelter Installer läuft - `pipeline.images.ocr.
+  tesseract_available()`, `pipeline.registry.ocr_engine_available()`/
+  `inpainting_backend_available()`, `pipeline.images.inpainting.
+  gpu_inpainting_available()`. Offen war nur, WAS bei einer fehlenden
+  Abhängigkeit im Installer-Kontext konkret passieren soll - je nach
+  Abhängigkeit technisch unterschiedlich beantwortet:
+
+  1. **Tesseract-Binary** (kein Python-Paket, System-Programm) -
+     **Entscheidung: wird direkt in den jeweiligen Plattform-Installer
+     mit reingepackt** (PyInstaller kann beliebige Binärdateien
+     mitbündeln), statt nur auf einen externen Installer zu verlinken.
+     Kostet geschätzt ~30-70 MB je nach Sprachpaketen, aber kein
+     Mehraufwand beim Bauen selbst, da Windows/macOS/Linux ohnehin
+     getrennt gebaut werden müssen (siehe 18.08.2026-Eintrag oben).
+  2. **pytesseract + opencv-python-headless** (`requirements-ocr.txt`,
+     reine, moderat große Python-Pakete) - vorgeschlagen, immer mit zu
+     bündeln, unabhängig von Punkt 1 (Michael nicht widersprochen, aber
+     auch nicht explizit einzeln bestätigt - beim nächsten Anfassen des
+     Themas kurz gegenchecken).
+  3. **PaddleOCR** (`requirements-paddleocr.txt`, mehrere hundert MB
+     inkl. Modelle) **und GPU-Inpainting** (`requirements-gpu.txt`,
+     torch/CUDA, GB-Bereich, muss laut der eigenen Anleitung dort
+     ohnehin von Hand zur passenden CUDA-Version installiert werden) -
+     beide sprengen Michaels Größenziel klar, bleiben deshalb NICHT im
+     Basis-Download. Michael: "Es sollte eine Möglichkeit geben das bei
+     der Installation ausgewählt werden kann ob man das mit runterladen
+     möchte, also selbst runterladen, nicht mit im Installer oder gar
+     nicht erst installieren. Mit Hinweis was das bedeutet." -
+     **Entscheidung: eine Komponenten-Auswahl direkt im nativen
+     Setup-Assistenten** (Windows/macOS/Linux, mit Erklärtext zu Größe/
+     Internetbedarf/Zweck), NICHT als In-App-Nachinstallation nach dem
+     ersten Start. Ausdrücklich gegen die einfachere Alternative
+     entschieden (In-App-Download-Button, plattformunabhängig, nutzt
+     die bereits vorhandene Erkennungs-/Hinweis-Logik direkt weiter) -
+     Michael wurde der Mehraufwand genannt (für jede Plattform ein
+     eigenes natives Installer-Toolkit mit eigener Download-Logik
+     während der Installation, z. B. Inno Setup unter Windows, dreimal
+     separat zu pflegen statt einmal in der plattformunabhängigen
+     PySide6-App), hat sich aber bewusst dafür entschieden.
+
+  Weiterhin unverändert offen (siehe 18.08.2026-Eintrag oben): ob
+  Michael die Windows/macOS-Builds selbst auf seinen Geräten baut, oder
+  eine CI-Pipeline das übernehmen soll - diese Entscheidung betrifft
+  jetzt zusätzlich die Wahl des Installer-Toolkits je Plattform (das für
+  Punkt 3 die Download-während-Setup-Logik tragen muss), ist aber noch
+  nicht Teil dieses Updates gewesen. Umsetzung nach wie vor nicht
+  begonnen - noch kein einziger Build (auch kein Linux-Build) erstellt.
+
+  **Update (26.08.2026, direkt im Anschluss) - Build-Strategie geklärt,
+  dabei die Architektur selbst noch einmal aufgerollt:** Michael zur
+  Build-Hardware-Frage: "Im Moment habe ich nur Zugriff auf Linux. Auf
+  einen MacOS werde ich voraussichtlich keinen haben. Deswegen war ja
+  auch ein Web-Ansatz gedacht." Repo liegt bereits auf GitHub - CI
+  (GitHub Actions mit `windows-latest`/`macos-latest`/`ubuntu-latest`-
+  Runnern) würde das reine BAUEN ohne eigene Windows/macOS-Hardware
+  lösen, aber nicht das Testen auf echter Hardware - dieser Unterschied
+  wurde Michael erklärt, bevor er sich entschied.
+
+  Zur Klärung, was "Web-Ansatz" konkret heißen soll, wurden die beiden
+  im 22.08.2026-Eintrag oben bereits unterschiedenen Varianten noch
+  einmal explizit gegenübergestellt: **lokaler Server + Browser-UI**
+  (bleibt komplett lokal, löst das Test-Problem NICHT - das
+  Python-Backend müsste weiterhin nativ pro Plattform gebaut UND
+  getestet werden, nur mit Browser- statt Qt-Oberfläche) vs.
+  **vollwertige gehostete Web-App** (löst das Test-Problem wirklich,
+  da nur eine von Michael selbst betriebene [Linux-]Instanz existiert,
+  aber Dokumente - auch die vertraulichen ICO-PDFs - würden dafür zur
+  Verarbeitung hochgeladen statt lokal zu bleiben, plus dauerhafter
+  Hosting-Betrieb und Mehrbenutzer-Zugangsdaten-Verwaltung).
+
+  **Entscheidung (Michael, nach dieser Klarstellung):** "Also einen
+  Installer der alles auf dem lokalen Browser startet. Also in Richtung
+  Lokaler Server + Browser UI, aber auch als App." - also NICHT die
+  gehostete Variante (Dokumente bleiben lokal), sondern ein Installer/
+  Programm, das lokal einen Server startet und die Oberfläche im
+  Browser (oder einer eingebetteten Browser-Ansicht) zeigt. Ausdrücklich
+  noch einmal auf die Konsequenz hingewiesen - CI bleibt trotzdem nötig
+  (das Backend muss weiterhin pro Plattform gebaut werden), Testen auf
+  echter Hardware bleibt trotzdem ungelöst, und es wäre ein kompletter
+  UI-Neubau (die gesamte bestehende PySide6/Qt-Oberfläche, inkl. des
+  gerade erst fertiggestellten Card-Redesigns vom selben Tag, würde
+  durch eine HTML/CSS/JS-Oberfläche ersetzt) - Michael, nach Nennung
+  dieser drei Punkte: "Ja, trotzdem umbauen."
+
+  **Umsetzung:** noch nicht begonnen. Nächster Schritt ist eine
+  ausführliche Planungsrunde (Architektur: eingebettete Browser-Ansicht
+  z. B. via pywebview vs. Start im System-Standardbrowser; wie der
+  bestehende PySide6-Job-/Worker-/i18n-/Settings-Code wiederverwendet
+  vs. neu gebaut wird; ob die 22.08.2026 bereits gebaute lokale-Server-
+  Lösung der Bildkorrektur als Vorbild/Baustein dient), bevor
+  irgendeine Zeile Code geändert wird - Umfang und Risiko sind deutlich
+  größer als alles bisher in diesem Projekt umgebaute.
+
 - Cross-Projekt: Bildübersetzung als Basis für TME (21.08.2026, Claude per
   Cowork, im Rahmen einer TME-Session geprüft): TME (github.com/MiSte-Git/TME,
   Telegram-Export-Tool desselben Nutzers) hat in seinem eigenen Backlog einen
@@ -4314,3 +4416,92 @@
   Assert in einem bestehenden Test, keine neue Testfunktion). Noch
   nicht erneut visuell bestätigt - Michael um einen weiteren
   Screenshot gebeten.
+
+## 26.08.2026 - Umbau auf lokaler Server + pywebview: Planungsrunde abgeschlossen, erster Umsetzungsschritt (i18n-Split + settings_store) fertig
+
+  Direkt im Anschluss an die Build-Strategie-Klärung (siehe Eintrag oben,
+  "Also einen Installer der alles auf dem lokalen Browser startet [...]
+  Lokaler Server + Browser UI, aber auch als App", "Ja, trotzdem
+  umbauen"): eine ausführliche Planungsrunde (drei parallele
+  Explore-Agenten + ein Plan-Agent, per `EnterPlanMode`) hat einen
+  konkreten Umsetzungsplan für einen ersten Gehversuch ergeben - nur der
+  Bild-Übersetzungs-Modus, Ende-zu-Ende, bevor PDF/Word/PPTX angefasst
+  werden. Michael hat dabei zwei weitere Entscheidungen getroffen:
+  App-Hülle **pywebview** (natives Fenster statt System-Browser-Tab -
+  `create_file_dialog()` gibt einen echten systemeigenen Datei-Dialog,
+  ersetzt `QFileDialog` direkt, praktischer Vorteil nicht nur
+  Kosmetik), und **Bilder übersetzen** als erster Gehversuch (weil dafür
+  mit `image_translate_cli/review_server.py`, 22.08.2026 für den
+  Korrektur-Dialog gebaut, bereits ein funktionierendes Vorbild für
+  "lokaler `http.server` + eigenständige HTML/JS-Seite" existiert).
+
+  Wichtiger Zwischenfund bei der Planung: die Sandbox-Kopien aus
+  früheren Sitzungen waren uneinheitlich (teils veraltet, teils
+  unvollständig) - vor dem eigentlichen Planen wurde deshalb ein
+  frischer Abgleich gegen das echte Gerät gemacht (`ui/models.py`
+  existiert und ist bereits vollständig Qt-frei laut eigenem Docstring;
+  `image_translate_cli/cli.py`/`review_server.py`/`regions_io.py` sind
+  auf dem echten Gerät vollständig und aktuell; `ui/i18n.py` importiert
+  `PySide6.QtCore` bereits auf Modulebene, Zeile 6, VOR den reinen
+  Katalog-Dicts). Der vollständige Plan liegt in
+  `/root/.claude/plans/moonlit-humming-brook.md` (Architektur, HTTP-API,
+  Reihenfolge in 8 Schritten, explizite Nicht-Ziele) - hier nur die
+  Kurzfassung der ersten Umsetzung.
+
+  **Schritt 1 umgesetzt (von 8 laut Plan):** `ui/i18n.py`s reine
+  Katalog-Daten (`LocaleInfo`/`LOCALES`/`DE`/`EN`/`CATALOGUES`, 158
+  Schlüssel je Sprache, byte-identisch übernommen) nach neues
+  `ui/i18n_data.py` ausgelagert - dieses Modul importiert NICHTS aus
+  PySide6, verifiziert durch einen echten Test mit geblocktem
+  `PySide6`-Import (`sys.meta_path`-Trick, kein Mock). `ui/i18n.py`
+  selbst bleibt als schlanker Re-Export bestehen (`from ui.i18n_data
+  import ...`) und behält nur `LanguageManager(QObject)` - jeder
+  bestehende `from ui.i18n import DE/CATALOGUES/...`-Aufruf funktioniert
+  unverändert weiter, die Qt-App ist von diesem Schritt nicht betroffen.
+
+  Neues Paket `webapp/` (gleichrangig zu `ui/`/`pipeline/`/
+  `image_translate_cli/`), bisher nur `settings_store.py`: stdlib-only
+  JSON-Datei im OS-üblichen Konfigurationsordner (`$XDG_CONFIG_HOME`/
+  `%APPDATA%`/`~/Library/Application Support`, per `sys.platform`-
+  Verzweigung ermittelt, bewusst ohne neue Abhängigkeit wie
+  `platformdirs`) als Ersatz für `QSettings("PDF-Translator", "Document
+  Translator")`. Feldnamen orientieren sich an `ui/app.py`s
+  `_persist_form_state()`/`_restore_form_state()` (Zeile 380-438),
+  minus der PDF/Word-only-Felder (`form.mode`, `form.ico_mode` usw.),
+  die für den Bild-only-Piloten nicht gebraucht werden. `load()` fällt
+  bei fehlender oder kaputter Datei sauber auf `DEFAULTS` zurück
+  (nie ein Absturz beim Server-Start), `save()` ist ein
+  Read-Modify-Write (Teil-Update, kein Überschreiben nicht genannter
+  Felder) - beides mit echten Dateisystem-Tests in
+  `tests/test_webapp_settings_store.py` verifiziert, nicht nur
+  behauptet. Zugangsdaten (`ui/settings.py::credential_status()`/
+  `save_credential()`) bleiben unverändert, da sie schon heute über
+  Env-Variablen/`keyring` laufen, nicht über `QSettings`.
+
+  **Getestet:** `webapp` importiert und läuft nachweislich auch mit
+  komplett geblocktem `PySide6`-Import (derselbe `sys.meta_path`-Test
+  wie oben, diesmal inklusive eines echten `save()`/`load()`-Rundlaufs).
+  Neu: `tests/test_webapp_settings_store.py` (6 Tests: Standardwerte
+  bei fehlender/kaputter Datei, echter Rundlauf, Teil-Update statt
+  Überschreiben, automatisches Anlegen fehlender Ordner,
+  Konfigurationspfad-Auflösung für Linux/Windows/macOS je einzeln mit
+  `monkeypatch` geprüft - nie der echte `~/.config`-Pfad angefasst,
+  analog zu `tests/conftest.py`s QSettings-Isolationsbegründung).
+  `tests/test_ui_i18n.py`: weiterhin 3 passed (Katalog-Parität etc.
+  unverändert, da `ui.i18n.CATALOGUES` weiterhin exakt dasselbe Objekt
+  liefert wie vorher). Gesamter Testlauf (`tests/`, ohne
+  `test_ui_images_mode.py`): 203 passed (vorher 197), 1 skipped - keine
+  Regressionen.
+
+  **Noch offen (Schritte 2-8 laut Plan):** `webapp/server.py` +
+  `webapp/job_bridge.py` (HTTP-Server, `/api/config` + `/api/analyze`
+  zuerst, noch ohne Seiteneffekte), das statische Frontend, der
+  eigentliche Job-Start/Fortschritt/Abbruch-Pfad, das
+  Bestätigungs-Gate Ende-zu-Ende, der pywebview-Bootstrap, die
+  QA-Bericht-Anzeige, und zuletzt die `review_server.py`-Übergabe
+  (braucht einen kleinen, abwärtskompatiblen Refactor von
+  `run_review_session()` in `start_review_server()` + separate
+  Blockier-Logik, damit die URL sofort verfügbar ist statt erst nach
+  Ende der Korrektursitzung). Ausdrücklich nicht Teil dieses oder der
+  nächsten Schritte: Installer/CI, PDF/Word/PPTX-Migration, Entfernen
+  der bestehenden Qt-App.
