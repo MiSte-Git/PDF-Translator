@@ -194,6 +194,10 @@ button.primary:disabled {
 
 .result p {
     margin: 0 0 8px;
+    /* job.result_summary_images/start.confirm_summary_images embed
+       literal "\n" line breaks (see ui/i18n_data.py) - pre-line renders
+       those without needing a second, <br>-based copy of every template. */
+    white-space: pre-line;
 }
 
 .result ul {
@@ -210,4 +214,28 @@ button.primary:disabled {
     color: var(--muted);
     font-size: 13px;
     margin-top: 8px;
+    white-space: pre-line;
+}
+
+.checkbox-field label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 400;
+    cursor: pointer;
+}
+
+.checkbox-field input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+.checkbox-field input[type="checkbox"]:disabled {
+    cursor: default;
+}
+
+#cancel-button {
+    margin-left: 8px;
 }

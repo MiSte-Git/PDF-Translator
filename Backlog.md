@@ -4709,3 +4709,64 @@
   serverseitige Nachprüfung ohne vorheriges `/api/analyze`), der
   pywebview-Bootstrap mit `create_file_dialog()`, die QA-Bericht-Anzeige,
   und zuletzt die `review_server.py`-Übergabe.
+
+  **Update (26.08.2026, direkt im Anschluss) - Schritt 5 abgeschlossen:
+  Bestätigungs-Gate Ende-zu-Ende verdrahtet.** Die serverseitige Hälfte
+  des Gates (die Fail-Fast-Prüfungen in `start_job()`) stand technisch
+  schon seit Schritt 4, da `start_job()` nie geprüft hat, ob vorher
+  `/api/analyze` aufgerufen wurde - neu ist die FRONTEND-Hälfte plus ein
+  Test, der diese Unabhängigkeit ausdrücklich benennt statt sie nur
+  beiläufig mitzubeweisen.
+
+  `app.js` bekam eine Zustandsmaschine, die `ui/app.py`s eigene
+  `_start_blocked_reason()`/`_invalidate_analysis()`/`_analysis_finished()`
+  spiegelt: der Start-Button bleibt deaktiviert, bis (1) eine Analyse
+  erfolgreich war UND (2) die neue Checkbox "Analyse und Kostenschätzung
+  geprüft" angehakt ist. Jede Änderung an einem preisrelevanten Feld
+  (Quelle, Anbieter, Sprachen, geschützte Begriffe, OCR-Engine,
+  Rückschreibe-Methode) entwertet eine vorhandene Analyse sofort wieder -
+  genau dieselben Feld-Änderungssignale, an die auch `ui/app.py`s
+  `_invalidate_analysis()` gebunden ist. Wie in der Qt-App bleibt die
+  Checkbox deaktiviert, wenn die Schätzung das Zeichen-Lauflimit
+  überschreitet (`cost.within_run_limit`) - ein Überschuss lässt sich
+  ansehen, aber nicht bestätigen. Nach jedem abgeschlossenen Lauf (fertig,
+  abgebrochen oder fehlgeschlagen) verlangt der nächste Start wieder eine
+  frische Analyse.
+
+  Neu im Formular: ein Zielordner-Textfeld (`output_dir` für `/api/jobs`,
+  dieselbe Interims-Begründung wie beim Quellpfade-Textfeld - Schritt 6
+  ersetzt beide durch `pywebview.create_file_dialog()`), ein
+  Abbrechen-Button (verdrahtet auf `/api/jobs/<id>/cancel`), ein
+  Bestätigungsdialog vor dem eigentlichen Start (`window.confirm()` mit
+  demselben `start.confirm_summary_images`-Text wie Qt's
+  `QMessageBox.question()` - `window.confirm()` bleibt unter pywebview in
+  Schritt 6 ein natives Dialogfenster, keine Anpassung nötig), und ein
+  Status-Polling (800ms, `job.progress_count_files`/`job.progress_prefix`)
+  bis zum Ergebnis (`job.result_summary_images`).
+
+  **Getestet:** Gesamter Testlauf (`tests/`, ohne `test_ui_images_mode.py`):
+  221 passed (vorher 220), 1 skipped - keine Regressionen. Neuer,
+  ausdrücklich benannter Test `test_start_job_enforces_checks_without_a_
+  prior_analyze_call` (ergänzt den bereits bestehenden
+  `test_start_job_runs_a_real_batch_end_to_end`, der ebenfalls nie
+  `/api/analyze` aufruft) - beweist beide Richtungen: `/api/jobs`
+  funktioniert UND lehnt korrekt ab, unabhängig davon, ob der Client
+  vorher analysiert hat.
+
+  Zusätzlich mit Playwright (im Sandbox bereits vorinstalliert, echter
+  Chromium, kein Mock) von Hand gegen den echten laufenden Server
+  geprüft, nicht nur über die Test-Suite: Start-Button und Checkbox
+  starten deaktiviert; nach erfolgreicher Analyse wird die Checkbox
+  aktiv, der Start-Button bleibt bis zum Anhaken blockiert; nach dem
+  Anhaken wird gestartet; der `window.confirm()`-Dialog erscheint mit dem
+  korrekten, mit echten Zahlen gefüllten Text; der Lauf (echtes Testbild,
+  echtes Tesseract-OCR, `FakeProvider`) läuft durch bis zum Ergebnis mit
+  korrektem Text; danach ist das Gate wieder blockiert. Keine
+  JavaScript-Fehler in der Konsole (bis auf ein harmloses
+  `favicon.ico`-404, das der Browser automatisch anfragt - keine eigene
+  Route dafür angelegt, nicht Teil des Plans).
+
+  **Noch offen (Schritte 6-8 laut Plan):** der pywebview-Bootstrap
+  (`webapp/__main__.py`, `create_file_dialog()` ersetzt die beiden
+  Textfelder für Quelle/Zielordner), die QA-Bericht-Anzeige, und zuletzt
+  die `review_server.py`-Übergabe.

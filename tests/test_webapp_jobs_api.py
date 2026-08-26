@@ -118,6 +118,13 @@ def _poll_until_finished(base_url: str, job_id: str, timeout_seconds: float = 10
 def test_start_job_runs_a_real_batch_end_to_end(
     running_server: str, fake_deepl_credential: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    # No /api/analyze call anywhere in this test - Schritt 5's
+    # confirmation gate (app.js only enables the Start button after a
+    # successful analyze + a checked confirmation box) is a client-side
+    # UX affordance, not what makes /api/jobs safe. This test's success
+    # here, together with test_start_job_enforces_checks_without_a_prior_
+    # analyze_call's rejection below, is the concrete proof for both
+    # directions of that claim.
     monkeypatch.setattr(image_job_module, "build_provider", lambda name: FakeProvider())
     source = tmp_path / "photo.png"
     _build_image(source, "Hello")
@@ -155,6 +162,27 @@ def test_start_job_runs_a_real_batch_end_to_end(
     assert file_entry["has_correctable_regions"] is True
     assert Path(file_entry["output"]).is_file()
     assert Path(file_entry["qa_report"]).is_file()
+
+
+def test_start_job_enforces_checks_without_a_prior_analyze_call(
+    running_server: str, tmp_path: Path
+) -> None:
+    """Schritt 5, the other half of the confirmation-gate proof: a client
+    that skips /api/analyze entirely and posts straight to /api/jobs is
+    rejected by the SAME fail-fast checks as ui/app.py::_start() runs
+    (here: missing credential, no fake_deepl_credential fixture) - the
+    RoadMap.md Leitprinzip holds even for a client that never asked for a
+    cost estimate at all, not just one that asked and was ignored.
+    """
+    source = tmp_path / "photo.png"
+    _build_image(source, "Hello")
+    status, payload = _post_json(
+        f"{running_server}/api/jobs",
+        {"source_paths": [str(source)], "output_dir": str(tmp_path / "out"), "provider": "deepl"},
+    )
+    assert status == 400
+    assert payload["ok"] is False
+    assert any("deepl" in message for message in payload["errors"])
 
 
 def test_start_job_rejects_empty_source_paths(running_server: str, fake_deepl_credential: None) -> None:

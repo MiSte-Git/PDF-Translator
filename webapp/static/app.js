@@ -1,11 +1,24 @@
 "use strict";
 
-/* webapp/static/app.js - Schritt 3 (Frontend-Grundgerüst) des Umbaus auf
- * lokaler Server + pywebview, siehe Backlog.md 26.08.2026 und
- * /root/.claude/plans/moonlit-humming-brook.md. Deckt GET /api/config
- * (Formular füllen) und POST /api/analyze (Kostenschätzung anzeigen) ab.
- * Kein Job-Start (Schritt 4/5), keine native Datei-Auswahl (Schritt 6 -
- * das Textfeld für Quellpfade unten ist eine bewusste Übergangslösung).
+/* webapp/static/app.js - Umbau auf lokaler Server + pywebview, siehe
+ * Backlog.md 26.08.2026 und /root/.claude/plans/moonlit-humming-brook.md.
+ *
+ * Schritt 3: GET /api/config (Formular füllen) + POST /api/analyze
+ * (Kostenschätzung anzeigen).
+ * Schritt 5: das Bestätigungs-Gate Ende-zu-Ende - der Start-Button wird
+ * erst nutzbar, nachdem /api/analyze erfolgreich war UND die Checkbox
+ * "Analyse und Kostenschätzung geprüft" angehakt ist (mirrors
+ * ui/app.py::_start_blocked_reason()); jede Formular-Änderung
+ * entwertet eine vorhandene Analyse wieder (mirrors
+ * ui/app.py::_invalidate_analysis(), an dieselben Feld-Änderungssignale
+ * angehängt). POST /api/jobs startet den Lauf, GET .../status wird
+ * gepollt, GET .../result zeigt das Ergebnis. Die serverseitige
+ * Nachprüfung in webapp/job_bridge.py::start_job() gilt unabhängig
+ * davon, ob hier überhaupt zuvor analysiert wurde - dieses Gate ist
+ * Verteidigung in der Tiefe, keine alleinige Kontrolle.
+ *
+ * Keine native Datei-/Ordner-Auswahl (Schritt 6 - die Textfelder für
+ * Quellpfade/Zielordner sind eine bewusste Übergangslösung).
  *
  * Kein Framework/Build-Schritt, exakt wie image_translate_cli/review_server.py's
  * eigenes Frontend und wie im Plan festgehalten ("echte Dateien statt
@@ -14,6 +27,9 @@
 
 let catalogue = {};
 let currentLanguage = "de";
+let lastAnalysis = null; // null, or the last successful /api/analyze response
+let activeJobId = null;
+let pollTimer = null;
 
 function t(key, fallback) {
   return catalogue[key] !== undefined ? catalogue[key] : (fallback !== undefined ? fallback : key);
@@ -163,12 +179,18 @@ function renderAnalysisResult(result) {
   const summaryEl = document.getElementById("analysis-summary");
   const warningsEl = document.getElementById("analysis-warnings");
   const statusEl = document.getElementById("analysis-status");
+  const checkbox = document.getElementById("confirm-checkbox");
   warningsEl.innerHTML = "";
 
   if (!result.ok) {
     resultEl.classList.add("hidden");
     statusEl.textContent = `${t("analysis.failed", "Analyse fehlgeschlagen.")} ${result.errors.join(" ")}`;
-    setStartBlocked(t("start.blocked_no_analysis"));
+    // Mirrors ui/app.py::_analysis_failed(): a failed re-analysis leaves
+    // any PREVIOUS successful analysis (lastAnalysis) untouched - only a
+    // form-field change (invalidateAnalysis()) or a SUCCESSFUL analyze
+    // clears it. updateStartState() re-reads whatever lastAnalysis
+    // already is.
+    updateStartState();
     return;
   }
 
@@ -211,14 +233,48 @@ function renderAnalysisResult(result) {
   resultEl.classList.remove("hidden");
   statusEl.textContent = "";
 
-  // /api/jobs (Job-Start) kommt erst in Schritt 4 - bis dahin bleibt der
-  // Start-Button bewusst deaktiviert, auch nach erfolgreicher Analyse.
-  setStartBlocked(t("start.pending"));
+  lastAnalysis = result;
+  // Mirrors ui/app.py::_analysis_finished(): the confirm checkbox is only
+  // enabled when the estimated run stays within max_chars_per_run - an
+  // over-limit analysis can be SEEN but not confirmed/started from here.
+  checkbox.checked = false;
+  checkbox.disabled = !cost.within_run_limit;
+  updateStartState();
 }
 
-function setStartBlocked(message) {
-  document.getElementById("start-button").disabled = true;
-  document.getElementById("start-status").textContent = message;
+/* Entwertet eine vorhandene Analyse - mirrors
+ * ui/app.py::_invalidate_analysis(), an dieselben Signale angehängt wie
+ * dort (jede relevante Formular-Änderung). Ohne das könnte der
+ * Start-Button mit einer Kostenschätzung für ein längst geändertes
+ * Formular losgeschickt werden. */
+function invalidateAnalysis() {
+  lastAnalysis = null;
+  const checkbox = document.getElementById("confirm-checkbox");
+  checkbox.checked = false;
+  checkbox.disabled = true;
+  document.getElementById("analysis-result").classList.add("hidden");
+  document.getElementById("analysis-status").textContent = "";
+  updateStartState();
+}
+
+/* Mirrors ui/app.py::_start_blocked_reason() - exactly one reason is
+ * shown at a time, in the same priority order. */
+function updateStartState() {
+  const startButton = document.getElementById("start-button");
+  const startStatus = document.getElementById("start-status");
+  const checkbox = document.getElementById("confirm-checkbox");
+
+  let reasonKey = null;
+  if (activeJobId !== null) {
+    reasonKey = "start.blocked_running";
+  } else if (!lastAnalysis) {
+    reasonKey = "start.blocked_no_analysis";
+  } else if (!checkbox.checked) {
+    reasonKey = "start.blocked_not_confirmed";
+  }
+
+  startButton.disabled = reasonKey !== null;
+  startStatus.textContent = reasonKey ? t(reasonKey) : t("start.ready", "Bereit zum Start.");
 }
 
 async function runAnalysis() {
@@ -242,10 +298,163 @@ async function runAnalysis() {
   }
 }
 
+async function runStart() {
+  if (!lastAnalysis) return;
+  const outputDir = document.getElementById("output-dir").value.trim();
+  const startStatus = document.getElementById("start-status");
+  if (!outputDir) {
+    startStatus.textContent = "Zielordner fehlt.";
+    return;
+  }
+
+  const cost = lastAnalysis.cost;
+  const sourceCount = document
+    .getElementById("source-paths")
+    .value.split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0).length;
+  const summary = formatTemplate(t("start.confirm_summary_images"), {
+    characters: cost.characters,
+    provider: cost.provider,
+    cost: cost.estimated_cost_usd,
+    count: sourceCount,
+    folder: outputDir,
+  });
+  // window.confirm() - a plain native dialog is enough for this
+  // browser-only interim step (pywebview's own window.confirm() also
+  // maps to a native dialog once Schritt 6 lands, so no rewrite needed
+  // there); mirrors ui/app.py::_start()'s QMessageBox.question() gate.
+  if (!window.confirm(summary)) return;
+
+  const body = { ...gatherRequestBody(), output_dir: outputDir };
+  document.getElementById("job-result").classList.add("hidden");
+  startStatus.textContent = t("job.running", "Übersetzung läuft …");
+
+  let response;
+  try {
+    response = await fetch("/api/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    startStatus.textContent = String(error);
+    return;
+  }
+  const result = await response.json();
+  if (!result.ok) {
+    startStatus.textContent = result.errors.join(" ");
+    updateStartState();
+    return;
+  }
+
+  activeJobId = result.job_id;
+  document.getElementById("cancel-button").classList.remove("hidden");
+  updateStartState();
+  pollJobStatus();
+}
+
+function renderJobProgress(status) {
+  const progressText = formatTemplate(t("job.progress_count_files"), {
+    processed: status.files_processed,
+    total: status.files_total,
+  });
+  const detail = status.progress_message
+    ? formatTemplate(t("job.progress_prefix"), { location: status.progress_message })
+    : "";
+  document.getElementById("start-status").textContent = [t("job.running"), progressText, detail]
+    .filter((part) => part)
+    .join(" — ");
+}
+
+function pollJobStatus() {
+  if (pollTimer) clearInterval(pollTimer);
+  // 800ms - within the plan's stated 750ms-1s polling interval (see
+  // /root/.claude/plans/moonlit-humming-brook.md's "Polling statt
+  // SSE/WebSockets"-Entscheidung).
+  pollTimer = setInterval(async () => {
+    if (!activeJobId) return;
+    const jobId = activeJobId;
+    let response;
+    try {
+      response = await fetch(`/api/jobs/${jobId}/status`);
+    } catch (error) {
+      return; // transient network hiccup - try again on the next tick
+    }
+    const status = await response.json();
+    if (!status.ok) return;
+    renderJobProgress(status);
+    if (status.status !== "running") {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      await finishJob(jobId, status);
+    }
+  }, 800);
+}
+
+async function finishJob(jobId, status) {
+  activeJobId = null;
+  document.getElementById("cancel-button").classList.add("hidden");
+  const startStatus = document.getElementById("start-status");
+
+  if (status.status === "failed") {
+    startStatus.textContent = `${t("job.failed_title", "Übersetzung fehlgeschlagen")}: ${status.error || ""}`;
+  } else {
+    const response = await fetch(`/api/jobs/${jobId}/result`);
+    const result = await response.json();
+    if (result.ok) {
+      renderJobResult(result, status.status === "cancelled");
+    } else {
+      startStatus.textContent = result.errors.join(" ");
+    }
+  }
+
+  // Jeder abgeschlossene Lauf (erfolgreich, abgebrochen oder
+  // fehlgeschlagen) verlangt vor dem nächsten Start wieder eine frische
+  // Analyse + Bestätigung - dasselbe Leitprinzip wie bei jeder
+  // Formular-Änderung, nur hier durch den Lauf selbst ausgelöst statt
+  // durch eine Eingabe.
+  invalidateAnalysis();
+}
+
+function renderJobResult(result, wasCancelled) {
+  const translated = result.files.reduce((sum, file) => sum + file.translated, 0);
+  const failed = result.files.reduce((sum, file) => sum + file.failed, 0);
+  const chars = result.files.reduce((sum, file) => sum + file.chars_sent, 0);
+  let text = formatTemplate(t("job.result_summary_images"), {
+    files: result.files.length,
+    translated,
+    failed,
+    chars,
+    output_dir: result.output_dir,
+  });
+  if (wasCancelled) {
+    text += t("job.result_cancelled_suffix", "");
+  }
+  document.getElementById("job-result-summary").textContent = text;
+  document.getElementById("job-result").classList.remove("hidden");
+}
+
+async function runCancel() {
+  if (!activeJobId) return;
+  const button = document.getElementById("cancel-button");
+  button.disabled = true;
+  document.getElementById("start-status").textContent = t("job.cancel_requested");
+  try {
+    await fetch(`/api/jobs/${activeJobId}/cancel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function init() {
   await loadCatalogue(currentLanguage);
   await loadConfig();
-  setStartBlocked(t("start.blocked_no_analysis"));
+  updateStartState();
 
   document.getElementById("language-select").value = currentLanguage;
   document.getElementById("language-select").addEventListener("change", async (event) => {
@@ -255,9 +464,32 @@ async function init() {
     // Sprachwechsel neu aufgebaut statt nur die statischen data-i18n-
     // Knoten zu aktualisieren.
     await loadConfig();
+    updateStartState();
   });
 
   document.getElementById("analyze-button").addEventListener("click", runAnalysis);
+  document.getElementById("confirm-checkbox").addEventListener("change", updateStartState);
+  document.getElementById("start-button").addEventListener("click", runStart);
+  document.getElementById("cancel-button").addEventListener("click", runCancel);
+
+  // Jede Änderung an einem preisrelevanten Feld entwertet eine
+  // vorhandene Analyse - mirrors ui/app.py's _invalidate_analysis()-
+  // Verdrahtung an dieselben Felder. "output-dir" ist bewusst NICHT
+  // dabei: der Zielordner fließt nicht in die Kostenschätzung ein.
+  const priceRelevantFieldIds = [
+    "source-paths",
+    "provider",
+    "source-language",
+    "target-language",
+    "protected-terms",
+    "ocr-engine",
+    "inpainting-backend",
+  ];
+  priceRelevantFieldIds.forEach((id) => {
+    const el = document.getElementById(id);
+    const eventName = el.tagName === "SELECT" ? "change" : "input";
+    el.addEventListener(eventName, invalidateAnalysis);
+  });
 }
 
 init();
