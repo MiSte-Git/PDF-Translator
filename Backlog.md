@@ -4938,3 +4938,128 @@
   der riskanteste verbleibende Eingriff, da er einen bereits genutzten,
   bestehenden Ablauf (`image_translate_cli/cli.py::_cmd_review()`)
   aufspaltet; `_cmd_review()` wird danach erneut regressionsgeprüft.
+
+  **Update (26.08.2026, direkt im Anschluss) - Schritt 8 abgeschlossen:
+  `review_server.py`-Übergabe. Der Plan ist damit vollständig
+  umgesetzt.** `image_translate_cli/review_server.py::run_review_session()`
+  war bisher EIN blockierender Aufruf (bindet den Korrektur-Server, wartet
+  bis "Anwenden"/"Abbrechen"/Zeitüberschreitung, gibt erst danach
+  zurück) - für `webapp/` unbrauchbar, da ein HTTP-Request-Handler nie
+  bis zu 30 Minuten auf einen Menschen in einem separaten Browser-Tab
+  warten darf. Aufgespalten (wie im Plan vorgesehen) in
+  `start_review_server()` (bindet, startet, gibt sofort eine neue
+  `ReviewSession` mit fertiger `.url` zurück - blockiert nicht) und
+  `ReviewSession.wait()` (die bisherige Blockier-/Wartelogik, jetzt
+  separat aufrufbar). `run_review_session()` selbst ist nur noch ein
+  dünner Wrapper aus beidem - exakt dieselbe Signatur, dasselbe
+  Verhalten wie vorher, `image_translate_cli/cli.py::_cmd_review()`
+  unverändert lauffähig.
+
+  Neues `webapp/review_bridge.py`: `POST /api/jobs/<id>/files/<index>/
+  correct` startet `start_review_server()` für EIN Bild aus einem
+  abgeschlossenen Batch-Lauf (Quelle = `target.source_path`, Regionen =
+  `target.stats.replacements` - dieselben Werte, die
+  `ui/app.py::_open_image_correction_dialog()` auch an
+  `ImageCorrectionDialog` übergibt) und antwortet SOFORT mit
+  `{correction_id, url}`, ohne zu blockieren. Ein eigener
+  Hintergrund-Thread ruft danach `ReviewSession.wait()` auf und
+  reagiert je nach Ausgang: bei "Anwenden" wird
+  `ui/image_job.py::run_image_correction_job()` aufgerufen (dieselbe
+  Funktion, die `ImageCorrectionDialog._apply()` in der Qt-App auch
+  nutzt) und das Ergebnis per neuem `job_bridge.apply_correction_result()`
+  an derselben Position in `job.result.stats.results` gespliced -
+  dieselbe Splice-Logik wie `_open_image_correction_dialog()`, nur nach
+  Index statt nach Python-Objektidentität adressiert. `GET
+  /api/corrections/<id>/status` wird vom Frontend gepollt (dieselbe
+  "Polling statt Push"-Entscheidung wie beim Job-Status) und liefert bei
+  "applied" das schon aktualisierte Datei-Objekt gleich mit.
+
+  Ein zweiter gleichzeitiger Korrektur-Versuch auf DASSELBE Bild wird
+  abgelehnt ("Für dieses Bild läuft bereits eine Korrektur.") - dieselbe
+  "eine Sache gleichzeitig"-Grundidee wie `_ACTIVE_JOB_ID` für ganze
+  Läufe, hier nur pro Bild statt pro Job; zwei VERSCHIEDENE Bilder
+  desselben Laufs dürfen weiterhin gleichzeitig in zwei Tabs korrigiert
+  werden.
+
+  **Frontend:** jede Ergebniszeile mit korrigierbaren Regionen (Schritt
+  7) bekommt jetzt zusätzlich einen "Übersetzung korrigieren"-Button.
+  Klick startet die Korrektur, öffnet die zurückgegebene URL per
+  `window.open()` und pollt bis zum Ergebnis, ohne die Hauptseite zu
+  blockieren; bei "applied" wird die komplette Dateizeile neu gerendert
+  (frischer QA-Bericht-Button statt des jetzt veralteten Berichtstexts).
+
+  **Empirisch geklärt, was der Plan als offene Frage benannt hatte
+  ("`window.open()` - in pywebview typischerweise ein neues natives
+  Fenster statt Browser-Tab, aber plattformabhängig, muss in Schritt 6
+  empirisch geprüft werden"):** unter pywebviews Qt-Backend ist das
+  NICHT der Fall. `webview.platforms.qt.py`s `WebPage.createWindow()`
+  fängt jede `window.open()`-Anfrage ab und übergibt sie an
+  `NavigationHandler.acceptNavigationRequest()`, die (Standardeinstellung
+  `OPEN_EXTERNAL_LINKS_IN_BROWSER = True`, in dieser Sandbox nachgewiesen
+  über einen echten pywebview-Lauf unter `xvfb-run` mit einem
+  monkeypatchten `webbrowser.open()`, das den Aufruf aufgezeichnet hat)
+  `webbrowser.open()` aufruft - die URL landet also im System-
+  Standardbrowser, NICHT in einem zweiten nativen pywebview-Fenster. Für
+  diesen Anwendungsfall ist das genau richtig: das Haupt-App-Fenster
+  bleibt dabei unblockiert weiter nutzbar (die Polling-Schleife läuft im
+  selben Fenster weiter), während die Korrektur in einem gewöhnlichen
+  Browser-Tab passiert - kein Sonderfall für pywebview nötig, dieselbe
+  `window.open()`-Zeile funktioniert im normalen Browser (Schritt 3)
+  identisch.
+
+  **Getestet:** Zwei neue Testdateien. `tests/test_review_server.py` (6
+  Tests, KEIN Browser - ein Hintergrund-Thread spielt exakt dieselben
+  GET/POST-Aufrufe nach, die `_PAGE_HTML`s eigenes JS macht): beweist,
+  dass `start_review_server()` sofort mit einer nutzbaren `.url`
+  zurückkehrt, dass `ReviewSession.wait()` alle drei Ausgänge
+  (apply/cancel/timeout) korrekt liefert, dass `run_review_session()`
+  als dünner Wrapper `webbrowser.open()` weiterhin mit der richtigen URL
+  aufruft und blockiert bis zur Aktion, UND (erste Testdatei überhaupt
+  für `image_translate_cli/cli.py::main()`) dass der komplette `review`-
+  Unterbefehl Ende-zu-Ende noch funktioniert - Regionen-Datei einlesen,
+  Korrektur-Server starten, "Anwenden" simulieren, Exit-Code und
+  neu gerenderte Datei prüfen.
+
+  `tests/test_webapp_correction_api.py` (6 Tests, echte HTTP-Aufrufe
+  gegen einen laufenden `webapp.server`, kein Mocking von
+  `webapp.review_bridge`/`webapp.job_bridge` selbst): ein voller Lauf
+  von Batch-Übersetzung bis Korrektur - Bild übersetzen, Korrektur
+  starten, als "Browser" gegen die zurückgegebene Korrektur-URL
+  `/api/state`+`/api/apply` mit bearbeitetem Text aufrufen, per Polling
+  auf "applied" warten, prüfen, dass `/api/jobs/<id>/result` jetzt den
+  korrigierten QA-Bericht ("... nach manueller Korrektur ...") liefert;
+  derselbe Ablauf mit "Abbrechen" statt "Anwenden" lässt das
+  Job-Ergebnis nachweislich unverändert; ein zweiter gleichzeitiger
+  Korrektur-Versuch auf dasselbe Bild wird abgelehnt; unbekannte
+  Job-ID/Datei-Nummer/Korrektur-ID liefern die erwarteten Fehler.
+  Gesamter Testlauf (`tests/`, ohne `test_ui_images_mode.py`): 244
+  passed (vorher 232), 1 skipped - keine Regressionen.
+  `webapp.server`/`webapp.job_bridge`/`webapp.review_bridge` importieren
+  weiterhin nachweislich ohne `PySide6`.
+
+  Zusätzlich mit Playwright von Hand gegen den echten laufenden Server
+  geprüft, inklusive Popup-Fenster-Handling (`page.context.expect_page()`):
+  nach einem echten Übersetzungslauf öffnet "Übersetzung korrigieren"
+  tatsächlich `review_server.py`s eigene Seite in einem neuen
+  Browser-Tab, dort wurde der übersetzte Text bewusst bearbeitet
+  ("Hallo (Schritt-8-Testkorrektur)") und "Anwenden" geklickt - die
+  Hauptseite hat den Ausgang per Polling erkannt ("Korrektur
+  angewendet."), und ein danach neu geladener QA-Bericht zeigt
+  nachweislich den Korrektur-Header ("... nach manueller Korrektur
+  ..."), nicht mehr den ursprünglichen. Keine neuen JavaScript-Fehler in
+  der Konsole (weiterhin nur das schon dokumentierte harmlose
+  `favicon.ico`-404).
+
+  **Damit ist der komplette Walking-Skeleton-Plan
+  (`/root/.claude/plans/moonlit-humming-brook.md`) umgesetzt** - der
+  Bild-Übersetzungs-Modus läuft jetzt Ende-zu-Ende über den lokalen
+  Server + pywebview: Quellbilder wählen (native Dialoge), konfigurieren,
+  Kostenschätzung mit Bestätigungs-Gate, Lauf mit Live-Fortschritt,
+  QA-Bericht pro Bild inline, und jetzt auch die manuelle Korrektur im
+  Browser. PDF/Word/PPTX bleiben wie geplant unverändert auf der
+  bestehenden Qt-App. Ausdrücklich nicht Teil dieses Plans (siehe dessen
+  eigener "Ausdrücklich nicht Teil"-Abschnitt) und weiterhin offen: kein
+  Installer/Packaging, keine CI-Workflow-Datei, kein Einbetten
+  übersetzter Bilder zurück in PDF/Word/PPTX, keine Entfernung der
+  bestehenden Qt-App - das bleibt eine separate, künftige Entscheidung,
+  kein automatischer Folgeschritt dieses Piloten.

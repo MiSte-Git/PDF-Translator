@@ -9,14 +9,16 @@ image_translate_cli/review_server.py). PDF/Word/PPTX stay on the
 existing PySide6 app (ui/) until this pilot proves out - see the plan
 this package was built from for the full reasoning and sequencing.
 
-The HTTP layer - server.py, job_bridge.py, settings_store.py, and
-everything they import from ui/pipeline/ - must never import PySide6/
-PyQt (verified by tests/test_webapp_*.py's own PySide6-blocked import
-check). That is what keeps this package testable and runnable outside a
+The HTTP layer - server.py, job_bridge.py, settings_store.py,
+review_bridge.py (Schritt 8), and everything they import from
+ui/pipeline/image_translate_cli - must never import PySide6/PyQt
+(verified by tests/test_webapp_*.py's own PySide6-blocked import check).
+That is what keeps this package testable and runnable outside a
 GUI/display, exactly the property ui/i18n_data.py was split out of
 ui/i18n.py for (see that module's own docstring) and why server.py/
-job_bridge.py reuse ui/models.py/pipeline/registry.py directly instead
-of anything Qt-flavored.
+job_bridge.py/review_bridge.py reuse ui/models.py/pipeline/registry.py/
+image_translate_cli/review_server.py directly instead of anything
+Qt-flavored.
 
 __main__.py (Schritt 6, the pywebview app-shell bootstrap) is the one
 deliberate exception: its whole job is opening a native GUI window, so

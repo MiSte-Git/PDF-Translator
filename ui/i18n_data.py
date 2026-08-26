@@ -174,6 +174,19 @@ DE = {
     "job.hide_report": "QA-Bericht ausblenden",
     "job.report_load_error": "QA-Bericht konnte nicht geladen werden.",
     "job.correct_translation": "Übersetzung korrigieren",
+    # Bild-Modus-Korrektur-Übergabe (Schritt 8, 26.08.2026, siehe
+    # webapp/review_bridge.py) - der Bearbeitungs-Dialog selbst läuft in
+    # einem separaten Fenster/Tab (image_translate_cli/review_server.py's
+    # eigene, unveränderte Seite), diese Statuszeile begleitet nur das
+    # Warten darauf hier im Hauptfenster. Von der Qt-App nicht verwendet
+    # (dort blockiert stattdessen der modale ImageCorrectionDialog selbst).
+    "job.correction_starting": "Korrektur wird gestartet …",
+    "job.correction_opened": "Korrektur-Fenster geöffnet - dort bearbeiten, dann „Anwenden“ oder „Abbrechen“ klicken.",
+    "job.correction_applied": "Korrektur angewendet.",
+    "job.correction_cancelled": "Korrektur abgebrochen.",
+    "job.correction_timeout": "Korrektur-Zeitüberschreitung - keine Rückmeldung aus dem Korrektur-Fenster.",
+    "job.correction_failed": "Korrektur fehlgeschlagen: {error}",
+    "job.correction_error": "Korrektur konnte nicht gestartet werden.",
     "job.failed_title": "Übersetzung fehlgeschlagen",
     "correction.title": "PDF-Übersetzung korrigieren",
     "correction.hint": "Wähle unten eine Zeile aus und bearbeite ihre Übersetzung im Editor darunter. Mit Fett/Kursiv/Unterstrichen (auch per Strg+B/Strg+I/Strg+U) kannst du die Formatierung anpassen – auch bearbeitete Zeilen behalten dabei ihre Formatierung.",
@@ -363,6 +376,15 @@ EN = {
     "job.hide_report": "Hide QA report",
     "job.report_load_error": "Could not load QA report.",
     "job.correct_translation": "Correct translation",
+    # Images-mode correction handoff (Schritt 8, 26.08.2026) - see the
+    # matching German comment above for why this differs from the Qt app.
+    "job.correction_starting": "Starting correction …",
+    "job.correction_opened": "Correction window opened - edit there, then click \"Apply\" or \"Cancel\".",
+    "job.correction_applied": "Correction applied.",
+    "job.correction_cancelled": "Correction cancelled.",
+    "job.correction_timeout": "Correction timed out - no response from the correction window.",
+    "job.correction_failed": "Correction failed: {error}",
+    "job.correction_error": "Could not start the correction.",
     "job.failed_title": "Translation failed",
     "correction.title": "Correct PDF translation",
     "correction.hint": "Select a row below and edit its translation in the editor beneath the table. Use Bold/Italic/Underline (or Ctrl+B/Ctrl+I/Ctrl+U) to adjust formatting – edited rows keep their formatting too.",

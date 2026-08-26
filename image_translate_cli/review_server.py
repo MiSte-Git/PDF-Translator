@@ -40,6 +40,7 @@ import mimetypes
 import sys
 import threading
 import webbrowser
+from dataclasses import dataclass
 from pathlib import Path
 
 from pipeline.images.inpainting import TextReplacement
@@ -253,28 +254,58 @@ init();
 """
 
 
-def run_review_session(
+@dataclass
+class ReviewSession:
+    """A review server that has been bound and started (see
+    start_review_server()) but not yet waited on - handed back to the
+    caller immediately, `server.server_address` already valid, so a
+    non-blocking caller (webapp/review_bridge.py, Schritt 8 of the local-
+    server + pywebview migration, see Backlog.md 26.08.2026) can read
+    `.url` and hand it to a browser tab/window without blocking the
+    thread that started the session. `.wait()` is the blocking half that
+    `run_review_session()` below always ran inline - split out so a
+    caller can run `.wait()` on ITS OWN background thread instead.
+    """
+
+    server: http.server.ThreadingHTTPServer
+    url: str
+    _done: threading.Event
+    _state: dict[str, object]
+
+    def wait(self, timeout_seconds: float | None = 1800.0) -> tuple[str, list[TextReplacement] | None]:
+        """Blocks until the human applies/cancels (or `timeout_seconds`
+        elapses - 0/None disables the timeout), then shuts the server down
+        and returns the outcome, exactly as run_review_session() always
+        did:
+
+            ("apply", <edited replacements>)  - "Anwenden" was clicked.
+            ("cancel", None)                  - "Abbrechen" was clicked.
+            ("timeout", None)                 - neither happened in time.
+        """
+        finished_in_time = self._done.wait(timeout_seconds if timeout_seconds and timeout_seconds > 0 else None)
+        self.server.shutdown()
+        self.server.server_close()
+        if not finished_in_time:
+            return "timeout", None
+        return str(self._state["outcome"]), self._state["replacements"]  # type: ignore[return-value]
+
+
+def start_review_server(
     source_path: str,
     initial_replacements: list[TextReplacement],
     host: str = "127.0.0.1",
     port: int = 0,
-    open_browser: bool = True,
-    timeout_seconds: float = 1800.0,
-) -> tuple[str, list[TextReplacement] | None]:
-    """Start the review server, block until the human applies/cancels (or
-    `timeout_seconds` elapses - 0/None disables the timeout), then shut the
-    server down and return the outcome:
+) -> ReviewSession:
+    """Bind and start the review server WITHOUT blocking - mirrors
+    webapp/server.py::create_server()'s own "bind, don't block" split.
+    Returns a ReviewSession whose `.url` is ready to hand to a browser
+    immediately; call `.wait()` (on whatever thread should block - a CLI's
+    main thread via run_review_session() below, or a background thread
+    for an HTTP caller like webapp/review_bridge.py) to get the outcome.
 
-        ("apply", <edited replacements>)  - "Anwenden" was clicked;
-                                             cli.py re-renders from this.
-        ("cancel", None)                  - "Abbrechen" was clicked.
-        ("timeout", None)                 - neither happened in time.
-
-    `port=0` (the default) lets the OS pick a free port, printed to stdout
-    as part of the URL before this function blocks - a caller scripting
-    this (rather than a human watching stdout) can still discover it that
-    way, though `--port` (see cli.py's `review` subparser) lets a caller
-    pin a fixed port instead if that's more convenient to wire up.
+    `port=0` (the default) lets the OS pick a free port - already resolved
+    in `.url` by the time this function returns, no need to poll
+    `server.server_address` separately.
     """
     initial_regions = [r.to_dict() for r in regions_from_replacements(initial_replacements)]
     state: dict[str, object] = {"outcome": None, "replacements": None}
@@ -346,18 +377,32 @@ def run_review_session(
     thread.start()
 
     url = f"http://{host}:{actual_port}/"
-    print(f"Korrektur-Ansicht: {url}", file=sys.stdout, flush=True)
+    return ReviewSession(server=server, url=url, _done=done, _state=state)
+
+
+def run_review_session(
+    source_path: str,
+    initial_replacements: list[TextReplacement],
+    host: str = "127.0.0.1",
+    port: int = 0,
+    open_browser: bool = True,
+    timeout_seconds: float = 1800.0,
+) -> tuple[str, list[TextReplacement] | None]:
+    """cli.py's `review` command entry point - unchanged in behavior and
+    signature since before the Schritt 8 split above: start the review
+    server, print/open its URL, block until the human applies/cancels (or
+    `timeout_seconds` elapses), then return the outcome. A thin wrapper
+    around start_review_server() + ReviewSession.wait() now instead of
+    doing both inline - see start_review_server()'s own docstring for why
+    the split exists (a non-blocking caller like webapp/review_bridge.py
+    needs the URL before the human has acted, this function's own callers
+    never did).
+    """
+    session = start_review_server(source_path, initial_replacements, host, port)
+    print(f"Korrektur-Ansicht: {session.url}", file=sys.stdout, flush=True)
     if open_browser:
         try:
-            webbrowser.open(url)
+            webbrowser.open(session.url)
         except Exception:
             pass  # kein Browser verfügbar/konfiguriert - URL steht oben, Nutzer öffnet selbst
-
-    finished_in_time = done.wait(timeout_seconds if timeout_seconds and timeout_seconds > 0 else None)
-
-    server.shutdown()
-    server.server_close()
-
-    if not finished_in_time:
-        return "timeout", None
-    return str(state["outcome"]), state["replacements"]  # type: ignore[return-value]
+    return session.wait(timeout_seconds)

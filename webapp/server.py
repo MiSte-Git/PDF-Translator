@@ -17,7 +17,10 @@ own fail-fast checks (see start_job()'s docstring) matter as much as the
 HTTP plumbing here. Schritt 7 adds /api/jobs/<id>/qa-report?file=... -
 read-only again, but see job_bridge.job_qa_report()'s docstring for why
 its `file` argument needs its own validation, not just the usual JSON
-body checks.
+body checks. Schritt 8 adds POST /api/jobs/<id>/files/<index>/correct and
+GET /api/corrections/<id>/status (webapp/review_bridge.py) - starting a
+correction never blocks this handler thread itself; see review_bridge.py's
+own module docstring for why that needs its own background thread.
 """
 from __future__ import annotations
 
@@ -30,7 +33,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from webapp import job_bridge
+from webapp import job_bridge, review_bridge
 
 # webapp/static/ - the real HTML/CSS/JS files built in Schritt 3 (see
 # webapp/static/index.html's own docstring comment and Backlog.md
@@ -74,6 +77,16 @@ def _job_qa_report_route(job_id: str, file_path: str) -> tuple[int, dict[str, An
     return (200 if result.get("ok") else 404), result
 
 
+def _start_correction_route(job_id: str, file_index: str, _body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    result = review_bridge.start_correction(job_id, int(file_index))
+    return (200 if result.get("ok") else 400), result
+
+
+def _correction_status_route(correction_id: str) -> tuple[int, dict[str, Any]]:
+    result = review_bridge.correction_status(correction_id)
+    return (200 if result.get("ok") else 404), result
+
+
 # GET routes take no body; POST routes take the parsed JSON body (a dict -
 # do_POST() below rejects anything else with a 400 before the route ever
 # runs, so handlers can assume `body` is a dict).
@@ -94,12 +107,15 @@ _JOB_STATUS_RE = re.compile(r"^/api/jobs/([^/]+)/status$")
 _JOB_CANCEL_RE = re.compile(r"^/api/jobs/([^/]+)/cancel$")
 _JOB_RESULT_RE = re.compile(r"^/api/jobs/([^/]+)/result$")
 _JOB_QA_REPORT_RE = re.compile(r"^/api/jobs/([^/]+)/qa-report$")
+_JOB_FILE_CORRECT_RE = re.compile(r"^/api/jobs/([^/]+)/files/(\d+)/correct$")
+_CORRECTION_STATUS_RE = re.compile(r"^/api/corrections/([^/]+)/status$")
 
 
 class Handler(BaseHTTPRequestHandler):
     """Exact-path routing for /api/config, /api/analyze, /api/jobs (POST,
-    starts a job); /api/jobs/<id>/status|cancel|result|qa-report use the
-    four regexes above instead, matching review_server.py's Handler
+    starts a job); /api/jobs/<id>/status|cancel|result|qa-report and
+    /api/jobs/<id>/files/<index>/correct + /api/corrections/<id>/status
+    use the regexes above instead, matching review_server.py's Handler
     pattern otherwise (no framework, no path-templating library)."""
 
     server_version = "PDFTranslatorWebapp/0.1"
@@ -174,6 +190,11 @@ class Handler(BaseHTTPRequestHandler):
             status, payload = _job_qa_report_route(qa_report_match.group(1), file_path)
             self._send_json(status, payload)
             return
+        correction_status_match = _CORRECTION_STATUS_RE.match(path)
+        if correction_status_match is not None:
+            status, payload = _correction_status_route(correction_status_match.group(1))
+            self._send_json(status, payload)
+            return
         if path.startswith("/api/"):
             # An unmatched /api/* path is a routing error, not a missing
             # static file - answer with the same JSON 404 shape every
@@ -188,7 +209,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         handler = _ROUTES_POST.get(path)
         cancel_match = None if handler is not None else _JOB_CANCEL_RE.match(path)
-        if handler is None and cancel_match is None:
+        correct_match = None if handler is not None or cancel_match is not None else _JOB_FILE_CORRECT_RE.match(path)
+        if handler is None and cancel_match is None and correct_match is None:
             self._send_json(404, {"ok": False, "errors": [f"Unbekannter Pfad: {self.path}"]})
             return
         length = int(self.headers.get("Content-Length", 0) or 0)
@@ -203,8 +225,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if handler is not None:
             status, payload = handler(body)
-        else:
+        elif cancel_match is not None:
             status, payload = _job_cancel_route(cancel_match.group(1), body)
+        else:
+            assert correct_match is not None
+            status, payload = _start_correction_route(correct_match.group(1), correct_match.group(2), body)
         self._send_json(status, payload)
 
 

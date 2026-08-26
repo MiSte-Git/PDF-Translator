@@ -35,7 +35,13 @@
        /api/jobs/<id>/qa-report?file=..., siehe app.js/job_bridge.py) -
        es gibt hier keine "Ordner öffnen"-Aktion wie in der Qt-App, also
        ersetzt dieser Button gleichzeitig deren fehlendes Pendant für den
-       Bild-Modus (siehe ui/app.py::_show_job_result()). -->
+       Bild-Modus (siehe ui/app.py::_show_job_result()). Schritt 8: jede
+       Zeile mit korrigierbaren Regionen bekommt zusätzlich einen
+       "Übersetzung korrigieren"-Button, der image_translate_cli/
+       review_server.py's Browser-Korrektur-UI in einem eigenen
+       Fenster/Tab öffnet (POST /api/jobs/<id>/files/<index>/correct,
+       siehe webapp/review_bridge.py) und den Ausgang abwartet, ohne die
+       Hauptseite selbst zu blockieren. -->
   <section class="card" id="config-card">
     <h2 data-i18n="config.group">Auftrag konfigurieren</h2>
 

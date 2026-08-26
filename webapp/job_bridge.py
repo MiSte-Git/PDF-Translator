@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from pipeline.images.inpainting import TextReplacement
 from pipeline.registry import (
     INPAINTING_BACKEND_FACTORIES,
     OCR_ENGINE_FACTORIES,
@@ -25,7 +26,7 @@ from pipeline.registry import (
 )
 from pipeline.translation.cost_control import DEFAULT_MAX_CHARS_PER_RUN
 from ui.analysis import PRICING, analyze_request
-from ui.image_job import ImageBatchJobResult, ImageBatchStats, run_image_batch_job
+from ui.image_job import ImageBatchJobResult, ImageBatchStats, ImageJobResult, run_image_batch_job
 from ui.models import EmbeddedImageMode, TranslationMode, TranslationRequest
 from ui.settings import credential_status
 from webapp import settings_store
@@ -346,17 +347,36 @@ def cancel_job(job_id: str) -> dict[str, Any]:
         return {"ok": True}
 
 
-def job_result(job_id: str) -> dict[str, Any]:
-    """Backs GET /api/jobs/<id>/result - only meaningful once status is
-    "done"/"cancelled" (a cancelled batch still keeps every file finished
-    before the cancellation, see run_image_batch_job()'s docstring, so its
-    partial file list is real and worth returning too, not just an
-    error). has_correctable_regions mirrors the exact condition
+def _file_entry(item: ImageJobResult) -> dict[str, Any]:
+    """The per-file dict shape job_result() returns under "files" - pulled
+    out on its own (Schritt 7) so webapp/review_bridge.py's
+    apply_correction_result() below can return the SAME shape for a
+    freshly re-rendered file without duplicating this list-of-fields
+    somewhere else. has_correctable_regions mirrors the exact condition
     ui/app.py's correction-dialog button visibility uses: whether this
     file's ImageTranslationStats.replacements (successfully translated
     regions, the same list handed to inpainting_backend.apply()) is
     non-empty - see pipeline/images/translate_image.py's
     ImageTranslationStats.replacements docstring.
+    """
+    return {
+        "source": str(item.source_path),
+        "output": str(item.output_path),
+        "qa_report": str(item.qa_report_path),
+        "translated": item.stats.translated,
+        "skipped": item.stats.skipped,
+        "failed": item.stats.failed,
+        "chars_sent": item.stats.chars_sent,
+        "has_correctable_regions": bool(item.stats.replacements),
+    }
+
+
+def job_result(job_id: str) -> dict[str, Any]:
+    """Backs GET /api/jobs/<id>/result - only meaningful once status is
+    "done"/"cancelled" (a cancelled batch still keeps every file finished
+    before the cancellation, see run_image_batch_job()'s docstring, so its
+    partial file list is real and worth returning too, not just an
+    error).
     """
     with _JOBS_LOCK:
         job = _JOBS.get(job_id)
@@ -369,19 +389,7 @@ def job_result(job_id: str) -> dict[str, Any]:
         result = job.result
 
     assert result is not None  # status done/cancelled always sets .result, see _run() above
-    files = [
-        {
-            "source": str(item.source_path),
-            "output": str(item.output_path),
-            "qa_report": str(item.qa_report_path),
-            "translated": item.stats.translated,
-            "skipped": item.stats.skipped,
-            "failed": item.stats.failed,
-            "chars_sent": item.stats.chars_sent,
-            "has_correctable_regions": bool(item.stats.replacements),
-        }
-        for item in result.stats.results
-    ]
+    files = [_file_entry(item) for item in result.stats.results]
     return {
         "ok": True,
         "status": job.status,
@@ -431,3 +439,79 @@ def job_qa_report(job_id: str, file_path: str) -> dict[str, Any]:
     except OSError as exc:
         return {"ok": False, "errors": [f"QA-Bericht konnte nicht gelesen werden: {exc}"]}
     return {"ok": True, "text": text}
+
+
+# --- Bild-Korrektur-Übergabe (Schritt 8) ---------------------------------
+#
+# webapp/review_bridge.py drives image_translate_cli/review_server.py's
+# browser-based correction UI in a non-blocking way (a review session can
+# stay open for up to 30 minutes waiting for a human - see that module's
+# own docstring for why it needs its own background thread rather than
+# blocking an HTTP request handler). The two functions below are the only
+# points where review_bridge.py touches _JOBS/_JOBS_LOCK - kept here,
+# like every other _JOBS access, rather than reaching into this module's
+# "private" state from outside it.
+
+
+def get_correctable_file(
+    job_id: str, file_index: int
+) -> tuple[Path, Path, list[TextReplacement], str] | dict[str, Any]:
+    """Looks up file `file_index` of job `job_id`'s stored result and
+    returns (source_path, output_path, replacements, inpainting_backend
+    name) if that file actually has correctable regions, else an
+    {"ok": False, "errors": [...]} dict - review_bridge.start_correction()
+    uses this instead of reaching into _JOBS directly. `replacements` is
+    copied out of the stored ImageJobResult (list(...) below) so a
+    concurrent correction round on a DIFFERENT file of the same job can't
+    ever see a partially-mutated list - each file's replacements are only
+    ever replaced wholesale, never edited in place, but this keeps that
+    guarantee explicit rather than relying on it.
+    """
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if job is None:
+            return {"ok": False, "errors": ["Unbekannter Job."]}
+        if job.status == "running":
+            return {"ok": False, "errors": ["Lauf ist noch nicht abgeschlossen."]}
+        if job.status == "failed":
+            return {"ok": False, "errors": [job.error or "Lauf fehlgeschlagen."]}
+        result = job.result
+        assert result is not None  # status done/cancelled always sets .result, see _run() above
+        results = result.stats.results
+        if file_index < 0 or file_index >= len(results):
+            return {"ok": False, "errors": ["Unbekannte Datei-Nummer für diesen Lauf."]}
+        target = results[file_index]
+        if not target.stats.replacements:
+            return {"ok": False, "errors": ["Dieses Bild hat keine korrigierbaren Regionen."]}
+        return (
+            target.source_path,
+            target.output_path,
+            list(target.stats.replacements),
+            job.request.inpainting_backend,
+        )
+
+
+def apply_correction_result(job_id: str, file_index: int, corrected: ImageJobResult) -> dict[str, Any]:
+    """Splices a freshly re-rendered ImageJobResult (from
+    ui/image_job.py::run_image_correction_job(), called by
+    webapp/review_bridge.py once a human clicked "Anwenden") back into job
+    `job_id`'s stored batch result at `file_index` - the HTTP-layer
+    equivalent of ui/app.py::_open_image_correction_dialog()'s identical
+    splice, addressed by index (stable within one job - job_result()'s
+    "files" list is never reordered, only individual entries are replaced
+    in place) instead of Python object identity, which only makes sense
+    inside a single process holding onto the original object. Returns the
+    same per-file dict shape job_result() already returns for this file
+    (see _file_entry() above), so review_bridge.correction_status() can
+    hand it straight to the frontend without a second round trip through
+    /api/jobs/<id>/result.
+    """
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if job is None or job.result is None:
+            return {"ok": False, "errors": ["Unbekannter Job."]}
+        results = job.result.stats.results
+        if file_index < 0 or file_index >= len(results):
+            return {"ok": False, "errors": ["Unbekannte Datei-Nummer für diesen Lauf."]}
+        results[file_index] = corrected
+        return _file_entry(corrected)

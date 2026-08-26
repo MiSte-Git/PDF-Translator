@@ -31,6 +31,13 @@
  * und den Bericht inline in einem <pre> ein-/ausblendet) statt nur die
  * aggregierte Zusammenfassung zu zeigen - siehe renderJobResultFiles().
  *
+ * Schritt 8: jede Zeile mit korrigierbaren Regionen bekommt einen
+ * "Übersetzung korrigieren"-Button (siehe runCorrectFile()) - startet
+ * eine Korrektur-Runde in einem separaten Fenster/Tab
+ * (image_translate_cli/review_server.py's eigene Seite, über
+ * webapp/review_bridge.py nicht-blockierend gestartet) und pollt bis zum
+ * Ergebnis, statt die Hauptseite währenddessen einzufrieren.
+ *
  * Kein Framework/Build-Schritt, exakt wie image_translate_cli/review_server.py's
  * eigenes Frontend und wie im Plan festgehalten ("echte Dateien statt
  * Python-String" - aber weiterhin ohne Abhängigkeit).
@@ -41,6 +48,7 @@ let currentLanguage = "de";
 let lastAnalysis = null; // null, or the last successful /api/analyze response
 let activeJobId = null;
 let pollTimer = null;
+let lastJobResultFiles = []; // Schritt 8: re-rendered in place after a correction applies
 
 function t(key, fallback) {
   return catalogue[key] !== undefined ? catalogue[key] : (fallback !== undefined ? fallback : key);
@@ -443,7 +451,8 @@ function renderJobResult(result, wasCancelled, jobId) {
     text += t("job.result_cancelled_suffix", "");
   }
   document.getElementById("job-result-summary").textContent = text;
-  renderJobResultFiles(result.files, jobId);
+  lastJobResultFiles = result.files;
+  renderJobResultFiles(lastJobResultFiles, jobId);
   document.getElementById("job-result").classList.remove("hidden");
 }
 
@@ -459,7 +468,7 @@ function renderJobResult(result, wasCancelled, jobId) {
 function renderJobResultFiles(files, jobId) {
   const filesEl = document.getElementById("job-result-files");
   filesEl.innerHTML = "";
-  files.forEach((file) => {
+  files.forEach((file, fileIndex) => {
     const li = document.createElement("li");
     li.className = "job-result-file";
 
@@ -523,8 +532,105 @@ function renderJobResultFiles(files, jobId) {
 
     li.appendChild(reportButton);
     li.appendChild(reportPre);
+
+    // Schritt 8: nur anbieten, wenn dieses Bild tatsächlich korrigierbare
+    // Regionen hat - mirrors ui/app.py::_show_job_result()'s identische
+    // Bedingung fürs Einblenden des "Übersetzung korrigieren"-Buttons.
+    if (file.has_correctable_regions) {
+      const correctButton = document.createElement("button");
+      correctButton.type = "button";
+      correctButton.textContent = t("job.correct_translation");
+
+      const correctionStatusEl = document.createElement("p");
+      // "correction-status" (not just "hint", which #statsEl above also
+      // uses) so the re-render below can find THIS specific element again
+      // after rebuilding the row from scratch.
+      correctionStatusEl.className = "hint correction-status";
+
+      correctButton.addEventListener("click", () =>
+        runCorrectFile(jobId, fileIndex, correctButton, correctionStatusEl)
+      );
+
+      li.appendChild(correctButton);
+      li.appendChild(correctionStatusEl);
+    }
+
     filesEl.appendChild(li);
   });
+}
+
+/* Schritt 8: startet eine Korrektur-Runde für EIN Bild
+ * (POST /api/jobs/<id>/files/<index>/correct, siehe
+ * webapp/review_bridge.py), öffnet die zurückgegebene URL in einem neuen
+ * Fenster/Tab (window.open() - in pywebview mit Qt-Backend empirisch als
+ * eigenes natives Fenster bestätigt, siehe Backlog.md 26.08.2026s
+ * Schritt-8-Eintrag) und pollt GET /api/corrections/<id>/status (dieselbe
+ * "Polling statt Push"-Entscheidung wie bei /api/jobs/<id>/status) bis
+ * der Mensch dort "Anwenden"/"Abbrechen" geklickt hat oder die
+ * Zeitüberschreitung erreicht ist. Bei "applied" wird die komplette
+ * Dateiliste neu gerendert (renderJobResultFiles()) statt nur einzelner
+ * DOM-Knoten - baut dabei automatisch einen frischen QA-Bericht-Button
+ * (loaded=false) auf, statt den alten, jetzt veralteten Berichtstext
+ * weiter anzuzeigen. */
+async function runCorrectFile(jobId, fileIndex, button, statusEl) {
+  button.disabled = true;
+  statusEl.textContent = t("job.correction_starting", "Korrektur wird gestartet …");
+
+  let response;
+  try {
+    response = await fetch(`/api/jobs/${jobId}/files/${fileIndex}/correct`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+  } catch (error) {
+    statusEl.textContent = `${t("job.correction_error")} ${error}`;
+    button.disabled = false;
+    return;
+  }
+  const result = await response.json();
+  if (!result.ok) {
+    statusEl.textContent = (result.errors || []).join(" ") || t("job.correction_error");
+    button.disabled = false;
+    return;
+  }
+
+  statusEl.textContent = t("job.correction_opened");
+  window.open(result.url);
+
+  const correctionPollTimer = setInterval(async () => {
+    let statusResponse;
+    try {
+      statusResponse = await fetch(`/api/corrections/${result.correction_id}/status`);
+    } catch (error) {
+      return; // transient network hiccup - try again on the next tick
+    }
+    const statusPayload = await statusResponse.json();
+    if (!statusPayload.ok || statusPayload.status === "pending") return;
+
+    clearInterval(correctionPollTimer);
+    button.disabled = false;
+
+    if (statusPayload.status === "applied") {
+      lastJobResultFiles[fileIndex] = statusPayload.file;
+      renderJobResultFiles(lastJobResultFiles, jobId);
+      // The row (and statusEl within it) was just rebuilt from scratch -
+      // find the fresh element for this file to show the confirmation on,
+      // rather than writing into the now-detached old `statusEl`.
+      const filesEl = document.getElementById("job-result-files");
+      const newRow = filesEl.children[fileIndex];
+      const newStatusEl = newRow && newRow.querySelector(".correction-status");
+      if (newStatusEl) newStatusEl.textContent = t("job.correction_applied");
+    } else if (statusPayload.status === "cancelled") {
+      statusEl.textContent = t("job.correction_cancelled");
+    } else if (statusPayload.status === "timeout") {
+      statusEl.textContent = t("job.correction_timeout");
+    } else {
+      statusEl.textContent = formatTemplate(t("job.correction_failed"), {
+        error: (statusPayload.errors || []).join(" "),
+      });
+    }
+  }, 1500);
 }
 
 async function runCancel() {
