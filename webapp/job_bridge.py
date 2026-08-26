@@ -388,3 +388,46 @@ def job_result(job_id: str) -> dict[str, Any]:
         "output_dir": str(result.output_dir),
         "files": files,
     }
+
+
+def job_qa_report(job_id: str, file_path: str) -> dict[str, Any]:
+    """Backs GET /api/jobs/<id>/qa-report?file=<path> (Schritt 7) - returns
+    the raw text of ONE image's QA report, so app.js can render it inline
+    in a <pre> block. Replaces ui/app.py::_open_qa_report()'s
+    QDesktopServices.openUrl() for this pilot: the images-mode Qt UI has
+    no per-file "open report" button at all (one QA report PER image, see
+    job_result()'s docstring above) - it just says "look in the output
+    folder yourself" (job.result_summary_images). A local page can show
+    the text directly instead, which is strictly more useful than the Qt
+    app's own images-mode behavior, not merely a port of it.
+
+    `file_path` MUST exactly match one of THIS job's own
+    ImageJobResult.qa_report_path values (the same paths already returned
+    by job_result() under "qa_report") - never an arbitrary caller-supplied
+    path. Without this check, this LOCAL-ONLY, unauthenticated server (see
+    webapp/server.py's module docstring) would read any file readable by
+    the process for a query string like "?file=/etc/passwd" - the same
+    class of mistake server.py's _serve_static() already guards against
+    for static files (see its traversal check), just here for a dynamic
+    per-job argument instead of a fixed directory.
+    """
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if job is None:
+            return {"ok": False, "errors": ["Unbekannter Job."]}
+        if job.status == "running":
+            return {"ok": False, "errors": ["Lauf ist noch nicht abgeschlossen."]}
+        if job.status == "failed":
+            return {"ok": False, "errors": [job.error or "Lauf fehlgeschlagen."]}
+        result = job.result
+
+    assert result is not None  # status done/cancelled always sets .result, see _run() above
+    known_paths = {str(item.qa_report_path) for item in result.stats.results}
+    if not file_path or file_path not in known_paths:
+        return {"ok": False, "errors": ["Unbekannte QA-Bericht-Datei für diesen Lauf."]}
+
+    try:
+        text = Path(file_path).read_text(encoding="utf-8")
+    except OSError as exc:
+        return {"ok": False, "errors": [f"QA-Bericht konnte nicht gelesen werden: {exc}"]}
+    return {"ok": True, "text": text}

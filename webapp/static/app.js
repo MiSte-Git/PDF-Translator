@@ -26,6 +26,11 @@
  * (python -m webapp.server) bleiben die Textfelder die einzige
  * Möglichkeit, `window.pywebview` existiert dort schlicht nicht.
  *
+ * Schritt 7: das Ergebnis listet jedes Bild einzeln auf (Dateiname,
+ * Statistik, ein Button, der GET /api/jobs/<id>/qa-report?file=... lädt
+ * und den Bericht inline in einem <pre> ein-/ausblendet) statt nur die
+ * aggregierte Zusammenfassung zu zeigen - siehe renderJobResultFiles().
+ *
  * Kein Framework/Build-Schritt, exakt wie image_translate_cli/review_server.py's
  * eigenes Frontend und wie im Plan festgehalten ("echte Dateien statt
  * Python-String" - aber weiterhin ohne Abhängigkeit).
@@ -409,7 +414,7 @@ async function finishJob(jobId, status) {
     const response = await fetch(`/api/jobs/${jobId}/result`);
     const result = await response.json();
     if (result.ok) {
-      renderJobResult(result, status.status === "cancelled");
+      renderJobResult(result, status.status === "cancelled", jobId);
     } else {
       startStatus.textContent = result.errors.join(" ");
     }
@@ -423,7 +428,7 @@ async function finishJob(jobId, status) {
   invalidateAnalysis();
 }
 
-function renderJobResult(result, wasCancelled) {
+function renderJobResult(result, wasCancelled, jobId) {
   const translated = result.files.reduce((sum, file) => sum + file.translated, 0);
   const failed = result.files.reduce((sum, file) => sum + file.failed, 0);
   const chars = result.files.reduce((sum, file) => sum + file.chars_sent, 0);
@@ -438,7 +443,88 @@ function renderJobResult(result, wasCancelled) {
     text += t("job.result_cancelled_suffix", "");
   }
   document.getElementById("job-result-summary").textContent = text;
+  renderJobResultFiles(result.files, jobId);
   document.getElementById("job-result").classList.remove("hidden");
+}
+
+/* Schritt 7: eine Zeile pro Bild mit einem Button, der dessen eigenen
+ * QA-Bericht per GET /api/jobs/<id>/qa-report?file=... inline lädt und
+ * ein-/ausblendet - siehe webapp/job_bridge.py::job_qa_report()'s
+ * Docstring dazu, warum das der Bild-Modus-eigene Ersatz für
+ * ui/app.py's QDesktopServices-basiertes "QA-Bericht öffnen" ist (das es
+ * für den Bild-Modus in der Qt-App gar nicht gibt - dort nur "Ordner
+ * öffnen", ohne Web-Äquivalent hier). Der Bericht wird höchstens einmal
+ * pro Bild geladen (loaded-Flag) - erneutes Ein-/Ausblenden braucht dann
+ * keinen weiteren Request mehr. */
+function renderJobResultFiles(files, jobId) {
+  const filesEl = document.getElementById("job-result-files");
+  filesEl.innerHTML = "";
+  files.forEach((file) => {
+    const li = document.createElement("li");
+    li.className = "job-result-file";
+
+    const nameEl = document.createElement("div");
+    // Nur der Dateiname - der Ausgabeordner steht bereits einmal in der
+    // Zusammenfassung oben, ihn hier pro Zeile zu wiederholen wäre nur
+    // Rauschen. Trennzeichen bewusst sowohl "/" als auch "\" (Quellpfade
+    // können von einem Windows-Gerät stammen, auch wenn dieser Server
+    // hier unter Linux läuft).
+    const baseName = file.source.split(/[\\/]/).pop();
+    nameEl.textContent = baseName;
+    li.appendChild(nameEl);
+
+    const statsEl = document.createElement("span");
+    statsEl.className = "hint";
+    statsEl.textContent = formatTemplate(t("job.stats_summary"), {
+      translated: file.translated,
+      skipped: file.skipped,
+      failed: file.failed,
+      chars: file.chars_sent,
+    });
+    li.appendChild(statsEl);
+
+    const reportButton = document.createElement("button");
+    reportButton.type = "button";
+    reportButton.textContent = t("job.show_report");
+
+    const reportPre = document.createElement("pre");
+    reportPre.className = "qa-report hidden";
+
+    let loaded = false;
+    reportButton.addEventListener("click", async () => {
+      const isHidden = reportPre.classList.contains("hidden");
+      if (!isHidden) {
+        reportPre.classList.add("hidden");
+        reportButton.textContent = t("job.show_report");
+        return;
+      }
+      if (!loaded) {
+        reportButton.disabled = true;
+        try {
+          const response = await fetch(
+            `/api/jobs/${jobId}/qa-report?file=${encodeURIComponent(file.qa_report)}`
+          );
+          const data = await response.json();
+          if (data.ok) {
+            reportPre.textContent = data.text;
+            loaded = true;
+          } else {
+            reportPre.textContent = `${t("job.report_load_error")} ${(data.errors || []).join(" ")}`;
+          }
+        } catch (error) {
+          reportPre.textContent = `${t("job.report_load_error")} ${error}`;
+        } finally {
+          reportButton.disabled = false;
+        }
+      }
+      reportPre.classList.remove("hidden");
+      reportButton.textContent = t("job.hide_report");
+    });
+
+    li.appendChild(reportButton);
+    li.appendChild(reportPre);
+    filesEl.appendChild(li);
+  });
 }
 
 async function runCancel() {

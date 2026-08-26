@@ -29,7 +29,13 @@
        (pywebview.api.pick_images()/pick_output_dir(), siehe app.js) -
        im normalen Browser (python -m webapp.server) bleiben die
        Textfelder die einzige Möglichkeit, da ein <input type="file">
-       dort keinen echten Dateisystempfad preisgeben kann. -->
+       dort keinen echten Dateisystempfad preisgeben kann. Schritt 7: das
+       Ergebnis listet jedes Bild einzeln auf, mit einem Button, der
+       seinen eigenen QA-Bericht direkt inline ein-/ausblendet (GET
+       /api/jobs/<id>/qa-report?file=..., siehe app.js/job_bridge.py) -
+       es gibt hier keine "Ordner öffnen"-Aktion wie in der Qt-App, also
+       ersetzt dieser Button gleichzeitig deren fehlendes Pendant für den
+       Bild-Modus (siehe ui/app.py::_show_job_result()). -->
   <section class="card" id="config-card">
     <h2 data-i18n="config.group">Auftrag konfigurieren</h2>
 
@@ -125,6 +131,7 @@
 
     <div class="result hidden" id="job-result">
       <p id="job-result-summary"></p>
+      <ul id="job-result-files"></ul>
     </div>
   </section>
 </div>

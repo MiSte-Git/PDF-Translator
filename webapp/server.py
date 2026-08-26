@@ -14,7 +14,10 @@ adds /api/jobs (start a batch translation on a background thread) plus
 its polling/cancel/result companions - the first routes with real side
 effects (spends provider budget, writes files), which is why job_bridge's
 own fail-fast checks (see start_job()'s docstring) matter as much as the
-HTTP plumbing here.
+HTTP plumbing here. Schritt 7 adds /api/jobs/<id>/qa-report?file=... -
+read-only again, but see job_bridge.job_qa_report()'s docstring for why
+its `file` argument needs its own validation, not just the usual JSON
+body checks.
 """
 from __future__ import annotations
 
@@ -25,7 +28,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from webapp import job_bridge
 
@@ -66,6 +69,11 @@ def _job_result_route(job_id: str) -> tuple[int, dict[str, Any]]:
     return (200 if result.get("ok") else 404), result
 
 
+def _job_qa_report_route(job_id: str, file_path: str) -> tuple[int, dict[str, Any]]:
+    result = job_bridge.job_qa_report(job_id, file_path)
+    return (200 if result.get("ok") else 404), result
+
+
 # GET routes take no body; POST routes take the parsed JSON body (a dict -
 # do_POST() below rejects anything else with a 400 before the route ever
 # runs, so handlers can assume `body` is a dict).
@@ -79,19 +87,20 @@ _ROUTES_POST: dict[str, Callable[[dict[str, Any]], tuple[int, dict[str, Any]]]] 
 
 # Dynamic routes ("/api/jobs/<id>/...") - a plain dict can't express a
 # variable segment, so these are matched separately, checked after the
-# exact-path dicts above miss. Kept to exactly the three shapes Schritt 4
-# needs rather than a general path-templating mechanism - nothing else in
+# exact-path dicts above miss. Kept to exactly the shapes each step
+# needed rather than a general path-templating mechanism - nothing else in
 # this app needs more than that yet.
 _JOB_STATUS_RE = re.compile(r"^/api/jobs/([^/]+)/status$")
 _JOB_CANCEL_RE = re.compile(r"^/api/jobs/([^/]+)/cancel$")
 _JOB_RESULT_RE = re.compile(r"^/api/jobs/([^/]+)/result$")
+_JOB_QA_REPORT_RE = re.compile(r"^/api/jobs/([^/]+)/qa-report$")
 
 
 class Handler(BaseHTTPRequestHandler):
     """Exact-path routing for /api/config, /api/analyze, /api/jobs (POST,
-    starts a job); /api/jobs/<id>/status|cancel|result use the three
-    regexes above instead, matching review_server.py's Handler pattern
-    otherwise (no framework, no path-templating library)."""
+    starts a job); /api/jobs/<id>/status|cancel|result|qa-report use the
+    four regexes above instead, matching review_server.py's Handler
+    pattern otherwise (no framework, no path-templating library)."""
 
     server_version = "PDFTranslatorWebapp/0.1"
 
@@ -153,6 +162,16 @@ class Handler(BaseHTTPRequestHandler):
         result_match = _JOB_RESULT_RE.match(path)
         if result_match is not None:
             status, payload = _job_result_route(result_match.group(1))
+            self._send_json(status, payload)
+            return
+        qa_report_match = _JOB_QA_REPORT_RE.match(path)
+        if qa_report_match is not None:
+            # parse_qs() already unquotes percent-encoding (app.js sends
+            # the qa_report path through encodeURIComponent()) - no
+            # separate unquote() call needed here.
+            query = parse_qs(urlsplit(self.path).query)
+            file_path = (query.get("file") or [""])[0]
+            status, payload = _job_qa_report_route(qa_report_match.group(1), file_path)
             self._send_json(status, payload)
             return
         if path.startswith("/api/"):

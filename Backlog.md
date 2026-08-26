@@ -4864,3 +4864,77 @@
 
   **Noch offen (Schritte 7-8 laut Plan):** die QA-Bericht-Anzeige, und
   zuletzt die `review_server.py`-Übergabe.
+
+  **Update (26.08.2026, direkt im Anschluss) - Schritt 7 abgeschlossen:
+  QA-Bericht-Anzeige inline pro Bild.** Neuer Endpunkt `GET
+  /api/jobs/<id>/qa-report?file=...` (`webapp/job_bridge.py::
+  job_qa_report()`, verdrahtet in `webapp/server.py`) liefert den
+  Rohtext EINES Bildes QA-Bericht. Das Ergebnis (`#job-result`) listet
+  jetzt jedes Bild einzeln auf (Dateiname, Statistik wie
+  `job.stats_summary`) mit einem Button, der den Bericht direkt inline
+  in einem `<pre>` ein-/ausblendet, statt ihn extern zu öffnen - genau
+  die im Plan vorgesehene Alternative zu `QDesktopServices.openUrl()`.
+
+  Wichtig dabei: die Bild-Modus-Qt-App hat für diesen Fall gar kein
+  Äquivalent - `ui/app.py::_show_job_result()` blendet den
+  "QA-Bericht öffnen"-Button für `ImageBatchJobResult` bewusst aus (ein
+  Bericht PRO Bild, kein einzelner) und verweist stattdessen nur auf
+  "Ordner öffnen". Die Web-Oberfläche kann das nicht 1:1 nachbauen (kein
+  natives "Ordner öffnen" ohne eigene pywebview-API dafür, nicht Teil
+  dieses Plans), bietet dafür aber etwas, das die Qt-App im Bild-Modus
+  gar nicht hat: den Bericht direkt ansehen, ohne den Ausgabeordner
+  überhaupt selbst zu öffnen - eine echte Verbesserung, kein bloßer
+  Port.
+
+  **Sicherheit bewusst mitgedacht:** der `file`-Query-Parameter ist kein
+  freier Dateisystempfad. `job_qa_report()` akzeptiert NUR einen Pfad,
+  der exakt einem der `qa_report`-Pfade aus dem eigenen `job_result()`
+  dieses Laufs entspricht (Allow-Liste, keine bloße
+  Existenzprüfung) - ohne diese Prüfung könnte diese lokale, nicht
+  authentifizierte Serverinstanz (siehe `webapp/server.py`s eigener
+  Docstring: "LOCAL ONLY - no auth") über `?file=/beliebiger/pfad` jede
+  für den Prozess lesbare Datei ausliefern. Dieselbe Klasse Fehler, vor
+  der `server.py::_serve_static()`s Pfad-Traversal-Check für statische
+  Dateien schon schützt, hier nur für ein dynamisches Argument statt
+  eines festen Verzeichnisses.
+
+  Neue i18n-Schlüssel in `ui/i18n_data.py` (`job.show_report`,
+  `job.hide_report`, `job.report_load_error`) - von der Qt-App nicht
+  verwendet, genau wie schon `dialog.choose_images`/`job.cancel` usw.
+  seit Schritt 6, aber weiterhin an derselben zentralen Stelle gepflegt
+  statt in einer separaten webapp-eigenen Kopie; `webapp/static/i18n/
+  {de,en}.json` frisch aus `ui/i18n_data.py` neu exportiert
+  (`python -m webapp.tools.export_i18n`, jetzt 161 statt 158 Schlüssel).
+
+  **Getestet:** Vier neue Tests in `tests/test_webapp_jobs_api.py`:
+  ein voller Ende-zu-Ende-Lauf, dessen QA-Bericht-Text über die neue
+  Route abgerufen und Byte für Byte gegen dieselbe Datei verglichen
+  wird, die direkt von der Platte gelesen wurde (beweist echten Inhalt,
+  keine Platzhalter-Antwort); ein gezielter Sicherheitstest, der
+  versucht, eine echte, existierende, aber NICHT zum Job gehörende Datei
+  (dieses Testmodul selbst) über den `file`-Parameter zu lesen - bewusst
+  eine echte Datei statt eines nicht existierenden Pfads, damit die
+  Prüfung nachweislich eine Allow-Liste ist und keine bloße
+  `os.path.exists()`-Prüfung, durch die eine echte Datei einfach
+  durchrutschen würde; unbekannte Job-ID; Abruf-Versuch, bevor der Lauf
+  fertig ist (mit demselben künstlich verlangsamten `FakeProvider`-Trick
+  wie beim bereits bestehenden Race-Test). Gesamter Testlauf (`tests/`,
+  ohne `test_ui_images_mode.py`): 232 passed (vorher 228), 1 skipped -
+  keine Regressionen. `webapp.server`/`webapp.job_bridge` importieren
+  weiterhin nachweislich ohne `PySide6`.
+
+  Zusätzlich mit Playwright von Hand gegen den echten laufenden Server
+  geprüft (nicht nur die Test-Suite): nach einem echten Lauf erscheint
+  genau eine Ergebniszeile mit dem Button "QA-Bericht anzeigen"; ein
+  Klick lädt den echten Bericht ("Bildübersetzung - QA-Bericht ...") in
+  das `<pre>`-Element und der Button wechselt auf "QA-Bericht
+  ausblenden"; ein zweiter Klick blendet ihn wieder aus, ohne einen
+  erneuten Request zu benötigen (Bericht wird höchstens einmal geladen,
+  `loaded`-Flag in `app.js`). Keine neuen JavaScript-Fehler in der
+  Konsole (weiterhin nur das schon dokumentierte harmlose
+  `favicon.ico`-404).
+
+  **Noch offen (Schritt 8 laut Plan):** die `review_server.py`-Übergabe -
+  der riskanteste verbleibende Eingriff, da er einen bereits genutzten,
+  bestehenden Ablauf (`image_translate_cli/cli.py::_cmd_review()`)
+  aufspaltet; `_cmd_review()` wird danach erneut regressionsgeprüft.

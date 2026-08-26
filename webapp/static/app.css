@@ -214,6 +214,52 @@ button.primary:disabled {
     color: var(--muted);
 }
 
+/* #job-result-files (Schritt 7) is also a <ul> inside .result, but with
+   its own per-file layout (name, stats, a QA-report toggle button, an
+   inline report block) rather than a plain bullet list like
+   #analysis-warnings - override the generic ".result ul" bullet/indent
+   styling above with a more specific selector instead of fighting it. */
+#job-result-files {
+    list-style: none;
+    padding-left: 0;
+    margin-top: 8px;
+}
+
+.job-result-file {
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+    color: var(--ink);
+}
+
+.job-result-file:first-child {
+    border-top: none;
+    padding-top: 0;
+}
+
+.job-result-file .hint {
+    display: inline;
+    margin: 0;
+}
+
+.job-result-file button {
+    display: block;
+    margin-top: 6px;
+}
+
+.qa-report {
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: var(--input-bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-control);
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    max-height: 260px;
+    overflow-y: auto;
+}
+
 /* Generic utility, not just for .result - also toggled on #cancel-button
    (Schritt 5) and the pywebview pick-buttons/hints (Schritt 6). A bug
    here would be silent (the element just stays visible instead of

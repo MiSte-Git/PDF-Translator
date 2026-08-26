@@ -22,6 +22,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 from PIL import Image, ImageDraw, ImageFont
@@ -316,3 +317,102 @@ def test_cancel_after_job_finished_is_rejected(
     assert status == 404
     assert payload["ok"] is False
     assert payload["errors"] == ["Lauf ist nicht mehr aktiv."]
+
+
+# --- /api/jobs/<id>/qa-report (Schritt 7) --------------------------------
+
+
+def test_qa_report_returns_the_real_report_text_for_a_finished_job(
+    running_server: str, fake_deepl_credential: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(image_job_module, "build_provider", lambda name: FakeProvider())
+    source = tmp_path / "photo.png"
+    _build_image(source, "Hello")
+    status, start_payload = _post_json(
+        f"{running_server}/api/jobs",
+        {
+            "source_paths": [str(source)],
+            "output_dir": str(tmp_path / "out"),
+            "provider": "deepl",
+            "ocr_engine": "tesseract",
+            "inpainting_backend": "box_overlay",
+        },
+    )
+    job_id = start_payload["job_id"]
+    _poll_until_finished(running_server, job_id)
+
+    status, result_payload = _get_json(f"{running_server}/api/jobs/{job_id}/result")
+    qa_report_path = result_payload["files"][0]["qa_report"]
+
+    status, payload = _get_json(f"{running_server}/api/jobs/{job_id}/qa-report?file={quote(qa_report_path)}")
+    assert status == 200
+    assert payload["ok"] is True
+    # Same file, read a second time directly from disk - proves the route
+    # returns the REAL report content, not a placeholder/echo of the path.
+    assert payload["text"] == Path(qa_report_path).read_text(encoding="utf-8")
+    assert "Bildübersetzung - QA-Bericht" in payload["text"]
+
+
+def test_qa_report_rejects_a_path_that_is_not_this_jobs_own_report(
+    running_server: str, fake_deepl_credential: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The `file` query parameter is not a free-form filesystem path - see
+    job_bridge.job_qa_report()'s docstring: this LOCAL-ONLY, unauthenticated
+    server must never read a caller-supplied path that isn't one of THIS
+    job's own known QA report files. A real, unrelated, existing file
+    (this test module itself) is used here rather than a path that simply
+    doesn't exist, to prove the check is an allow-list, not just an
+    os.path.exists() guard that a real file would sail through.
+    """
+    monkeypatch.setattr(image_job_module, "build_provider", lambda name: FakeProvider())
+    source = tmp_path / "photo.png"
+    _build_image(source, "Hello")
+    status, start_payload = _post_json(
+        f"{running_server}/api/jobs",
+        {
+            "source_paths": [str(source)],
+            "output_dir": str(tmp_path / "out"),
+            "provider": "deepl",
+            "ocr_engine": "tesseract",
+            "inpainting_backend": "box_overlay",
+        },
+    )
+    job_id = start_payload["job_id"]
+    _poll_until_finished(running_server, job_id)
+
+    unrelated_real_file = str(Path(__file__).resolve())
+    status, payload = _get_json(f"{running_server}/api/jobs/{job_id}/qa-report?file={quote(unrelated_real_file)}")
+    assert status == 404
+    assert payload["ok"] is False
+
+
+def test_qa_report_for_unknown_job_returns_404(running_server: str) -> None:
+    status, payload = _get_json(f"{running_server}/api/jobs/does-not-exist/qa-report?file=/tmp/whatever.txt")
+    assert status == 404
+    assert payload["ok"] is False
+
+
+def test_qa_report_before_job_finishes_is_rejected(
+    running_server: str, fake_deepl_credential: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(image_job_module, "build_provider", lambda name: FakeProvider(delay_seconds=0.5))
+    source = tmp_path / "photo.png"
+    _build_image(source, "Hello")
+    status, start_payload = _post_json(
+        f"{running_server}/api/jobs",
+        {
+            "source_paths": [str(source)],
+            "output_dir": str(tmp_path / "out"),
+            "provider": "deepl",
+            "ocr_engine": "tesseract",
+            "inpainting_backend": "box_overlay",
+        },
+    )
+    job_id = start_payload["job_id"]
+
+    status, payload = _get_json(f"{running_server}/api/jobs/{job_id}/qa-report?file=/tmp/whatever.txt")
+    assert status == 404
+    assert payload["ok"] is False
+    assert payload["errors"] == ["Lauf ist noch nicht abgeschlossen."]
+
+    _poll_until_finished(running_server, job_id)

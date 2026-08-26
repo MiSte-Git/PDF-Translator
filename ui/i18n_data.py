@@ -162,6 +162,17 @@ DE = {
     "job.pdf_overflow_count": "{count} Block/Blöcke musste(n) wachsen oder schrumpfen, um zu passen – bitte im PDF stichprobenartig prüfen.",
     "job.open_folder": "Ordner öffnen",
     "job.open_report": "QA-Bericht öffnen",
+    # Bild-Modus im Webapp-Frontend (Schritt 7, 26.08.2026): es gibt dort
+    # keine "Ordner öffnen"-Aktion (kein natives Dateisystem-Fenster ohne
+    # zusätzliche pywebview-API), also wird pro Bild sein eigener
+    # QA-Bericht direkt inline ein-/ausgeblendet statt extern geöffnet
+    # (job.open_report/QDesktopServices bleibt der Qt-App vorbehalten,
+    # die dafür ohnehin kein Pendant im Bild-Modus zeigt - siehe
+    # ui/app.py::_show_job_result()). Von der Qt-App nicht verwendet,
+    # genau wie schon dialog.choose_images/job.cancel usw.
+    "job.show_report": "QA-Bericht anzeigen",
+    "job.hide_report": "QA-Bericht ausblenden",
+    "job.report_load_error": "QA-Bericht konnte nicht geladen werden.",
     "job.correct_translation": "Übersetzung korrigieren",
     "job.failed_title": "Übersetzung fehlgeschlagen",
     "correction.title": "PDF-Übersetzung korrigieren",
@@ -346,6 +357,11 @@ EN = {
     "job.pdf_overflow_count": "{count} block(s) needed to grow or shrink to fit – please spot-check the PDF.",
     "job.open_folder": "Open folder",
     "job.open_report": "Open QA report",
+    # Images mode in the webapp frontend (Schritt 7, 26.08.2026) - see the
+    # matching German comment above for why this differs from the Qt app.
+    "job.show_report": "Show QA report",
+    "job.hide_report": "Hide QA report",
+    "job.report_load_error": "Could not load QA report.",
     "job.correct_translation": "Correct translation",
     "job.failed_title": "Translation failed",
     "correction.title": "Correct PDF translation",
