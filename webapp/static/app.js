@@ -168,6 +168,15 @@ async function loadConfig() {
   if (form.protected_terms) document.getElementById("protected-terms").value = form.protected_terms;
   if (form.ocr_engine) ocrSelect.value = form.ocr_engine;
   if (form.inpainting_backend) inpaintingSelect.value = form.inpainting_backend;
+  // 27.08.2026 - real user report, Backlog.md 27.08.2026: "Der
+  // Zielordner wird nicht gespeichert." webapp/job_bridge.py::start_job()
+  // has always SAVED last_output_dir (see its own 27.08.2026 comment -
+  // the same fix that made source_lang/target_lang/etc. above survive a
+  // restart), and build_config() has always returned it right here in
+  // `saved` - this loop above just never read it back into the
+  // #output-dir field, the one part of "last_form_state" this function
+  // silently dropped on the floor.
+  if (saved.last_output_dir) document.getElementById("output-dir").value = saved.last_output_dir;
   updateAvailabilityHint(ocrSelect, config.ocr_engine_available, document.getElementById("ocr-engine-hint"));
   updateAvailabilityHint(inpaintingSelect, config.inpainting_backend_available, document.getElementById("inpainting-backend-hint"));
 }

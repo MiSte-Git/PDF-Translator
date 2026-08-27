@@ -5759,3 +5759,98 @@ Ursache für die beobachtete Abweichung ist noch nicht gefunden. Falls das
 beim nächsten Lauf wieder auftritt, wäre ein Hinweis darauf hilfreich.
 
 266 von 266 Tests grün (vorher 263).
+
+## 27.08.2026 - Zielordner-Speicherung und Zeilenumbruch: der Zeilenumbruch-Fix von oben war beim ersten Versand tatsächlich noch kaputt
+
+Michael, direkt im Anschluss an den Eintrag oben, zwei neue Rückmeldungen
+am selben Nachmittag:
+
+1. "Der Zielordner wird nicht gespeichert."
+2. Nach einem Korrekturdurchlauf mit deutlich weniger nötigen Korrekturen
+   als je zuvor ("das war bisher die beste Lösung"): "Nachdem ich dann
+   auf 'Übernehmen' geklickt habe, wurden diese Änderungen mit anderem
+   Font und die Textboxen an anderer Position übernommen. [...] Im
+   Korrekturfenster schaut alles nahezu perfekt aus und nach Übernahme
+   ist einiges wieder zerschossen." Am Titel konkret sichtbar: im
+   Korrekturfenster zweizeilig (sein eingefügter Zeilenumbruch), im
+   fertigen Bild wieder einzeilig - der im selben Eintrag oben als
+   "behoben" gemeldete Zeilenumbruch-Fix hat also NICHT funktioniert.
+
+### Zielordner: eine Zeile hat gefehlt
+
+`webapp/job_bridge.py::start_job()` hat `last_output_dir` schon seit dem
+Fix zu Task #14 korrekt gespeichert, und `build_config()` hat es über
+`/api/config` auch immer korrekt zurückgegeben - nur
+`webapp/static/app.js::loadConfig()` hat es nie wieder in das
+`#output-dir`-Feld zurückgeschrieben (nur `provider` und die `form.*`-
+Felder). Eine Zeile ergänzt. Mit Playwright gegen den echten Server
+verifiziert (`repro_output_dir.py`, siehe unten).
+
+### Zeilenumbruch: der Fix von oben sah im Code richtig aus und war es nicht - erst ein echter Browser hat das gezeigt
+
+Ernüchternd, aber wichtig festzuhalten: Der oben gemeldete Zeilenumbruch-
+Fix ("Enter fügt ein literales '\n'-Zeichen ein") wurde nur gegen
+Python-Unit-Tests und eine reine Node-Syntaxprüfung verifiziert - beides
+prüft, dass der JS-Code SYNTAKTISCH gültig ist und dass
+`_wrap_text_to_width()` ein "\n" korrekt behandelt, aber keins von
+beidem prüft, was passiert, wenn ein echter Browser tatsächlich hineintippt.
+Genau das hat Michael am echten Fall gefunden. Diesmal mit Playwright
+(echtes, headless Chromium - im Sandbox vorinstalliert) nachgestellt
+(`repro_linebreak.py`, im Repo belassen) statt nur am Code gelesen - drei
+Anläufe nötig, jeder einzelne am echten Tippverhalten gescheitert:
+
+1. **Erster Versand (der oben als "behoben" gemeldete Stand):**
+   `Range.insertNode()` fügt einen eigenen Textknoten nur mit "\n" ein,
+   Cursor wird "danach" gesetzt. Sieht im DOM sofort danach korrekt aus.
+   Mit Playwright weitergetippt: die NÄCHSTEN Zeichen landeten VOR diesem
+   Textknoten statt danach - Chromiums eigene Cursor-Auflösung an der
+   Grenze zwischen zwei Textknoten löst offenbar zum "Anfang des
+   folgenden Knotens" auf, nicht zum "Ende des vorherigen". Ergebnis: das
+   "\n" wanderte beim Weitertippen bis ans Ende des gesamten Strings -
+   exakt das beobachtete Symptom (Zeilenumbruch verschwunden, Text an
+   falscher Stelle zusammengefügt).
+2. **Zweiter Versuch:** `document.execCommand('insertText', false,
+   '\n')` - fügt in echtem, Playwright-gesteuertem Chromium gar nichts
+   ein. `execCommand` gilt seit Jahren als veraltet und ist inzwischen
+   unzuverlässig genug, dass es hierfür nicht mehr taugt.
+3. **Dritter Versuch:** "\n" direkt in die Zeichenkette des bestehenden
+   Textknotens spleißen (kein neuer, isolierter Knoten). Gleiches
+   Symptom wie Versuch 1 - ein Cursor direkt NACH einem abschliessenden
+   "\n" ist in Chromium offenbar grundsätzlich keine stabile Tippposition,
+   unabhängig davon, wie das "\n" dorthin kam.
+
+**Die Lösung, die tatsächlich funktioniert:** Enter komplett in Ruhe
+lassen - der Browser macht sein eigenes, sehr zuverlässiges Standard-
+verhalten (ein neues `<div>` pro Absatz), Cursor-Handling bleibt
+vollständig bei Chromium selbst. Der Zeilenumbruch wird erst beim
+Auslesen rekonstruiert: `textWithLineBreaks()` (neu, review_server.py)
+läuft den DOM-Baum der Box ab und setzt genau ein "\n" pro
+`<div>`/`<br>`-Grenze, statt `.textContent` direkt zu lesen (das hätte
+alle Blöcke kommentarlos aneinandergehängt). Verwendet sowohl in
+`collectRegions()` (was tatsächlich an `/api/apply` geht) als auch in
+`refitText()` (damit die Live-Vorschau denselben Text sieht wie
+"Anwenden" nachher tatsächlich verschickt). Mit Playwright verifiziert:
+Enter, Text weitertippen, doppeltes Enter (Leerzeile), und der
+komplette Weg bis zum Server - jedes Mal exakt der erwartete String,
+jedes Mal reproduzierbar.
+
+**Neu, dauerhaft:** `tests/test_browser_regressions.py` - zwei Playwright-
+Tests für genau diese beiden Fehler (Zeilenumbruch Ende-zu-Ende inkl.
+Server-Empfang, Zielordner-Wiederherstellung). Playwright ist bewusst
+KEINE neue Projekt-Abhängigkeit (steht nicht in requirements.txt) und
+wird auf Michaels Rechner nicht installiert sein -
+`pytest.importorskip("playwright.sync_api")` lässt beide Tests dort
+sauber überspringen (verifiziert: `Skipped`, kein Fehler) statt
+`pytest tests/` kaputtzumachen. Im eigenen Dev-Sandbox (Playwright/
+Chromium vorinstalliert) laufen sie mit und sind die einzigen Tests in
+dieser Suite, die tatsächlich einen echten Browser durchspielen - nach
+drei fehlgeschlagenen Anläufen am selben Bug der klare Beleg, dass genau
+diese Testart hier gefehlt hat.
+
+**Ehrlich:** 266 grüne Tests waren beim ersten Versand dieses Zeilenumbruch-
+Fixes kein verlässliches Signal - keiner davon hat einen echten Browser
+tippen lassen. Das ist jetzt behoben, aber es ist der Grund, warum der
+Fix nicht auf Anhieb hielt.
+
+268 von 268 Tests grün (266 + 2 neue, davon evtl. übersprungen ohne
+Playwright), 1 skipped (unverändert, Tesseract).

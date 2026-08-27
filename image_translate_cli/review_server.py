@@ -205,7 +205,12 @@ function refitText(box, text) {
   const maxWidth = Math.max(parseInt(box.style.width, 10) - 8, 1);
   const maxHeight = Math.max(parseInt(box.style.height, 10) - 4, 1);
   const base = parseInt(text.dataset.baseFontSize, 10) || 13;
-  const content = text.textContent || '';
+  // textWithLineBreaks(), not plain .textContent - see collectRegions()'s
+  // own comment: a break the user just typed lives as a <div>/<br>
+  // boundary until Anwenden serializes it, and the live preview needs to
+  // account for it exactly the same way or it drifts from what
+  // Anwenden actually sends.
+  const content = textWithLineBreaks(text) || '';
   let size = base;
   while (true) {
     const ctx = _measureCtx(size);
@@ -258,37 +263,35 @@ function renderRegions() {
     // anything `review` itself produces; falls back to the CSS default.
     text.dataset.baseFontSize = r.font_size_px || 13;
     // 27.08.2026 - real user report, Backlog.md 27.08.2026: "einen
-    // Zeilenumbruch sollte mit übernommen werden". Left to the browser's
-    // own default, Enter inside a contentEditable div splits into a new
-    // <div>/<br> - collectRegions() below reads .textContent, and a
-    // block split like that either vanishes from .textContent entirely
-    // or shows up in a way pipeline.images.inpainting.py's renderer never
-    // agreed to interpret. Intercepted here instead: Enter inserts one
-    // literal "\\n" text character at the cursor - collectRegions()
-    // already sends that straight through as part of translated_text
-    // with no change needed there, and inpainting.py's
-    // _wrap_text_to_width() (see its own 27.08.2026 comment) now treats
-    // that exact character as a forced break instead of ordinary
-    // whitespace.
-    text.addEventListener('keydown', (e) => {
-      if (e.key !== 'Enter') return;
-      e.preventDefault();
-      const sel = window.getSelection();
-      if (!sel.rangeCount) return;
-      const range = sel.getRangeAt(0);
-      range.deleteContents();
-      const breakNode = document.createTextNode('\\n');
-      range.insertNode(breakNode);
-      range.setStartAfter(breakNode);
-      range.setEndAfter(breakNode);
-      sel.removeAllRanges();
-      sel.addRange(range);
-      refitText(box, text);
-    });
-    // Any other edit (typing, paste, delete) also needs a re-fit - the
-    // Enter case above already re-fits itself since 'input' does not
-    // reliably fire for the manual Range.insertNode() above in every
-    // engine.
+    // Zeilenumbruch sollte mit übernommen werden".
+    //
+    // Three attempts before this one, all abandoned after being
+    // reproduced BROKEN with a real (Playwright-driven) Chromium, not
+    // just eyeballed - see repro_linebreak.py, kept in the repo because
+    // this class of bug does not show up from reading the code, only
+    // from actually typing into it: (1) intercepting Enter and inserting
+    // a lone "\\n" text node via Range.insertNode() - the browser's own
+    // native typing for the NEXT character then landed BEFORE that node
+    // instead of after it, so the "\\n" silently migrated to the end of
+    // the string. (2) document.execCommand('insertText', false, '\\n')
+    // - inserted nothing at all. (3) splicing '\\n' directly into the
+    // existing text node's own data at the caret offset - same failure
+    // as (1): Chromium's caret-after-a-trailing-"\\n" is apparently not
+    // a stable insertion point for its own subsequent typing, no matter
+    // how the "\\n" got there.
+    //
+    // Given three straight failures at intercepting Enter and hand-
+    // placing a raw "\\n" character, this version does the opposite:
+    // Enter is left COMPLETELY alone, so the browser's own (very
+    // reliable) native contentEditable editing handles typing and caret
+    // placement exactly as it always does - which means a plain Enter
+    // press produces a new <div> (Chromium's own default), not a "\\n"
+    // character. The line break only gets reconstructed as a "\\n"
+    // afterwards, when reading the box back out - see
+    // textWithLineBreaks() below, used by collectRegions() instead of
+    // plain .textContent. Confirmed via the same Playwright repro: the
+    // typed text and the break both land exactly where expected, every
+    // time, because nothing here ever fights the browser's own caret.
     text.addEventListener('input', () => refitText(box, text));
     box.appendChild(text);
 
@@ -378,6 +381,41 @@ function makeResizable(box, handle) {
   handle.addEventListener('pointerup', () => { resizing = false; });
 }
 
+// 27.08.2026 - see renderRegions()'s own comment on why Enter is left
+// alone rather than intercepted: a plain Enter inside `.region-text`
+// produces Chromium's own default split, a new <div> (occasionally a
+// <br> for a shift-Enter-like case) - never a literal "\\n" character.
+// This walks the box's actual DOM instead of reading .textContent
+// (which would just concatenate every block's text with nothing
+// between them, losing the break entirely) and reconstructs exactly
+// ONE "\\n" per block boundary / <br>, so pipeline.images.inpainting.py's
+// _wrap_text_to_width() (see its own 27.08.2026 comment) sees the same
+// forced break the user actually typed. A literal "\\n" already present
+// in a text node (round-tripping a PRIOR correction round's break, see
+// renderRegions() setting text.textContent = r.translated_text above)
+// passes straight through unchanged - this only ADDS breaks for
+// DOM-level block boundaries, never removes one already in the text.
+function textWithLineBreaks(el) {
+  let out = '';
+  function walk(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      out += node.textContent;
+      return;
+    }
+    if (node.nodeName === 'BR') {
+      out += '\\n';
+      return;
+    }
+    const isBlock = node.nodeName === 'DIV' || node.nodeName === 'P';
+    if (isBlock && out.length > 0 && !out.endsWith('\\n')) {
+      out += '\\n';
+    }
+    node.childNodes.forEach(walk);
+  }
+  el.childNodes.forEach(walk);
+  return out;
+}
+
 function collectRegions() {
   const boxes = document.querySelectorAll('.region');
   const out = [];
@@ -396,7 +434,7 @@ function collectRegions() {
       orig_y: parseInt(box.dataset.origY, 10),
       orig_width: parseInt(box.dataset.origWidth, 10),
       orig_height: parseInt(box.dataset.origHeight, 10),
-      translated_text: text.textContent,
+      translated_text: textWithLineBreaks(text),
       original_text: box.dataset.originalText,
       confidence: parseFloat(box.dataset.confidence),
     });
