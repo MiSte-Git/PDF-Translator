@@ -436,6 +436,25 @@ class GoogleVisionOcrEngine:
 # two real, opposite-direction changes underneath).
 _PADDLE_TRANSLATABLE_LABELS = frozenset({"text", "paragraph_title", "doc_title", "footer"})
 
+# 26.08.2026 - the "richtiger Fix" the 24.08.2026 writeup above pointed
+# to but didn't build yet: for a block with one of THESE labels (not in
+# _PADDLE_TRANSLATABLE_LABELS above, so still never merged into one
+# paragraph and translated as a blob), _paddle_block_to_line_regions()
+# additionally emits each of its matched OCR lines as its OWN small,
+# independently translatable region - real user report, Backlog.md
+# 26.08.2026: "Wenn das als Bild gesehen wird, sollte das Bild doch auch
+# extrahiert und übersetzbar sein." The block itself is STILL also kept
+# (translatable=False, see OcrTextRegion.translatable's docstring) as a
+# full-bbox collision obstacle in addition to the per-line regions - so
+# a neighbouring region still can't grow sideways into the empty visual
+# gaps BETWEEN the scattered labels (the failure mode the 24.08.2026
+# revert-of-the-revert fixed), while the labels themselves now get
+# translated in place at their own small boxes instead of staying
+# permanently in English. Only "image" is listed - a genuinely
+# graphic-only "image" block (no OCR line matches at all) still produces
+# zero line regions, same as before this existed.
+_PADDLE_SCATTERED_TEXT_LABELS = frozenset({"image"})
+
 # 24.08.2026: two of PP-StructureV3's own per-line OCR results turned
 # out to be small decorative icons misread as a short, spurious text
 # token rather than a bug on our side - found via the real result JSON
@@ -570,6 +589,34 @@ def _paddle_ocr_lines(overall_ocr_res: dict) -> list[tuple[tuple[float, float, f
     return lines
 
 
+def _match_block_lines(
+    block_box: tuple[float, float, float, float],
+    ocr_lines: list[tuple[tuple[float, float, float, float], str, float]],
+) -> list[int]:
+    """Indices into `ocr_lines` of every line whose box CENTER falls
+    inside `block_box` - the geometric matching step shared by
+    _paddle_block_to_region() (joins them into one paragraph region) and
+    _paddle_block_to_line_regions() (26.08.2026, keeps them as separate
+    small regions - see that function's docstring). Factored out so both
+    can never disagree about which lines belong to a block.
+
+    Returns INDICES (26.08.2026, was the matched `(box, text, score)`
+    tuples themselves until then) rather than the tuples: a caller that
+    needs to recognize "this exact line" across multiple blocks (see
+    `claimed_line_indices` below) can't reliably do that via identity or
+    equality on a tuple rebuilt from unpacked-and-repacked values - the
+    index into the one shared `ocr_lines` list is the only stable
+    handle."""
+    bx0, by0, bx1, by1 = block_box
+    matched: list[int] = []
+    for index, (box, text, score) in enumerate(ocr_lines):
+        lx0, ly0, lx1, ly1 = box
+        center_x, center_y = (lx0 + lx1) / 2, (ly0 + ly1) / 2
+        if bx0 <= center_x <= bx1 and by0 <= center_y <= by1:
+            matched.append(index)
+    return matched
+
+
 def _paddle_block_to_region(
     block: dict, ocr_lines: list[tuple[tuple[float, float, float, float], str, float]]
 ) -> OcrTextRegion | None:
@@ -587,12 +634,7 @@ def _paddle_block_to_region(
         return None
     bx0, by0, bx1, by1 = block_box
 
-    matched: list[tuple[tuple[float, float, float, float], str, float]] = []
-    for box, text, score in ocr_lines:
-        lx0, ly0, lx1, ly1 = box
-        center_x, center_y = (lx0 + lx1) / 2, (ly0 + ly1) / 2
-        if bx0 <= center_x <= bx1 and by0 <= center_y <= by1:
-            matched.append((box, text, score))
+    matched = [ocr_lines[i] for i in _match_block_lines(block_box, ocr_lines)]
     if not matched:
         return None
 
@@ -608,6 +650,79 @@ def _paddle_block_to_region(
         x=round(bx0), y=round(by0), width=round(bx1 - bx0), height=round(by1 - by0),
         confidence=confidence, line_height=line_height,
     )
+
+
+def _paddle_block_to_line_regions(
+    block: dict,
+    ocr_lines: list[tuple[tuple[float, float, float, float], str, float]],
+    claimed_line_indices: set[int],
+) -> list[OcrTextRegion]:
+    """26.08.2026 - the "richtiger Fix" _PADDLE_SCATTERED_TEXT_LABELS's
+    docstring points to: one SMALL, independently translatable
+    OcrTextRegion per matched OCR line, each at its OWN original
+    position - instead of _paddle_block_to_region()'s single merged
+    paragraph region for the same lines.
+
+    Only called for a block whose label is in
+    _PADDLE_SCATTERED_TEXT_LABELS (currently just "image") - i.e. a
+    layout block PP-StructureV3 itself did NOT classify as prose, so
+    joining its lines into one paragraph (like a real "text" block)
+    is exactly the wrong shape for it (see Backlog.md 24.08.2026's full
+    "Version 13 ist schlechter als Version 12" writeup: nine short,
+    scattered icon labels joined into one string and drawn as one blob
+    over a neighbouring block was less readable than the untranslated
+    original). Returning each line as its own tiny region lets every
+    normal downstream mechanism - translation, per-region font sizing
+    (estimated_font_size() reads a region's own line_height), and
+    inpainting's collision avoidance (_vertical_room_below()/
+    _horizontal_room() treat every OcrTextRegion as a potential
+    neighbour, translated or not) - handle these exactly like any other
+    short text line anywhere else on the page, with no special-casing
+    needed beyond this function existing.
+
+    `claimed_line_indices` (26.08.2026, indices into `ocr_lines` already
+    matched into a genuinely translatable block - built by recognize()
+    in a pass over EVERY block before this one runs) excludes a line
+    already spoken for elsewhere. Found via the real result JSON for
+    "Spirit - Soul - Meatsuit.jpg": this exact "image" block's bbox
+    [25,457,394,718] slightly overlaps the NEIGHBOURING
+    "WHEREEXPERIENCES,PATTERNS&DISTORTIONSLIVE" banner's own separate
+    `paragraph_title` block bbox ([333,457,733,476]) at its top-right
+    corner - without this exclusion, the banner's own "WHERE" OCR line
+    would ALSO match here (bounding-box-center containment doesn't know
+    a line "belongs" to only one block) and get translated and drawn a
+    SECOND time, on top of the banner's own, already-correct
+    translation of the same text (confirmed empirically: without this
+    exclusion, a second, garbled "WHEREEXPERIENCES,PATTERNS&
+    DISTORTIONSLIVE WHERE" region appeared at x=333,y=457, right where
+    the banner already draws itself). Harmless for the merged
+    _paddle_block_to_region() obstacle above (its `.text` is never
+    rendered, only its bbox matters) - not harmless once a line becomes
+    its own independently drawn region.
+
+    Returns [] on no bbox / no matched lines, same as
+    _paddle_block_to_region()."""
+    block_box = _paddle_field(block, "block_bbox")
+    if block_box is None or len(block_box) != 4:
+        return []
+
+    regions = []
+    for index in _match_block_lines(block_box, ocr_lines):
+        if index in claimed_line_indices:
+            continue
+        box, text, score = ocr_lines[index]
+        if not text.strip():
+            continue
+        lx0, ly0, lx1, ly1 = box
+        height = round(ly1 - ly0)
+        regions.append(
+            OcrTextRegion(
+                text=text,
+                x=round(lx0), y=round(ly0), width=round(lx1 - lx0), height=height,
+                confidence=score * 100, line_height=height,
+            )
+        )
+    return regions
 
 
 class PaddleOcrEngine:
@@ -706,11 +821,32 @@ class PaddleOcrEngine:
         # same as the predict() call above, instead of a raw traceback.
         try:
             ocr_lines = _paddle_ocr_lines(result.get("overall_ocr_res") or {})
+            blocks = result.get("parsing_res_list") or []
+
+            # 26.08.2026 - a first pass over EVERY translatable block,
+            # before any region is built: which ocr_lines indices a
+            # normal, genuinely translatable block already claims (see
+            # _paddle_block_to_line_regions()'s `claimed_line_indices`
+            # docstring for the real overlap this guards against - a
+            # scattered-label block's own bbox can slightly overlap a
+            # neighbouring translatable block's bbox). Must run to
+            # completion BEFORE the second pass below, since a block
+            # that claims a line can appear AFTER the scattered-label
+            # block in `blocks`' own order - PaddleX doesn't guarantee
+            # any particular block ordering here.
+            claimed_line_indices: set[int] = set()
+            for block in blocks:
+                if _paddle_field(block, "block_label") in _PADDLE_TRANSLATABLE_LABELS:
+                    block_box = _paddle_field(block, "block_bbox")
+                    if block_box is not None and len(block_box) == 4:
+                        claimed_line_indices.update(_match_block_lines(block_box, ocr_lines))
+
             regions: list[OcrTextRegion] = []
-            for block in result.get("parsing_res_list") or []:
+            for block in blocks:
                 region = _paddle_block_to_region(block, ocr_lines)
                 if region is None:
                     continue
+                label = _paddle_field(block, "block_label")
                 # 24.08.2026: a label-excluded block that genuinely has
                 # OCR'd text (see OcrTextRegion.translatable's
                 # docstring) is still returned, marked untranslatable,
@@ -718,8 +854,18 @@ class PaddleOcrEngine:
                 # obstacle_regions collision-avoidance instead of
                 # disappearing from every collision check the way it
                 # did before this field existed.
-                if _paddle_field(block, "block_label") not in _PADDLE_TRANSLATABLE_LABELS:
+                if label not in _PADDLE_TRANSLATABLE_LABELS:
                     region = _dataclass_replace(region, translatable=False)
+                    regions.append(region)
+                    # 26.08.2026 - see _PADDLE_SCATTERED_TEXT_LABELS's
+                    # docstring: additionally translate each of this
+                    # block's own OCR lines individually, in place,
+                    # instead of leaving the whole block untranslated.
+                    if label in _PADDLE_SCATTERED_TEXT_LABELS:
+                        regions.extend(
+                            _paddle_block_to_line_regions(block, ocr_lines, claimed_line_indices)
+                        )
+                    continue
                 regions.append(region)
         except Exception as exc:
             raise OcrError(f"PaddleOCR-Ergebnis konnte nicht verarbeitet werden: {exc}") from exc

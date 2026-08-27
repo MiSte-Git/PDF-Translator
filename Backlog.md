@@ -5320,3 +5320,107 @@ mit echten Maus-Events gegen eine echte Chromium-Instanz (siehe oben).
 Gesamter Testlauf (`tests/`, ohne `test_ui_images_mode.py`): 254
 passed (vorher 249), 1 skipped. `webapp/`-Schicht weiterhin nachweislich
 ohne `PySide6`-Import.
+
+## 26.08.2026 - Klarstellung zum Resize-Fix + "Buch in der Kugel"-Liste jetzt tatsächlich übersetzt (Zeile für Zeile statt als ein Block)
+
+**Klarstellung zum Drag-Fix von eben:** Michael wies zurecht darauf hin,
+dass er nie Probleme mit dem Ziehen/Verschieben hatte - er benutzt
+ausschliesslich das Greifkästchen unten rechts zum Vergrössern/
+Verkleinern. Zur Einordnung: dieses Kästchen hat schon immer
+funktioniert und wurde vom Drag-Bug gar nicht berührt - es hat einen
+eigenen, komplett separaten Event-Listener (`makeResizable()`,
+`e.stopPropagation()`), der nie mit dem betroffenen Code
+(`makeDraggable()`) in Berührung kommt, und ändert grundsätzlich nur
+Breite/Höhe, nie die Position (die obere linke Ecke bleibt beim
+Grösse-Ändern immer fest). Der Drag-Fix von eben betrifft ausschliesslich
+das direkte Anklicken und Ziehen der Box SELBST (nicht des
+Eckkästchens), um sie zu VERSCHIEBEN ohne die Grösse zu ändern - das
+hat Michael nach eigener Aussage nie benutzt, war also nicht die
+Ursache seines eigentlichen Problems. Der wirkliche Übeltäter für
+"Korrekturen werden nicht übernommen" war der Architektur-Bug
+(`render_box`/Lösch-Logik) - unabhängig davon, mit welcher Maus-Geste
+korrigiert wurde. Der Drag-Fix bleibt trotzdem sinnvoll (jetzt
+tatsächlich funktionsfähig für den Fall, dass jemand die Box direkt statt
+über das Eckkästchen verschieben will), war aber nicht die Erklärung für
+Michaels konkreten Fall - das war zu Unrecht so dargestellt.
+
+**"Buch in der Kugel"-Liste: Michaels Einwand berechtigt, jetzt richtig
+gelöst statt nur dokumentiert.** Michael: "Wenn das als Bild gesehen
+wird, sollte das Bild doch auch extrahiert und übersetzbar sein. Google
+Vision kann es ja auch. [...] Leer lassen ist keine Option." Der
+"richtige Fix", den der 24.08.2026-Eintrag schon damals als noch nicht
+umgesetzt benannt hatte ("jede der 9 kurzen OCR-Zeilen [...] müsste als
+EIGENE kleine Region an ihrer EIGENEN ursprünglichen Position übersetzt
+und gezeichnet werden, statt zu einem Absatz zusammengefasst zu
+werden"), ist jetzt gebaut: `pipeline/images/ocr.py`s neue
+`_paddle_block_to_line_regions()` gibt für einen "image"-klassifizierten
+Block mit echtem Text (`_PADDLE_SCATTERED_TEXT_LABELS`) zusätzlich zum
+bisherigen, weiterhin als Hindernis geführten Gesamt-Block JEDE
+zugeordnete OCR-Zeile als eigene, kleine, unabhängig übersetzbare Region
+an ihrer eigenen Original-Position zurück - genau der Fix, der beim
+ersten Versuch (23./24.08.2026) noch fehlte, als alle 9 Labels zu EINEM
+Absatz zusammengefasst und als ein Textklumpen über den Nachbarblock
+gezeichnet wurden ("Version 13 ist schlechter als Version 12"). Der
+Gesamt-Block bleibt zusätzlich als `translatable=False`-Hindernis
+bestehen, damit Nachbar-Regionen weiterhin nicht seitlich in die leeren
+Zwischenräume zwischen den Labels hineinwachsen können (derselbe Schutz
+wie beim vorherigen, dritten Versuch).
+
+**Beim Testen mit dem echten Ergebnis-JSON gefunden und behoben, bevor
+es zu einem sichtbaren Fehler wurde:** Der "image"-Block
+[25,457,394,718] überlappt am oberen rechten Rand leicht mit dem
+Bounding-Box des direkt benachbarten, bereits normal übersetzbaren
+Banner-Blocks "WHEREEXPERIENCES,PATTERNS&DISTORTIONSLIVE" ([333,457,
+733,476]). Eine einzelne OCR-Zeile ("WHERE") liegt mit ihrem
+Mittelpunkt in BEIDEN Boxen - ohne Gegenmassnahme wäre sie ein zweites
+Mal, unabhängig vom Banner, übersetzt und gezeichnet worden, direkt
+über der bereits korrekten Banner-Übersetzung. Behoben durch einen
+Vorab-Durchlauf über alle Blöcke (`claimed_line_indices` in
+`recognize()`): jede OCR-Zeile, die bereits zu einem normal
+übersetzbaren Block gehört, wird beim Aufsplitten des "image"-Blocks
+ausgeschlossen. Ohne einen echten, vorhandenen Diagnose-Datensatz
+(`paddle_probe_out/`) wäre dieser Randfall vermutlich erst bei Michael
+aufgefallen.
+
+**Echter Rendertest gegen das tatsächliche Bild (nicht nur Unit-Tests) -
+gegeben die Vorgeschichte dieser Stelle (dreimal in Folge am 24.08.2026
+regressiert) Pflicht, nicht optional:** Mit dem bereits vorhandenen,
+echten PaddleOCR-Ergebnis (`paddle_probe_out/.../_res.json`) und einer
+kleinen Wörterbuch-Übersetzung ("Thoughts"→"Gedanken" usw.) den
+kompletten `translate_image()`-Lauf gegen die echte Bilddatei
+ausgeführt und das Ergebnis visuell geprüft: alle 9-10 Listeneinträge
+(Thoughts, Emotions, Choices, LEDGER, Beliefs, Trauma, Karma,
+Experiences, "...aufgezeichnet als", PATTERNS) erscheinen jetzt einzeln,
+an ihrer ursprünglichen Position um die Kugel-Grafik verteilt, lesbar,
+ohne Überlappung mit dem Banner oder dem Titel darüber - keine
+Wiederholung der Version-13-Verschlechterung.
+
+**Ein kleiner, verbleibender Schönheitsfehler, ehrlich gemeldet statt
+verschwiegen:** An genau einer Stelle sitzen zwei der neuen kleinen
+Regionen ("...aufgezeichnet als" und "MUSTER") vertikal eng
+übereinander - im Original waren das zwei kurze, eng gesetzte Zeilen
+derselben Bildunterschrift. Die deutsche Übersetzung von "...rocorded
+as" ist länger als das Original und bricht in der schmalen Box auf zwei
+Zeilen um; für diesen Fall reicht der verfügbare Vertikal-Abstand zur
+Nachbar-Region "MUSTER" knapp nicht, sie berühren sich leicht
+("alsMUSTER"). Das ist keine neue Regression, sondern dieselbe, bereits
+in `_vertical_room_below()`s eigenem Docstring dokumentierte,
+allgemeine Grenze des Renderers (Schrumpfen bis zu einer Mindestgrösse,
+danach wird ein Überlappen in Kauf genommen, statt bis zur
+Unleserlichkeit zu schrumpfen) - sie betrifft grundsätzlich jedes eng
+stehende Regionenpaar mit wachsender Übersetzung, wird hier nur zum
+ersten Mal sichtbar, weil dieser Bereich vorher ein einziger,
+unübersetzter Block war. Über die Korrektur-Ansicht von Hand leicht zu
+beheben (Box verschieben/vergrössern); eine generelle Verbesserung des
+Vertikal-Abstands wäre ein eigenes, separates Thema.
+
+**Getestet:** `test_paddleocr_recognize_translates_an_image_labeled_
+blocks_lines_individually` umgebaut (prüft jetzt: Gesamt-Block bleibt
+Hindernis, jede Zeile erscheint zusätzlich einzeln). Neuer Test
+`test_paddleocr_recognize_does_not_duplicate_a_line_already_claimed_by_
+a_translatable_block` (bildet die echte WHERE-Überlappung nach).
+Zusätzlich der oben beschriebene echte End-to-End-Rendertest gegen das
+tatsächliche Bild und das echte, gespeicherte PaddleOCR-Ergebnis
+(nicht Teil der automatisierten Suite). `tests/test_image_ocr.py`
+allein: 43 passed (vorher 42). Gesamter Testlauf (`tests/`, ohne
+`test_ui_images_mode.py`): 255 passed (vorher 254), 1 skipped.

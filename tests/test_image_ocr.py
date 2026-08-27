@@ -846,7 +846,7 @@ def test_paddleocr_recognize_skips_a_block_with_no_matching_ocr_line(
     assert engine.recognize(str(source)) == []
 
 
-def test_paddleocr_recognize_marks_an_image_labeled_block_untranslatable_but_still_returns_it(
+def test_paddleocr_recognize_translates_an_image_labeled_blocks_lines_individually(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Fund 1 from Michael's QA-Bericht "(12)": "Einmal in der Mitte ganz
@@ -856,24 +856,25 @@ def test_paddleocr_recognize_marks_an_image_labeled_block_untranslatable_but_sti
     the whole "Thoughts/Emotions/.../recorded as PATTERNS" list as
     layout category "image" (probably because of the ledger/sphere
     graphic sharing the block) even though it genuinely contains
-    recognized text. Three attempts, same day:
+    recognized text. Four attempts now, across two days:
 
-    1) Added "image" to _PADDLE_TRANSLATABLE_LABELS - DID translate it,
-       but Michael's real next test (QA-Bericht "(13)") came back
-       worse than before: _paddle_block_to_region() joins every
-       matched OCR line into ONE paragraph and draws ONE text blob at
-       the block's bbox - correct for real prose, but this block is 9
-       short, independent icon labels scattered around a graphic, not
-       a paragraph. Joined and translated as one string they became
-       one garbled blob overlapping the neighbouring banner block
-       ("Version 13 ist schlechter als Version 12").
-    2) Reverted "image" from the whitelist the same day, back to the
-       original behaviour: the block, and every OCR line matched
-       inside it, was dropped entirely BEFORE _paddle_block_to_region()
-       even ran - it never became an OcrTextRegion at all.
-    3) That turned out to be its own, WORSE regression (QA-Bericht
-       "(15)", Michael: "Das ist jetzt noch schlimmer als das
-       vorherige. Die Font stimmen gar nicht mehr usw."):
+    1) (24.08.2026) Added "image" to _PADDLE_TRANSLATABLE_LABELS - DID
+       translate it, but Michael's real next test (QA-Bericht "(13)")
+       came back worse than before: _paddle_block_to_region() joins
+       every matched OCR line into ONE paragraph and draws ONE text
+       blob at the block's bbox - correct for real prose, but this
+       block is 9 short, independent icon labels scattered around a
+       graphic, not a paragraph. Joined and translated as one string
+       they became one garbled blob overlapping the neighbouring
+       banner block ("Version 13 ist schlechter als Version 12").
+    2) (24.08.2026) Reverted "image" from the whitelist the same day,
+       back to the original behaviour: the block, and every OCR line
+       matched inside it, was dropped entirely BEFORE
+       _paddle_block_to_region() even ran - it never became an
+       OcrTextRegion at all.
+    3) (24.08.2026) That turned out to be its own, WORSE regression
+       (QA-Bericht "(15)", Michael: "Das ist jetzt noch schlimmer als
+       das vorherige. Die Font stimmen gar nicht mehr usw."):
        translate_image.py's `obstacle_regions` collision-avoidance
        (built 22.08.2026) only protects regions that exist in
        `stats.regions` in the first place - since this block never
@@ -881,13 +882,24 @@ def test_paddleocr_recognize_marks_an_image_labeled_block_untranslatable_but_sti
        (pipeline.images.inpainting._horizontal_room()) saw "no
        obstacle there" and expanded NEIGHBOURING regions' text
        sideways straight over the block's still-visible English text.
+       Fixed that day by returning the block as a `translatable=False`
+       obstacle region instead of dropping it - stable, but left the
+       list itself untranslated (Michael, 26.08.2026: "Wenn das als
+       Bild gesehen wird, sollte das Bild doch auch extrahiert und
+       übersetzbar sein.").
+    4) (26.08.2026) The "richtiger Fix" attempt 1's own docstring
+       already called for: keep the merged block as a
+       `translatable=False` obstacle (protects the empty visual gaps
+       BETWEEN the scattered labels, same as attempt 3), but ALSO
+       return each of its matched OCR lines as its OWN small,
+       independently translatable region at its OWN original position
+       (_paddle_block_to_line_regions()) - avoids attempt 1's exact
+       failure mode (one merged paragraph blob) since every line is
+       now translated and drawn completely independently, the same way
+       any ordinary text line elsewhere on the page is.
 
-    Fixed properly this time: the block IS still returned as a region
-    (so obstacle_regions sees it and neighbouring regions' reflow
-    respects its real extent), but marked `translatable=False` (see
-    that field's docstring) so translate_image.py's eligibility loop
-    still never sends it for translation. See Backlog.md, 24.08.2026,
-    for the fuller writeup of all three attempts."""
+    See Backlog.md, 24.08.2026 and 26.08.2026, for the fuller writeup
+    of all four attempts."""
     source = tmp_path / "irrelevant.png"
     _build_blank_image(source)
     monkeypatch.setattr("pipeline.images.ocr.paddleocr_available", lambda: True)
@@ -916,10 +928,84 @@ def test_paddleocr_recognize_marks_an_image_labeled_block_untranslatable_but_sti
 
     regions = engine.recognize(str(source))
 
-    assert len(regions) == 1
-    assert regions[0].translatable is False
-    assert regions[0].text == "Thoughts Emotions ...recorded as PATTERNS"
-    assert (regions[0].x, regions[0].y, regions[0].width, regions[0].height) == (25, 457, 369, 261)
+    # The merged block itself: still returned, still an obstacle, still
+    # never translated directly - unchanged from attempt 3 (24.08.2026).
+    block_region = next(r for r in regions if r.text == "Thoughts Emotions ...recorded as PATTERNS")
+    assert block_region.translatable is False
+    assert (block_region.x, block_region.y, block_region.width, block_region.height) == (25, 457, 369, 261)
+
+    # NEW (26.08.2026): each of its 4 matched OCR lines is ALSO returned,
+    # individually, as its own small translatable region at its own
+    # original position - not joined into the blob above.
+    line_texts = {r.text for r in regions if r.translatable}
+    assert line_texts == {"Thoughts", "Emotions", "...recorded as", "PATTERNS"}
+    thoughts = next(r for r in regions if r.text == "Thoughts")
+    assert (thoughts.x, thoughts.y, thoughts.width, thoughts.height) == (30, 470, 80, 20)
+    assert thoughts.confidence == pytest.approx(95.0)
+
+    assert len(regions) == 5
+
+
+def test_paddleocr_recognize_does_not_duplicate_a_line_already_claimed_by_a_translatable_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """26.08.2026 - found via the REAL result JSON for "Spirit - Soul -
+    Meatsuit.jpg" (not a hypothetical): the "image" block's own bbox
+    ([25,457,394,718]) slightly overlaps the neighbouring "paragraph_title"
+    banner block's bbox ([333,457,733,476]) at its top-right corner - one
+    real OCR line ("WHERE", bbox center at x=365/y=466) falls inside
+    BOTH. Fixture reproduces that exact geometry (rounded).
+
+    Before excluding already-claimed lines
+    (_paddle_block_to_line_regions()'s `claimed_line_indices`), this
+    "WHERE" line would have become a SECOND, independently translated and
+    drawn region - directly on top of the banner's own already-correct
+    translation of the same text, since the banner's own merged region
+    already includes "WHERE" too (`_paddle_block_to_region()` matches by
+    the same bounding-box-center rule, joining every line whose center
+    falls inside ITS bbox - never de-duplicated against other blocks,
+    since until now nothing else ever needed one line in two places)."""
+    source = tmp_path / "irrelevant.png"
+    _build_blank_image(source)
+    monkeypatch.setattr("pipeline.images.ocr.paddleocr_available", lambda: True)
+
+    parsing_res_list = [
+        {
+            "block_label": "paragraph_title",
+            "block_content": "WHEREEXPERIENCES,PATTERNS&DISTORTIONSLIVE",
+            "block_bbox": [333, 457, 733, 476],
+            "block_id": 0,
+        },
+        {
+            "block_label": "image",
+            "block_content": "WHERE \nThoughts",
+            "block_bbox": [25, 457, 394, 718],
+            "block_id": 1,
+        },
+    ]
+    overall_ocr_res = {
+        "rec_texts": ["WHEREEXPERIENCES,PATTERNS&DISTORTIONSLIVE", "WHERE", "Thoughts"],
+        "rec_scores": [0.98, 0.996, 0.95],
+        "rec_boxes": [
+            [334.0, 458.0, 733.0, 476.0],  # banner's own line - matches ONLY the banner
+            [336.0, 458.0, 395.0, 475.0],  # "WHERE" - center falls in BOTH blocks
+            [30.0, 470.0, 110.0, 490.0],  # "Thoughts" - matches ONLY the image block
+        ],
+    }
+    result = _paddle_result(parsing_res_list, overall_ocr_res)
+    engine = PaddleOcrEngine()
+    monkeypatch.setattr(engine, "_get_pipeline", lambda: _FakePaddlePipeline(result))
+
+    regions = engine.recognize(str(source))
+
+    # The banner's own merged region keeps both its lines - unaffected.
+    banner = next(r for r in regions if r.translatable and r.x == 333)
+    assert banner.text == "WHEREEXPERIENCES,PATTERNS&DISTORTIONSLIVE WHERE"
+
+    # "WHERE" must NOT ALSO appear as its own small region from the
+    # image block's line-splitting - only "Thoughts" should.
+    image_block_lines = [r for r in regions if r.translatable and r.x != 333]
+    assert [r.text for r in image_block_lines] == ["Thoughts"]
 
 
 def test_paddleocr_recognize_filters_a_stray_icon_glyph_misread_as_short_text(
