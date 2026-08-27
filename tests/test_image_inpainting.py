@@ -275,6 +275,51 @@ def test_wrap_text_to_width_handles_empty_text() -> None:
     assert _wrap_text_to_width(draw, "", font, max_width=100) == [""]
 
 
+def test_wrap_text_to_width_respects_a_literal_newline_as_a_forced_break() -> None:
+    """27.08.2026 - real user report, Backlog.md 27.08.2026: "einen
+    Zeilenumbruch sollte mit übernommen werden". Two short words that
+    would easily fit on one line together must still land on separate
+    lines when the user's own "\n" sits between them - see
+    review_server.py's Enter-key handler, the only real-world source of
+    a literal "\n" in this text today."""
+    draw = _measure_draw()
+    font = ImageFont.truetype(_FONT_PATH, 20)
+
+    lines = _wrap_text_to_width(draw, "Geist\nSeele", font, max_width=500)
+
+    assert lines == ["Geist", "Seele"]
+
+
+def test_wrap_text_to_width_keeps_a_deliberate_blank_line() -> None:
+    draw = _measure_draw()
+    font = ImageFont.truetype(_FONT_PATH, 20)
+
+    lines = _wrap_text_to_width(draw, "Titel\n\nUntertitel", font, max_width=500)
+
+    assert lines == ["Titel", "", "Untertitel"]
+
+
+def test_wrap_text_to_width_still_wraps_by_width_within_a_forced_segment() -> None:
+    """A forced break doesn't turn off ordinary width-based wrapping - a
+    segment between two "\n" that's itself too wide for max_width still
+    gets split across further lines, exactly as without any "\n" at
+    all."""
+    draw = _measure_draw()
+    font = ImageFont.truetype(_FONT_PATH, 20)
+    text = "Dies ist ein deutlich längerer übersetzter Text\nZweite Zeile"
+
+    lines = _wrap_text_to_width(draw, text, font, max_width=150)
+
+    assert len(lines) > 2
+    # "Text" (end of the first segment) and "Zweite" (start of the second)
+    # must never land on the same line - that's exactly what the forced
+    # break guarantees, on top of the ordinary width-based wrapping that
+    # still splits each segment on its own.
+    assert not any("Text" in line and "Zweite" in line for line in lines)
+    for line in lines:
+        assert draw.textlength(line, font=font) <= 150
+
+
 def test_fit_text_shrinks_font_when_wrapped_block_exceeds_region_height() -> None:
     """A narrow, short region (little width, little height) combined with
     a long translated text must shrink below the naive

@@ -97,6 +97,12 @@ _PAGE_HTML = """<!doctype html>
        actual output. */
     color: #fff; font-size: 13px; line-height: 1.25; overflow: hidden;
     cursor: text; outline: none; touch-action: none;
+    /* 27.08.2026 - a literal "\\n" (see the keydown handler in
+       renderRegions() below) needs this to actually show as a line
+       break; the default `normal` collapses it to a space like any
+       other whitespace, silently hiding the very break the user just
+       typed. */
+    white-space: pre-wrap;
   }
   .resize-handle {
     position: absolute; right: -5px; bottom: -5px; width: 12px; height: 12px;
@@ -140,6 +146,80 @@ async function init() {
   img.src = '/api/image';
 }
 
+// Mirrors pipeline.images.inpainting.py's own constants (27.08.2026) -
+// see refitText() below for why.
+const _FIT_MIN_SIZE = 9;
+const _FIT_LINE_SPACING = 1.15;
+let _measureCanvas = null;
+
+function _measureCtx(fontPx) {
+  if (!_measureCanvas) _measureCanvas = document.createElement('canvas');
+  const ctx = _measureCanvas.getContext('2d');
+  ctx.font = fontPx + 'px system-ui, sans-serif';
+  return ctx;
+}
+
+// Mirrors pipeline.images.inpainting.py's _wrap_text_to_width() - same
+// greedy word-wrap, same "\\n" forced-break handling (see that function's
+// own 27.08.2026 comment) - kept as a literal port rather than shared
+// code since this page has no build step to import Python from (see this
+// module's own docstring on why it stays vanilla JS).
+function _wrapForWidth(ctx, text, maxWidth) {
+  const lines = [];
+  text.split('\\n').forEach((segment) => {
+    const words = segment.split(/\\s+/).filter(Boolean);
+    if (!words.length) { lines.push(''); return; }
+    let current = words[0];
+    for (let i = 1; i < words.length; i++) {
+      const candidate = current + ' ' + words[i];
+      if (maxWidth <= 0 || ctx.measureText(candidate).width <= maxWidth) {
+        current = candidate;
+      } else {
+        lines.push(current);
+        current = words[i];
+      }
+    }
+    lines.push(current);
+  });
+  return lines.length ? lines : [''];
+}
+
+// 27.08.2026 - real user report, Backlog.md 27.08.2026: "Hier sieht man
+// schon verschiedene Boxen und Textgrössen. Schon hier gibt es
+// Unterschiede die nicht sein sollten." Root cause: this box's displayed
+// font-size (r.font_size_px, see renderRegions() below) was always just
+// estimated_font_size()'s HEIGHT-only heuristic, applied with no regard
+// for whether the text actually fits the box's WIDTH - the real renderer
+// (inpainting.py's _fit_text()) shrinks further whenever it doesn't, so
+// a long word/line could show here uncropped-looking (or, worse, visibly
+// clipped by .region-text's own `overflow: hidden`) while rendering
+// noticeably smaller in the real output. refitText() below runs the SAME
+// shrink loop client-side - shrink only, deliberately: the real
+// renderer's further "widen into a neighbouring region's free space" step
+// depends on every OTHER region's position too, data this page never
+// receives, so that part remains an approximation exactly like
+// r.font_size_px already was before this change (see its own comment) -
+// this just also accounts for the box's own width, closing the gap the
+// user actually reported.
+function refitText(box, text) {
+  const maxWidth = Math.max(parseInt(box.style.width, 10) - 8, 1);
+  const maxHeight = Math.max(parseInt(box.style.height, 10) - 4, 1);
+  const base = parseInt(text.dataset.baseFontSize, 10) || 13;
+  const content = text.textContent || '';
+  let size = base;
+  while (true) {
+    const ctx = _measureCtx(size);
+    const lines = _wrapForWidth(ctx, content, maxWidth);
+    const lineHeight = Math.max(1, Math.floor(size * _FIT_LINE_SPACING));
+    const totalHeight = lineHeight * lines.length;
+    const widest = lines.reduce((m, l) => Math.max(m, ctx.measureText(l).width), 0);
+    if ((totalHeight <= maxHeight && widest <= maxWidth) || size <= _FIT_MIN_SIZE) break;
+    size = Math.max(_FIT_MIN_SIZE, size - 2);
+  }
+  text.style.fontSize = size + 'px';
+  text.style.lineHeight = String(_FIT_LINE_SPACING);
+}
+
 function renderRegions() {
   const stage = document.getElementById('stage');
   regionsData.forEach((r) => {
@@ -176,9 +256,40 @@ function renderRegions() {
     // hand-written --regions file loaded via `correct` that never went
     // through report.py's regions_from_replacements(), never for
     // anything `review` itself produces; falls back to the CSS default.
-    if (r.font_size_px) {
-      text.style.fontSize = r.font_size_px + 'px';
-    }
+    text.dataset.baseFontSize = r.font_size_px || 13;
+    // 27.08.2026 - real user report, Backlog.md 27.08.2026: "einen
+    // Zeilenumbruch sollte mit übernommen werden". Left to the browser's
+    // own default, Enter inside a contentEditable div splits into a new
+    // <div>/<br> - collectRegions() below reads .textContent, and a
+    // block split like that either vanishes from .textContent entirely
+    // or shows up in a way pipeline.images.inpainting.py's renderer never
+    // agreed to interpret. Intercepted here instead: Enter inserts one
+    // literal "\\n" text character at the cursor - collectRegions()
+    // already sends that straight through as part of translated_text
+    // with no change needed there, and inpainting.py's
+    // _wrap_text_to_width() (see its own 27.08.2026 comment) now treats
+    // that exact character as a forced break instead of ordinary
+    // whitespace.
+    text.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const sel = window.getSelection();
+      if (!sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      range.deleteContents();
+      const breakNode = document.createTextNode('\\n');
+      range.insertNode(breakNode);
+      range.setStartAfter(breakNode);
+      range.setEndAfter(breakNode);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      refitText(box, text);
+    });
+    // Any other edit (typing, paste, delete) also needs a re-fit - the
+    // Enter case above already re-fits itself since 'input' does not
+    // reliably fire for the manual Range.insertNode() above in every
+    // engine.
+    text.addEventListener('input', () => refitText(box, text));
     box.appendChild(text);
 
     const handle = document.createElement('div');
@@ -188,6 +299,7 @@ function renderRegions() {
     makeDraggable(box, text, handle);
     makeResizable(box, handle);
 
+    refitText(box, text);
     stage.appendChild(box);
   });
 }
@@ -257,6 +369,11 @@ function makeResizable(box, handle) {
     if (!resizing) return;
     box.style.width = Math.max(8, startW + e.clientX - startX) + 'px';
     box.style.height = Math.max(8, startH + e.clientY - startY) + 'px';
+    // 27.08.2026 - see refitText()'s own comment: a resize changes the
+    // very box width/height that preview font-size now depends on, so it
+    // has to re-run live, not just once at initial load.
+    const textEl = box.querySelector('.region-text');
+    if (textEl) refitText(box, textEl);
   });
   handle.addEventListener('pointerup', () => { resizing = false; });
 }

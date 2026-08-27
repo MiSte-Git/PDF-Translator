@@ -180,21 +180,38 @@ def _wrap_text_to_width(draw, text: str, font, max_width: int) -> list[str]:
     overflowing that one line is preferable to breaking a word apart.
     `max_width` <= 0 (a degenerate/zero-width OCR region) still returns
     at least one line rather than looping forever.
+
+    A literal "\\n" in `text` (27.08.2026) is treated as a FORCED line
+    break rather than plain whitespace: each "\\n"-separated segment is
+    word-wrapped independently, so a break the user explicitly typed
+    always survives as its own line, never silently re-merged with the
+    next line just because both would technically fit on one width-wise.
+    Real user report, Backlog.md 27.08.2026: "einen Zeilenumbruch sollte
+    mit übernommen werden" - none of translate_image.py's own inputs
+    (DeepL/Google output, OCR text) ever contain "\\n" today, so this is
+    additive - the only source is review_server.py's correction textbox,
+    which now inserts a literal "\\n" on Enter instead of the browser's
+    default block-splitting behaviour (see its own comment). An empty
+    segment (two consecutive "\\n", or a leading/trailing one) becomes an
+    empty line rather than being dropped, so a deliberate blank line the
+    user left in place stays blank.
     """
-    words = text.split()
-    if not words:
-        return [""]
     lines: list[str] = []
-    current = words[0]
-    for word in words[1:]:
-        candidate = f"{current} {word}"
-        if max_width <= 0 or draw.textlength(candidate, font=font) <= max_width:
-            current = candidate
-        else:
-            lines.append(current)
-            current = word
-    lines.append(current)
-    return lines
+    for segment in text.split("\n"):
+        words = segment.split()
+        if not words:
+            lines.append("")
+            continue
+        current = words[0]
+        for word in words[1:]:
+            candidate = f"{current} {word}"
+            if max_width <= 0 or draw.textlength(candidate, font=font) <= max_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+    return lines or [""]
 
 
 def _initial_font_size(region: OcrTextRegion) -> int:

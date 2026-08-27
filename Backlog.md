@@ -5639,3 +5639,123 @@ mit bekannten Nachbar-Regionen), war aber für Michaels konkretes
 "HAUPTBUCH"-Symptom nicht die vollständige Erklärung - erst dieser
 zweite, per echtem Reproduktionsversuch gefundene Fehler war es. Noch
 nicht durch Michael selbst am echten Fall bestätigt.
+
+## 27.08.2026 - Korrektur-Browser: Vorschau war blind für Boxbreite, Zeilenumbrüche gingen verloren
+
+Michael, nach dem Neustart mit dem HAUPTBUCH-Fix (siehe Eintrag oben,
+jetzt von ihm am echten "Spirit - Soul - Meatsuit_DE (19).jpg" bestätigt:
+"Bild 1 ist das automatisch generierte vor der Korrektur" zeigt HAUPTBUCH
+jetzt korrekt-grosse), drei neue, eigenständige Punkte:
+
+1. "Bild 2 ist aus dem Browser Korrekturfenster vor der Korrektur. Hier
+   sieht man schon verschiedene Boxen und Textgrössen. Schon hier gibt es
+   Unterschiede die nicht sein sollten. Wie ist das erklärbar?"
+2. "Im Browser Korrekturfenster sollte zwingend eine Editiermöglichkeit
+   bestehen, so dass man zum Beispiel im Titel, also die oberste
+   Textbox, den Font einzelner Wörter/Buchstaben ändern kann, einen
+   Zeilenumbruch sollte mit übernommen werden. Das bedeutet alles was ich
+   korrigiere, Boxgrösse und Position, Font, Stil/Grösse und etwaige
+   Zeilenumbrüche sollten dann auch genauso übernommen werden."
+3. Titel, HAUPTBUCH-Box und Fusszeile angepasst (Bild 3): "Die
+   Vergrösserung der Textfelder in der Fusszeile wurde nicht so
+   übernommen wie ich es korrigiert hatte, ich hatte die Textboxen etwas
+   anders positioniert und vergrössert, ohne Zeilenumbruch." Die
+   HAUPTBUCH-Box selbst nennt er als erwartet ("da fehlt ja der
+   Zeilenumbruch, war also zu erwarten") - kein Bugreport, sondern
+   Beobachtung, die genau auf Punkt 2 hinausläuft.
+
+### Punkt 1 geklärt: die Vorschau im Korrektur-Browser rechnete nur mit der Höhe, nie mit der Breite
+
+`image_translate_cli/review_server.py`s Textbox zeigte den geschätzten
+Font (`r.font_size_px`, aus `estimated_font_size()` = derselbe
+`_initial_font_size()`, den `_fit_text()` auch als Startpunkt nimmt) 1:1
+an - ohne jemals zu prüfen, ob der Text bei dieser Grösse überhaupt in
+die Box-BREITE passt. `.region-text` hatte zusätzlich `overflow: hidden`
+gesetzt. Am echten Screenshot (Bild 2) sichtbar: die HAUPTBUCH-Box zeigte
+nur noch "HA", der Rest war abgeschnitten - der reale Renderer schrumpft
+seit dem Fix oben bei einem einzelnen zu breiten Wort die Schrift, die
+Browser-Vorschau tat das nie, sie hat schlicht nichts dergleichen
+berechnet. Damit war Michaels Beobachtung "Unterschiede die nicht sein
+sollten" strukturell korrekt - die Vorschau war nie mehr als eine grobe,
+höhenbasierte Näherung (das war auch schon so dokumentiert: "Annähernd,
+nicht genau", Backlog.md 26.08.2026), aber sie konnte um ein ganzes
+Vielfaches danebenliegen, statt nur ungefähr zu stimmen.
+
+Fix: `refitText()` (neu, review_server.py) läuft client-seitig denselben
+Shrink-Loop wie `_fit_text()` in `pipeline/images/inpainting.py` (per
+`<canvas>`-Textmessung, kein Server-Roundtrip) - beim ersten Rendern,
+bei jeder Texteingabe und bei jedem Grössenziehen an der Box neu
+berechnet. Bewusst NUR die Schrumpf-Seite portiert, nicht das
+"Verbreitern in freien Nachbarraum"-Fallback von `_fit_text()` - das
+hängt von den Positionen ALLER anderen Regionen ab, Daten, die diese
+Seite nie bekommt. Bleibt insofern weiterhin eine Näherung (andere
+Schriftart im Browser als DejaVu Sans im Rendering, kein Neighbour-Raum),
+aber eine, die jetzt wenigstens die Boxbreite selbst berücksichtigt -
+genau die Lücke, die Michael am HAUPTBUCH-Fall gesehen hat.
+
+### Punkt 2/3: Zeilenumbrüche gingen verloren - das ist jetzt behoben; Font/Stil pro Wort ist eine grössere, separate Aufgabe
+
+Zwei unterschiedliche Dinge in Michaels Wunsch:
+
+- **Zeilenumbruch übernehmen** - das war schlicht nicht gebaut. Enter in
+  der Textbox erzeugte per Browser-Standard einen neuen `<div>`/`<br>`
+  innerhalb des `contentEditable`-Felds; `collectRegions()` liest nur
+  `text.textContent`, das einen solchen Block-Split entweder verschluckt
+  oder in einer Form zurückgibt, die `_wrap_text_to_width()` nie als
+  Umbruch verstanden hat - die Funktion hat Text ausschliesslich anhand
+  von Leerzeichen und der Boxbreite selbst umgebrochen, jeden vom
+  Nutzer gesetzten Umbruch also grundsätzlich ignoriert. Behoben: Enter
+  fügt jetzt ein einzelnes literales "\n"-Zeichen ein (Range-Manipulation
+  statt Browser-Default), `_wrap_text_to_width()` (inpainting.py)
+  behandelt "\n" jetzt als erzwungenen Umbruch - der Text INNERHALB eines
+  solchen Segments wird weiterhin ganz normal breitenbasiert umgebrochen,
+  nur der Umbruch selbst wird nie mehr stillschweigend wieder
+  zusammengeführt. 3 neue Tests (`test_wrap_text_to_width_respects_a_
+  literal_newline_as_a_forced_break`, `..._keeps_a_deliberate_blank_line`,
+  `..._still_wraps_by_width_within_a_forced_segment`).
+
+- **Font/Stil einzelner Wörter/Buchstaben ändern** - das ist etwas
+  grundsätzlich anderes und deutlich grösser als der Zeilenumbruch: eine
+  Textbox trägt heute genau EINEN Font/Stil/Grösse für ihren gesamten
+  Inhalt (`TextReplacement` hat keinen Begriff von "dieses Wort fett,
+  jenes nicht"). Das umzusetzen bräuchte mehrere zusammenhängende
+  Änderungen - ein Datenmodell für mehrere Textabschnitte je Box statt
+  eines einzigen Strings, eine Bedienoberfläche im Browser dafür (z.B.
+  Markierung + Mini-Toolbar, kein einfacher Ein-Zeiler), UND einen
+  Renderer, der mehrere Font-Varianten in einer Zeile nebeneinander
+  zeichnen kann (`_fit_text()`/`_draw_fitted_text()` gehen heute von
+  einem einzigen Font für die ganze Box aus). Das ist nicht in diesem
+  Rutsch mit erledigt - bewusst als eigene, grössere Aufgabe stehen
+  gelassen (verwandt mit, aber konkreter als das bereits offene Task #15
+  "Font-Erkennung/-Editierung"). Sag Bescheid, wenn das als Nächstes
+  geplant werden soll.
+
+### Punkt 3, Fusszeile: teilweise erklärt, teilweise noch offen
+
+Direkter Bildvergleich (Fusszeile, vorher/nachher) zeigt: der rechte
+Fusszeilentext ("Es stellt wieder her, was immer schon vollständig war.")
+ist nach Michaels Korrektur sichtbar GRÖSSER gerendert als im
+automatischen Erstlauf. Das ist für sich genommen erwartetes Verhalten
+seit dem render_box-Breiten-Fix (siehe Eintrag oben): eine vergrösserte,
+manuell gesetzte Box gibt dem Schrift-Fit mehr Platz, also wird die
+Schrift grösser gewählt - das ist der Sinn der Boxgrösse als Vorgabe.
+Ob das auch der POSITION entspricht, die Michael gesetzt hatte, liess
+sich an den beiden Gesamt-Screenshots allein nicht abschliessend prüfen
+- `apply()` zeichnet an `render_box.x/y` direkt, ohne weitere Logik
+dazwischen (das wurde am Code verifiziert), ein Positions-Versatz aus
+dieser Stelle wäre also unerwartet. Ehrlich offen: nicht abschliessend
+bestätigt, dass die Position stimmt oder nicht stimmt - mit der jetzt
+korrigierten Browser-Vorschau (Punkt 1 oben) sollte sich das beim
+nächsten Korrekturdurchlauf direkt vergleichen lassen, da die Vorschau
+jetzt zeigt, was tatsächlich gerendert wird, statt einer groben Näherung.
+Bei einer beiläufig aufgefallenen Abweichung (Titel: aufrecht im
+Erstlauf, kursiv nach Michaels Korrektur-Runde, obwohl es dafür noch gar
+keine Bedienmöglichkeit gibt) konnte die Ursache nicht abschliessend
+geklärt werden - Kursiv-Erkennung (`classify_italic()`,
+pipeline/images/font_style.py) läuft bei jedem Korrekturdurchlauf frisch
+gegen die Originalbild-Pixel an der wahren Original-Position, sollte
+also eigentlich deterministisch dasselbe Ergebnis liefern; die exakte
+Ursache für die beobachtete Abweichung ist noch nicht gefunden. Falls das
+beim nächsten Lauf wieder auftritt, wäre ein Hinweis darauf hilfreich.
+
+266 von 266 Tests grün (vorher 263).
