@@ -5217,3 +5217,106 @@
     ein echter, nicht-trivialer Aufwand, noch nicht begonnen. Optionen
     dazu wurden Michael vorgeschlagen, noch keine Entscheidung
     getroffen.
+
+## 26.08.2026 - "Übernehmen" verwarf Positions-/Größenkorrekturen: zwei separate Bugs gefunden und behoben; Fontgröße wird jetzt approximativ angezeigt
+
+Michaels Feedback zur letzten Runde: *"...es scheint das am Schluss beim
+Klicken auf übernehmen die Positionen, Grösse und Korrekturen nicht
+übernommen werden. Also Live Rendering ist nicht erwünscht. Ich
+verstehe darunter das ich erst alle Boxen korrigiere und erst dann
+übernehme. [...] Wenigstens in etwas die Fontgrössen. Annähernd, nicht
+genau. Ausserdem fehlte wieder der ganze linke Teil mit der Auflistung
+um das Buch in der Kugel."* Drei Punkte, einzeln abgearbeitet:
+
+**1) Positions-/Größenkorrekturen wurden nicht übernommen - zwei
+unabhängige Bugs, beide gefunden und in einer echten Chromium-Sitzung
+(nicht nur per Unit-Test) end-to-end nachgewiesen:**
+
+- **Architektur-Bug:** `TextReplacement.region` war laut eigenem
+  Docstring "die ORIGINAL erkannte OCR-Region", wurde aber von JEDEM
+  Korrekturpfad (Qt-Dialog wie Browser-Korrektur) direkt überschrieben,
+  sobald eine Box verschoben/vergrößert wurde. Da alle drei
+  Rückschreibe-Backends (`BoxOverlayBackend`/`CvInpaintingBackend`/
+  `GpuInpaintingBackend`) dieselbe `region` sowohl zum LÖSCHEN des
+  Originaltexts als auch zum PLATZIEREN des übersetzten Texts nutzen,
+  wurde die ursprüngliche englische Textstelle nie wirklich gelöscht,
+  sobald `region` heimlich zur neuen Position wurde - an einer direkten
+  Pixel-Reproduktion nachgewiesen (Originaltext blieb nach einer
+  "Verschiebung" praktisch unverändert an der alten Stelle stehen).
+  Behoben durch ein neues, separates Feld `TextReplacement.render_box`:
+  `region` bleibt jetzt IMMER die wahre Original-Position (Löschen +
+  Stil-Schätzung), `render_box` (falls gesetzt) ist die Stelle, an der
+  tatsächlich gezeichnet wird - unterscheiden sich beide, wird auch die
+  neue Zielstelle vor dem Zeichnen sauber freigeräumt. Betroffen und
+  angepasst: alle drei Backends, `build_corrected_replacements()`
+  (Qt-Dialog), `replacements_from_region_list()` (Browser-Korrektur +
+  CLI `correct --regions`), sowie das gemeinsame JSON-Format in
+  `report.py`/`regions_io.py` (neue, optionale `orig_x/y/width/height`-
+  Felder, damit die wahre Originalposition beim Rundlauf über HTTP/Datei
+  nicht verloren geht - bestehende Report-/`--regions`-Dateien bleiben
+  dabei unverändert lesbar).
+
+- **Zweiter, unabhängiger Bug in der Browser-Korrektur selbst** (erst
+  durch eine echte, per Playwright gesteuerte Chromium-Sitzung
+  gefunden, nicht durch Code-Lesen allein): `review_server.py`s
+  `makeDraggable()` prüfte `if (e.target === textEl ...) return;` -
+  da der Text-Layer die komplette Box optisch überdeckt (`width: 100%;
+  height: 100%`), war `e.target` bei JEDEM Klick auf die sichtbare Box
+  praktisch immer `textEl`. Ein Verschieben per Maus hat dadurch so gut
+  wie NIE funktioniert (nur ein ca. 1,5px schmaler Rand war überhaupt
+  klickbar) - das ist vermutlich die eigentliche, dominante Ursache für
+  "Positionen werden nicht übernommen": die Box hat sich beim Ziehen
+  schlicht nie sichtbar bewegt. Behoben mit einer Bewegungs-Schwelle
+  (4px): ein Klick auf die Box startet immer einen potenziellen Zug,
+  aber erst nach echter Bewegung wird tatsächlich verschoben - ein
+  reiner Klick setzt weiterhin ganz normal den Textcursor.
+
+  Beide Fixes zusammen in einer echten Playwright-Chromium-Sitzung
+  verifiziert: Box tatsächlich per simulierten Maus-Events verschoben,
+  "Anwenden" geklickt, Ausgabebild neu per OCR gelesen - ursprüngliches
+  "Hello World" verschwunden, "Hallo" an der neuen Position gefunden,
+  unbeteiligte zweite Zeile unverändert.
+
+**2) Fontgröße - approximativ, wie gewünscht ("annähernd, nicht
+genau"):** Der Renderer hat schon seit längerem eine Heuristik zur
+Schätzung der Schriftgröße aus der Zeilenhöhe der erkannten Box
+(`_initial_font_size()`), die aber nie in der Korrektur-Ansicht
+ankam - dort stand immer ein fester, unabhängiger 13px-Wert. Über
+`estimated_font_size()` jetzt öffentlich gemacht und bis in
+`report.py`/`review_server.py` durchgereicht: die Box in der
+Korrektur-Ansicht zeigt den Text jetzt ungefähr in der Größe, in der er
+später tatsächlich gerendert wird - keine echte Font-Familien-Erkennung
+(dafür bräuchte es einen trainierten Klassifikator, siehe letzter
+Eintrag), aber genau die von Michael selbst als ausreichend genannte
+Annäherung bei der Größe.
+
+**3) Fehlende Liste links ("Buch in der Kugel") - KEIN neuer Bug,
+sondern derselbe, bereits bekannte Kompromiss vom 24.08.2026:**
+Geprüft am Original-Bild (`Spirit - Soul - Meatsuit.jpg`) und den
+Diagnose-Bildern aus `paddle_probe_out/`. Der rohe OCR-Texterkenner
+findet jeden Listeneintrag ("Thoughts, Emotions, Choices, Beliefs,
+Trauma, Karma, Experiences...") einzeln korrekt - aber PaddleOCRs
+LAYOUT-Klassifikator (ein separater Schritt) stuft den gesamten
+Abschnitt als EIN einziges, niedrig-sicheres (`0.56`) "image"-Feld ein.
+Genau dieser Fall wurde am 24.08.2026 schon einmal bearbeitet: Übersetzen
+von "image"-Feldern mit echtem Text wurde ausprobiert → noch am selben
+Tag zurückgerollt, weil es laut deinem eigenen Feedback ("Das ist jetzt
+noch schlimmer als das vorherige") eine Verschlechterung war → der
+Revert selbst löste eine NEUE Regression aus (Textüberlappung, weil das
+Feld für die Kollisionsvermeidung unsichtbar wurde) → behoben durch
+`translatable=False` (Feld bleibt als Hindernis erhalten, wird aber
+nicht übersetzt) - das ist der aktuelle, bewusst so gewählte Zustand.
+Ich habe das NICHT eigenmächtig wieder geändert, weil genau dieser Weg
+schon zweimal zu einer Regression geführt hat - das braucht erst eine
+Entscheidung von dir, siehe Chat-Antwort.
+
+**Getestet:** neue Unit-Tests für alle drei Backends (Original wird
+gelöscht, neue Position wird gezeichnet, Maske deckt beide Stellen ab),
+für `build_corrected_replacements()`, `replacements_from_region_list()`
+und `review_server.py`s HTTP-Schicht (inkl. Wiedereröffnen einer
+Korrektur-Runde auf einem bereits korrigierten Bild). Zusätzlich eine
+eigenständige, nicht in der Suite enthaltene Playwright-Reproduktion
+mit echten Maus-Events gegen eine echte Chromium-Instanz (siehe oben).
+Gesamter Testlauf (`tests/`, ohne `test_ui_images_mode.py`): 254
+passed (vorher 249), 1 skipped. `webapp/`-Schicht weiterhin nachweislich
+ohne `PySide6`-Import.

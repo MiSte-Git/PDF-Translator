@@ -119,6 +119,44 @@ def test_apply_replaces_recognized_text_end_to_end(tmp_path: Path) -> None:
     assert "Second Line" in result_texts
 
 
+@pytest.mark.skipif(not tesseract_available(), reason="Tesseract binary not installed")
+def test_apply_with_render_box_erases_the_original_position_and_draws_at_the_new_one(
+    tmp_path: Path,
+) -> None:
+    """26.08.2026 regression guard - same real user report and same fix
+    as test_image_inpainting.py's identically-named test for
+    BoxOverlayBackend (Backlog.md 26.08.2026: "die Positionen, Grösse und
+    Korrekturen werden nicht übernommen"). Here the inpainting MASK must
+    cover both `region` (erase the real original) and `render_box` (clean
+    background for the new draw target) - see _build_inpainting_mask()'s
+    CvInpaintingBackend counterpart in inpainting.py for the exact
+    reasoning."""
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    output = tmp_path / "out.png"
+
+    engine = TesseractOcrEngine()
+    regions = engine.recognize(str(source))
+    first_line = next(r for r in regions if r.text == "Hello World")
+    moved_box = OcrTextRegion(
+        text=first_line.text, x=250, y=110, width=130, height=30, confidence=first_line.confidence
+    )
+    replacement = TextReplacement(region=first_line, translated_text="Hallo Welt", render_box=moved_box)
+
+    CvInpaintingBackend().apply(str(source), [replacement], str(output))
+
+    result_regions = engine.recognize(str(output))
+    result_texts = [r.text for r in result_regions]
+    assert "Hello World" not in result_texts
+    moved_hits = [
+        r
+        for r in result_regions
+        if "Hallo" in r.text and r.x >= moved_box.x - 20 and r.y >= moved_box.y - 20
+    ]
+    assert moved_hits, f"expected translated text near the moved box, got: {result_regions}"
+    assert "Second Line" in result_texts
+
+
 def test_apply_reconstructs_gradient_more_closely_than_flat_fill(tmp_path: Path) -> None:
     """The concrete reason to prefer CvInpaintingBackend over
     BoxOverlayBackend for this kind of background: after inpainting, the

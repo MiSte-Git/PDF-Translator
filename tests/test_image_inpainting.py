@@ -150,6 +150,56 @@ def test_apply_replaces_recognized_text_end_to_end(tmp_path: Path) -> None:
     assert "Second Line" in result_texts
 
 
+@pytest.mark.skipif(not tesseract_available(), reason="Tesseract binary not installed")
+def test_apply_with_render_box_erases_the_original_position_and_draws_at_the_new_one(
+    tmp_path: Path,
+) -> None:
+    """26.08.2026 regression guard - real user report, Backlog.md 26.08.2026:
+    "die Positionen, Grösse und Korrekturen werden nicht übernommen". A
+    correction UI (image_translate_cli/review_server.py's browser page or
+    ui/image_correction_dialog.py's canvas) moving a box used to overwrite
+    `region` directly - which is also what `apply()` uses to erase the
+    original source text, so the untranslated English stayed fully
+    visible right where it always was, while a disconnected translated
+    patch appeared wherever the box had been dragged to. `render_box`
+    (see TextReplacement's own docstring) is the fix: `region` stays the
+    TRUE original for erasure, `render_box` is only ever a NEW draw
+    target. Verified via a real Tesseract round-trip, not just pixel
+    inspection - the same "verify against what actually happens"
+    discipline this file's own module docstring describes.
+    """
+    source = tmp_path / "source.png"
+    _build_two_line_image(source)
+    output = tmp_path / "out.png"
+
+    engine = TesseractOcrEngine()
+    regions = engine.recognize(str(source))
+    first_line = next(r for r in regions if r.text == "Hello World")
+    # Moved well clear of BOTH original lines and of the image edges -
+    # into the empty lower-right area of the 400x150 canvas.
+    moved_box = OcrTextRegion(
+        text=first_line.text, x=250, y=110, width=130, height=30, confidence=first_line.confidence
+    )
+    replacement = TextReplacement(region=first_line, translated_text="Hallo Welt", render_box=moved_box)
+
+    BoxOverlayBackend().apply(str(source), [replacement], str(output))
+
+    result_regions = engine.recognize(str(output))
+    result_texts = [r.text for r in result_regions]
+    # The untranslated ORIGINAL text must actually be gone from its real
+    # position - not just "no longer referenced by anything".
+    assert "Hello World" not in result_texts
+    # The translated text must appear at the NEW (moved) position.
+    moved_hits = [
+        r
+        for r in result_regions
+        if "Hallo" in r.text and r.x >= moved_box.x - 20 and r.y >= moved_box.y - 20
+    ]
+    assert moved_hits, f"expected translated text near the moved box, got: {result_regions}"
+    # The untouched second line must still be there, unchanged.
+    assert "Second Line" in result_texts
+
+
 def test_apply_picks_white_text_on_dark_background(tmp_path: Path) -> None:
     """Regression guard for _contrasting_text_color() actually being used
     inside apply(): on a dark background, the box-overlay fill AND the

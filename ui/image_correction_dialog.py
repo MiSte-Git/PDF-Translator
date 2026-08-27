@@ -622,9 +622,17 @@ class ImageCorrectionDialog(QDialog):
         # image, but the boxes below are still created against it - only
         # the visual preview is degraded, not the actual correction data.
         for row, replacement in enumerate(replacements):
-            region = replacement.region
+            # render_box (26.08.2026, see TextReplacement.render_box's
+            # docstring) - if this row was already corrected in an
+            # earlier round (re-opening the dialog on an already-
+            # corrected image), the canvas box must start at THAT
+            # position, not snap back to the original OCR position every
+            # time the dialog reopens. `region` itself is used when no
+            # such correction exists yet - identical to before this field
+            # existed.
+            box = replacement.render_box or replacement.region
             item = _ResizableRegionItem(
-                row, region.x, region.y, region.width, region.height,
+                row, box.x, box.y, box.width, box.height,
                 text=replacement.translated_text,
                 on_changed=self._on_region_item_changed, on_selected=self._on_region_item_selected,
             )

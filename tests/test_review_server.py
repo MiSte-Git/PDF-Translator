@@ -105,6 +105,48 @@ def test_review_session_wait_returns_apply_outcome_from_a_real_http_post(tmp_pat
     assert edited[0].region.x == 15
 
 
+def test_review_session_wait_keeps_the_original_region_when_the_browser_moved_the_box(
+    tmp_path: Path,
+) -> None:
+    """26.08.2026 regression guard - real user report, Backlog.md
+    26.08.2026: "die Positionen, Grösse und Korrekturen werden nicht
+    übernommen". review_server.py's browser page now sends BOTH the
+    current (possibly dragged/resized) x/y/width/height AND the
+    unchanged orig_x/orig_y/orig_width/orig_height (see collectRegions()'s
+    own comment) - `edited[0].region` must come back as the ORIGINAL
+    position (what InpaintingBackend.apply() erases), and
+    `edited[0].render_box` as the moved-to position (where it draws)."""
+    source = tmp_path / "photo.png"
+    _build_image(source)
+    session = review_server.start_review_server(str(source), [_replacement("Hello", x=10, y=10)])
+
+    moved_region = {
+        "x": 90, "y": 70, "width": 60, "height": 25,  # where the box was dragged to
+        "orig_x": 10, "orig_y": 10, "orig_width": 80, "orig_height": 20,  # unchanged original
+        "translated_text": "Hallo (verschoben)",
+        "original_text": "Hello", "confidence": 90.0,
+    }
+
+    def _act_like_the_browser() -> None:
+        time.sleep(0.1)
+        result = _post_json(session.url + "api/apply", [moved_region])
+        assert result["ok"] is True
+
+    threading.Thread(target=_act_like_the_browser).start()
+    outcome, edited = session.wait(timeout_seconds=5.0)
+
+    assert outcome == "apply"
+    assert edited is not None
+    replacement = edited[0]
+    assert (replacement.region.x, replacement.region.y, replacement.region.width, replacement.region.height) == (
+        10, 10, 80, 20,
+    )
+    assert replacement.render_box is not None
+    render_box = replacement.render_box
+    assert (render_box.x, render_box.y, render_box.width, render_box.height) == (90, 70, 60, 25)
+    assert replacement.translated_text == "Hallo (verschoben)"
+
+
 def test_review_session_wait_returns_cancel_outcome(tmp_path: Path) -> None:
     source = tmp_path / "photo.png"
     _build_image(source)
@@ -120,6 +162,40 @@ def test_review_session_wait_returns_cancel_outcome(tmp_path: Path) -> None:
 
     assert outcome == "cancel"
     assert edited is None
+
+
+def test_start_review_server_state_reflects_an_already_corrected_replacement(tmp_path: Path) -> None:
+    """26.08.2026: opening a SECOND review round on an already-corrected
+    replacement (one whose `render_box` a prior round already set) must
+    show the box at its CURRENT (corrected) position - not silently snap
+    back to the original OCR position - while still keeping the TRUE
+    original around (as orig_x/y/width/height) for THIS round's own
+    erase step, should the human move it yet again. See report.py::
+    regions_from_replacements()'s matching docstring."""
+    from pipeline.images.ocr import OcrTextRegion
+
+    source = tmp_path / "photo.png"
+    _build_image(source)
+    original_region = OcrTextRegion(text="Hello", x=10, y=10, width=80, height=20, confidence=90.0)
+    already_corrected_box = OcrTextRegion(text="Hello", x=90, y=70, width=60, height=25, confidence=90.0)
+    replacement = TextReplacement(
+        region=original_region, translated_text="Hallo (verschoben)", render_box=already_corrected_box
+    )
+
+    session = review_server.start_review_server(str(source), [replacement])
+    try:
+        state = _get_json(session.url + "api/state")
+        record = state["regions"][0]
+        # The box must render at its CURRENT (corrected) position...
+        assert (record["x"], record["y"], record["width"], record["height"]) == (90, 70, 60, 25)
+        # ...while the TRUE original is still available separately.
+        assert (record["orig_x"], record["orig_y"], record["orig_width"], record["orig_height"]) == (
+            10, 10, 80, 20,
+        )
+        assert record["font_size_px"] > 0
+    finally:
+        session.server.shutdown()
+        session.server.server_close()
 
 
 def test_review_session_wait_times_out_without_any_action(tmp_path: Path) -> None:

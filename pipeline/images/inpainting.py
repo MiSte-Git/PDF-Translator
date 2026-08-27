@@ -93,10 +93,36 @@ class TextReplacement:
     unit of work an InpaintingBackend consumes. `region` keeps the
     ORIGINAL recognized OcrTextRegion (not just a bare bounding box)
     around, so a backend can use its size/original text if useful (e.g.
-    for font-size sizing below)."""
+    for font-size sizing below).
+
+    `render_box` (26.08.2026, default None - see Backlog.md's entry for
+    that date, real user report: "Allerdings wird nach dem Übernehmen das
+    Bild nicht so gespeichert wie es in der Browservorschau angezeigt
+    wird ... Auch Position/Layout weicht ab", later narrowed to "die
+    Positionen, Grösse und Korrekturen werden nicht übernommen") - WHERE
+    to actually draw `translated_text`, if different from `region`. Every
+    InpaintingBackend.apply() below MUST keep using `region` (never
+    `render_box`) for erasing the original source text and for style
+    estimation - `region` is what actually still has the untranslated
+    pixels on it, `render_box` (when a human moved/resized the box in a
+    correction UI - image_translate_cli/review_server.py's browser page
+    or ui/image_correction_dialog.py's canvas, both funnel geometry edits
+    through pipeline.images.translate_image.build_corrected_replacements()
+    /image_translate_cli.regions_io.replacements_from_region_list()) is
+    only ever a NEW, empty-of-content target to draw on top of. Before
+    this field existed, a correction UI had no way to express "draw
+    somewhere else" without overwriting `region` itself - which silently
+    broke the "region is the ORIGINAL" contract this docstring already
+    claimed, and left the untranslated source text fully visible at its
+    real (now no-longer-referenced) position while a second, disconnected
+    patch of translated text appeared wherever the box had been dragged
+    to. None (the default, and what every call site that predates
+    26.08.2026 still produces) means "draw at `region` itself" - the
+    exact previous behavior, unchanged."""
 
     region: OcrTextRegion
     translated_text: str
+    render_box: OcrTextRegion | None = None
 
 
 @runtime_checkable
@@ -189,6 +215,28 @@ def _initial_font_size(region: OcrTextRegion) -> int:
     behaves exactly as before.
     """
     return min(max(_MIN_FONT_SIZE, int(region_line_height(region) * 0.8)), _MAX_FONT_SIZE)
+
+
+def estimated_font_size(region: OcrTextRegion) -> int:
+    """Public wrapper around _initial_font_size() above - the exact same
+    heuristic starting point every InpaintingBackend.apply() already uses
+    to seed its shrink-to-fit loop, exposed (26.08.2026) for a caller
+    OUTSIDE this module that wants to show an APPROXIMATION of the
+    eventual rendered size without duplicating the calculation.
+
+    First (and so far only) caller: image_translate_cli/report.py's
+    RegionRecord, which review_server.py's correction UI uses to size its
+    editable text box roughly like the real render will end up - real
+    user report, Backlog.md 26.08.2026: "Aber es fehlt noch die Font
+    Erkennung ... Wenigstens in etwas die Fontgrössen. Annähernd, nicht
+    genau." This wrapper IS that "annähernd" - real automatic font-FAMILY
+    recognition remains explicitly out of scope (see
+    pipeline.images.font_style's own module docstring on why), but the
+    SIZE the renderer will actually use was already being computed here
+    on every run; it just never reached anything a human could see before
+    clicking through to the final image.
+    """
+    return _initial_font_size(region)
 
 
 def _fit_text(
@@ -690,6 +738,41 @@ def _fill_gradient_rect(draw, x0: int, y0: int, x1: int, y1: int, gradient: Grad
             draw.line([(x0 + i, y0), (x0 + i, y1)], fill=_lerp_color(gradient.start, gradient.end, t))
 
 
+def _draw_region(replacement: TextReplacement) -> OcrTextRegion:
+    """Where `replacement.translated_text` actually gets DRAWN - its
+    `render_box` if a correction UI set one (26.08.2026, see
+    TextReplacement.render_box's docstring), otherwise `region` itself
+    (the previous, still-default behavior). Never use `.region` directly
+    for placing/sizing drawn text below - always go through this, or
+    `render_box` corrections silently do nothing again."""
+    return replacement.render_box or replacement.region
+
+
+def _erase_box(draw, image, x: int, y: int, width: int, height: int) -> tuple[int, int, int]:
+    """Samples the background around [x, y, x+width, y+height) and paints
+    over it (flat color, or a detected gradient - see
+    _sample_background()) - the shared "make whatever is currently here
+    disappear" step. Factored out (26.08.2026) so BoxOverlayBackend can
+    run it TWICE per replacement when `render_box` differs from `region`
+    (see that field's docstring): once over `region` (the ORIGINAL OCR
+    position - guarantees the untranslated source text is actually gone,
+    not just no-longer-referenced) and, only if different, again over
+    `render_box` (the corrected draw target - whatever was already
+    sitting there, unrelated to this replacement, needs clearing too
+    before text goes on top of it). Returns the flat color actually used
+    (the gradient's midpoint for a GradientBackground), so a caller
+    doesn't need a second _sample_background()/_representative_color()
+    call just to pick a contrasting text color for the same box.
+    """
+    background = _sample_background(image, x, y, width, height)
+    box = [x, y, x + width, y + height]
+    if isinstance(background, GradientBackground):
+        _fill_gradient_rect(draw, box[0], box[1], box[2], box[3], background)
+    else:
+        draw.rectangle(box, fill=background)
+    return _representative_color(background)
+
+
 class BoxOverlayBackend:
     """InpaintingBackend that overwrites each region with a sampled
     background (a flat color, or - since 22.08.2026, RoadMap.md Phase 3 -
@@ -717,28 +800,52 @@ class BoxOverlayBackend:
             raise InpaintingError(f"Bild konnte nicht geöffnet werden: {exc}") from exc
 
         draw = ImageDraw.Draw(image)
-        all_regions = [r.region for r in replacements] + list(obstacle_regions or [])
+        draw_regions = [_draw_region(r) for r in replacements]
+        all_regions = draw_regions + list(obstacle_regions or [])
+
+        # Two passes (26.08.2026, see TextReplacement.render_box's
+        # docstring - real user report, Backlog.md 26.08.2026: "die
+        # Positionen, Grösse und Korrekturen werden nicht übernommen").
+        # Pass 1 ALWAYS erases `region` - the ORIGINAL OCR position - and
+        # reads style from it, exactly as before this change (when no
+        # correction UI ever set render_box, draw_region IS region, so
+        # pass 2 below erases nothing further and behavior is
+        # byte-for-byte unchanged). Pass 2 only additionally erases+draws
+        # at `render_box` when a correction actually moved/resized the
+        # box away from its original position.
+        prepared = []  # (style, original_color) per replacement, same order
         for replacement in replacements:
             region = replacement.region
-            background = _sample_background(image, region.x, region.y, region.width, region.height)
-            background_color = _representative_color(background)
+            background_for_style = _sample_background(image, region.x, region.y, region.width, region.height)
+            representative = _representative_color(background_for_style)
             # Style estimation reads `image`'s CURRENT pixels at this
-            # region - must happen before the fill below overwrites them,
-            # or there is nothing left to estimate from.
+            # region - must happen before the erase below overwrites
+            # them, or there is nothing left to estimate from.
             style = estimate_font_style(
-                image, region, background_color, replacement.translated_text, _initial_font_size(region)
+                image, region, representative, replacement.translated_text, _initial_font_size(region)
             )
-            box = [region.x, region.y, region.x + region.width, region.y + region.height]
-            if isinstance(background, GradientBackground):
-                _fill_gradient_rect(draw, box[0], box[1], box[2], box[3], background)
-            else:
-                draw.rectangle(box, fill=background)
+            original_color = _erase_box(draw, image, region.x, region.y, region.width, region.height)
+            prepared.append((style, original_color))
+
+        for replacement, (style, original_color), draw_region in zip(replacements, prepared, draw_regions):
+            region = replacement.region
+            moved = (
+                draw_region.x != region.x
+                or draw_region.y != region.y
+                or draw_region.width != region.width
+                or draw_region.height != region.height
+            )
+            background_color = (
+                _erase_box(draw, image, draw_region.x, draw_region.y, draw_region.width, draw_region.height)
+                if moved
+                else original_color
+            )
             text_color = _contrasting_text_color(background_color)
-            max_height = _vertical_room_below(region, all_regions)
-            left_room, right_room = _horizontal_room(region, all_regions, image.width)
+            max_height = _vertical_room_below(draw_region, all_regions)
+            left_room, right_room = _horizontal_room(draw_region, all_regions, image.width)
             _draw_fitted_text(
                 draw,
-                region,
+                draw_region,
                 replacement.translated_text,
                 text_color,
                 image.height,
@@ -803,10 +910,22 @@ class CvInpaintingBackend:
         # cv2.inpaint()) stays entirely inside OpenCV's own convention.
         image_bgr = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
 
+        draw_regions = [_draw_region(r) for r in replacements]
+        # Mask covers `region` (the ORIGINAL OCR position) for every
+        # replacement, same as always, PLUS `render_box` too whenever a
+        # correction UI set a different draw target (26.08.2026, see
+        # TextReplacement.render_box's docstring) - cv2.inpaint()
+        # reconstructs BOTH spots in one pass, so the untranslated source
+        # text at the original position is genuinely gone (not just
+        # no-longer-referenced) AND the corrected draw target starts from
+        # a clean, reconstructed background instead of whatever was
+        # already there. A replacement whose render_box is None (no
+        # correction happened) contributes the exact same single mask
+        # rectangle as before this change.
         mask = np.zeros(image_bgr.shape[:2], dtype=np.uint8)
-        for replacement in replacements:
-            region = replacement.region
-            mask[region.y : region.y + region.height, region.x : region.x + region.width] = 255
+        for replacement, draw_region in zip(replacements, draw_regions):
+            for box in {replacement.region, draw_region}:
+                mask[box.y : box.y + box.height, box.x : box.x + box.width] = 255
 
         if replacements:
             image_bgr = cv2.inpaint(image_bgr, mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
@@ -815,30 +934,31 @@ class CvInpaintingBackend:
         from PIL import ImageDraw
 
         draw = ImageDraw.Draw(result)
-        all_regions = [r.region for r in replacements] + list(obstacle_regions or [])
-        for replacement in replacements:
+        all_regions = draw_regions + list(obstacle_regions or [])
+        for replacement, draw_region in zip(replacements, draw_regions):
             region = replacement.region
             # The interior itself is now a valid background estimate
             # (cv2.inpaint() already reconstructed it) - sampling the
             # RECONSTRUCTED interior directly for text-color contrast,
             # rather than BoxOverlayBackend's outside-ring sample, which
             # would still be correct here too but is a needless detour
-            # now that the interior itself is meaningful.
-            background = _average_region_color(result, region.x, region.y, region.width, region.height)
+            # now that the interior itself is meaningful. Sampled at
+            # `draw_region` (where text actually lands), not `region`.
+            background = _average_region_color(result, draw_region.x, draw_region.y, draw_region.width, draw_region.height)
             # `pil_image` (unlike `result`) was never touched by
             # cv2.inpaint() - still holds the ORIGINAL, un-reconstructed
-            # glyph pixels this region's style has to be estimated from;
-            # `background` still comes from the RECONSTRUCTED `result`
-            # (the best available background-color estimate).
+            # glyph pixels this region's style has to be estimated from -
+            # always `region` (the original OCR position), regardless of
+            # where the corrected `draw_region` ends up.
             style = estimate_font_style(
                 pil_image, region, background, replacement.translated_text, _initial_font_size(region)
             )
             text_color = _contrasting_text_color(background)
-            max_height = _vertical_room_below(region, all_regions)
-            left_room, right_room = _horizontal_room(region, all_regions, result.width)
+            max_height = _vertical_room_below(draw_region, all_regions)
+            left_room, right_room = _horizontal_room(draw_region, all_regions, result.width)
             _draw_fitted_text(
                 draw,
-                region,
+                draw_region,
                 replacement.translated_text,
                 text_color,
                 result.height,
@@ -914,6 +1034,15 @@ def _build_inpainting_mask(size: tuple[int, int], replacements: list[TextReplace
     anti-aliased glyph edges the OCR bounding box just barely missed are
     still covered - an uncovered sliver of the original glyph would
     otherwise show through underneath the new translated text.
+
+    Masks BOTH `region` (the ORIGINAL OCR position) and `render_box`
+    (26.08.2026, see TextReplacement.render_box's docstring) whenever a
+    correction UI set a different draw target - same reasoning as
+    CvInpaintingBackend's mask above: the model must reconstruct the
+    original spot (so the untranslated source text is genuinely gone) AND
+    the corrected draw target (so text lands on a clean background there
+    too). A replacement without a render_box contributes only its one
+    (unchanged) box, exactly as before this change.
     """
     from PIL import Image, ImageDraw
 
@@ -921,12 +1050,12 @@ def _build_inpainting_mask(size: tuple[int, int], replacements: list[TextReplace
     draw = ImageDraw.Draw(mask)
     width, height = size
     for replacement in replacements:
-        region = replacement.region
-        left = max(region.x - padding, 0)
-        top = max(region.y - padding, 0)
-        right = min(region.x + region.width + padding, width)
-        bottom = min(region.y + region.height + padding, height)
-        draw.rectangle([left, top, right, bottom], fill=255)
+        for region in {replacement.region, _draw_region(replacement)}:
+            left = max(region.x - padding, 0)
+            top = max(region.y - padding, 0)
+            right = min(region.x + region.width + padding, width)
+            bottom = min(region.y + region.height + padding, height)
+            draw.rectangle([left, top, right, bottom], fill=255)
     return mask
 
 
@@ -1021,23 +1150,28 @@ class GpuInpaintingBackend:
                 raise InpaintingError(f"KI-Inpainting fehlgeschlagen: {exc}") from exc
 
         draw = ImageDraw.Draw(image)
-        all_regions = [r.region for r in replacements] + list(obstacle_regions or [])
-        for replacement in replacements:
+        draw_regions = [_draw_region(r) for r in replacements]
+        all_regions = draw_regions + list(obstacle_regions or [])
+        for replacement, draw_region in zip(replacements, draw_regions):
             region = replacement.region
             # The model's own reconstructed interior is now a valid
             # background estimate (same reasoning as CvInpaintingBackend
             # above) - sampled directly rather than BoxOverlayBackend's
-            # outside-ring approach.
-            background = _average_region_color(image, region.x, region.y, region.width, region.height)
+            # outside-ring approach. Sampled at `draw_region` (where text
+            # actually lands), not `region`.
+            background = _average_region_color(image, draw_region.x, draw_region.y, draw_region.width, draw_region.height)
+            # Style is always read from `original_image` at `region` (the
+            # original OCR position) - unaffected by where the corrected
+            # `draw_region` ends up.
             style = estimate_font_style(
                 original_image, region, background, replacement.translated_text, _initial_font_size(region)
             )
             text_color = _contrasting_text_color(background)
-            max_height = _vertical_room_below(region, all_regions)
-            left_room, right_room = _horizontal_room(region, all_regions, image.width)
+            max_height = _vertical_room_below(draw_region, all_regions)
+            left_room, right_room = _horizontal_room(draw_region, all_regions, image.width)
             _draw_fitted_text(
                 draw,
-                region,
+                draw_region,
                 replacement.translated_text,
                 text_color,
                 image.height,

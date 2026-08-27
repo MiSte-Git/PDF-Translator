@@ -86,6 +86,15 @@ _PAGE_HTML = """<!doctype html>
   }
   .region-text {
     width: 100%; height: 100%; box-sizing: border-box; padding: 2px 4px;
+    /* 13px is only the FALLBACK now (26.08.2026) - renderRegions() below
+       sets an inline font-size per box from the region's own
+       font_size_px (see estimated_font_size()'s docstring: the same
+       heuristic size InpaintingBackend.apply() actually renders with),
+       real user report Backlog.md 26.08.2026: "Aber es fehlt noch die
+       Font Erkennung ... Wenigstens in etwas die Fontgrössen. Annähernd,
+       nicht genau." A flat 13px regardless of the real region size was
+       part of why the correction view looked disconnected from the
+       actual output. */
     color: #fff; font-size: 13px; line-height: 1.25; overflow: hidden;
     cursor: text; outline: none; touch-action: none;
   }
@@ -142,12 +151,34 @@ function renderRegions() {
     box.style.height = r.height + 'px';
     box.dataset.originalText = r.original_text;
     box.dataset.confidence = r.confidence;
+    // TRUE original OCR position (26.08.2026) - kept SEPARATE from the
+    // box's own (possibly already corrected, on a second review round)
+    // current style.left/top/width/height, so a drag/resize here never
+    // loses track of where the untranslated source text really sits.
+    // r.orig_x is only present when a PRIOR correction round already
+    // moved this region (see report.py::RegionRecord.to_dict()) - falls
+    // back to r.x itself (this position IS still the original) the very
+    // first time a region gets corrected, same fallback
+    // regions_io.py::replacements_from_region_list() applies on the way
+    // back in.
+    box.dataset.origX = r.orig_x !== undefined ? r.orig_x : r.x;
+    box.dataset.origY = r.orig_y !== undefined ? r.orig_y : r.y;
+    box.dataset.origWidth = r.orig_width !== undefined ? r.orig_width : r.width;
+    box.dataset.origHeight = r.orig_height !== undefined ? r.orig_height : r.height;
     box.title = 'Original: ' + r.original_text;
 
     const text = document.createElement('div');
     text.className = 'region-text';
     text.contentEditable = 'true';
     text.textContent = r.translated_text;
+    // Approximates the real render (26.08.2026, see .region-text's own
+    // CSS comment above) - r.font_size_px is absent only for a
+    // hand-written --regions file loaded via `correct` that never went
+    // through report.py's regions_from_replacements(), never for
+    // anything `review` itself produces; falls back to the CSS default.
+    if (r.font_size_px) {
+      text.style.fontSize = r.font_size_px + 'px';
+    }
     box.appendChild(text);
 
     const handle = document.createElement('div');
@@ -162,10 +193,32 @@ function renderRegions() {
 }
 
 function makeDraggable(box, textEl, handle) {
-  let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+  // 26.08.2026 regression fix - real user report, Backlog.md 26.08.2026:
+  // "die Positionen, Grösse und Korrekturen werden nicht übernommen".
+  // `textEl` (.region-text) is styled width/height 100% of `box` (see
+  // its own CSS) - it visually covers the ENTIRE box, so a pointerdown
+  // ANYWHERE inside the visible box always had e.target === textEl. The
+  // old code (`if (e.target === textEl ...) return;`) therefore bailed
+  // out of EVERY drag attempt that started on the visible box - only a
+  // pointerdown on the ~1.5px dashed border itself (practically
+  // unclickable with a mouse) could ever start one. Confirmed via a real
+  // Chromium session driving actual pointer events, not just reading the
+  // code: a simulated drag starting on the box left `box.style.left`
+  // completely unchanged.
+  //
+  // Fix: allow a drag to start from anywhere on the box (including over
+  // the text), but only actually begin MOVING it once the pointer has
+  // travelled past `DRAG_THRESHOLD` px - a plain click (no/negligible
+  // movement) still reaches `textEl` as a normal click, so clicking into
+  // the text to position the edit cursor keeps working exactly as
+  // before. `e.preventDefault()` only fires once real dragging starts,
+  // so it never blocks the plain-click case from placing a cursor.
+  const DRAG_THRESHOLD = 4;
+  let dragging = false, moved = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
   box.addEventListener('pointerdown', (e) => {
-    if (e.target === textEl || e.target === handle) return;
+    if (e.target === handle) return;
     dragging = true;
+    moved = false;
     startX = e.clientX; startY = e.clientY;
     startLeft = parseInt(box.style.left, 10);
     startTop = parseInt(box.style.top, 10);
@@ -173,8 +226,19 @@ function makeDraggable(box, textEl, handle) {
   });
   box.addEventListener('pointermove', (e) => {
     if (!dragging) return;
-    box.style.left = (startLeft + e.clientX - startX) + 'px';
-    box.style.top = (startTop + e.clientY - startY) + 'px';
+    const dx = e.clientX - startX, dy = e.clientY - startY;
+    if (!moved) {
+      if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+      moved = true;
+      // Only suppress the native click/selection behavior once this is
+      // genuinely a drag - keeps a plain click on the text free to place
+      // an edit cursor as usual.
+      e.preventDefault();
+      const selection = window.getSelection();
+      if (selection) selection.removeAllRanges();
+    }
+    box.style.left = (startLeft + dx) + 'px';
+    box.style.top = (startTop + dy) + 'px';
   });
   box.addEventListener('pointerup', () => { dragging = false; });
 }
@@ -207,6 +271,14 @@ function collectRegions() {
       y: parseInt(box.style.top, 10),
       width: parseInt(box.style.width, 10),
       height: parseInt(box.style.height, 10),
+      // Always sent back too (26.08.2026), UNCHANGED by drag/resize -
+      // see renderRegions()'s matching comment. Lets the backend erase
+      // the real original spot even when x/y/width/height above now
+      // point somewhere else entirely.
+      orig_x: parseInt(box.dataset.origX, 10),
+      orig_y: parseInt(box.dataset.origY, 10),
+      orig_width: parseInt(box.dataset.origWidth, 10),
+      orig_height: parseInt(box.dataset.origHeight, 10),
       translated_text: text.textContent,
       original_text: box.dataset.originalText,
       confidence: parseFloat(box.dataset.confidence),

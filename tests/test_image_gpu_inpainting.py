@@ -139,6 +139,25 @@ def test_build_inpainting_mask_empty_replacements_is_fully_black() -> None:
     assert all(mask.getpixel((x, y)) == 0 for x in range(10) for y in range(10))
 
 
+def test_build_inpainting_mask_covers_both_original_and_render_box() -> None:
+    """26.08.2026 regression guard - real user report, Backlog.md
+    26.08.2026: "die Positionen, Grösse und Korrekturen werden nicht
+    übernommen". Without `render_box` in the mask too, the model would
+    never reconstruct the corrected draw target's background, and without
+    `region` in the mask, the ORIGINAL untranslated source text would
+    never be removed at all - see TextReplacement.render_box's own
+    docstring."""
+    region = OcrTextRegion(text="Hello", x=10, y=10, width=20, height=15, confidence=90.0)
+    render_box = OcrTextRegion(text="Hello", x=60, y=60, width=20, height=15, confidence=90.0)
+    replacement = TextReplacement(region=region, translated_text="Hallo", render_box=render_box)
+
+    mask = _build_inpainting_mask((100, 100), [replacement], padding=4)
+
+    assert mask.getpixel((20, 17)) == 255  # inside the ORIGINAL region
+    assert mask.getpixel((70, 67)) == 255  # inside the corrected render_box
+    assert mask.getpixel((40, 40)) == 0  # neither - untouched
+
+
 def test_apply_raises_before_touching_torch_when_gpu_unavailable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

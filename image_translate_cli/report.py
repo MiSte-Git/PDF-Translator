@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from pipeline.images.inpainting import TextReplacement
+from pipeline.images.inpainting import TextReplacement, estimated_font_size
 
 from image_translate_cli.config import ImageTranslateConfig, config_to_dict
 
@@ -77,6 +77,22 @@ class RegionRecord:
     correction UI ui/image_correction_dialog.py already has - an external
     caller's own UI can offer the same if it wants to, or ignore geometry
     entirely and only ever edit `translated_text`.
+
+    `x`/`y`/`width`/`height` mean "where this is drawn right now" -
+    `replacement.render_box` if a previous correction round set one
+    (26.08.2026, see pipeline.images.inpainting.TextReplacement.
+    render_box's docstring), otherwise `replacement.region` (unchanged
+    meaning, matches every entry from before this field existed).
+    `orig_x`/`orig_y`/`orig_width`/`orig_height` (None unless a
+    correction actually moved/resized this entry) carry
+    `replacement.region` - the TRUE, ORIGINAL OCR position - forward
+    SEPARATELY, so a second correction round (re-opening `review` on an
+    already-corrected image, or a `correct --regions` file built from
+    THIS report) still knows where the untranslated source text
+    genuinely sits and can erase it there too, even though it's no
+    longer being drawn there. See image_translate_cli.regions_io.
+    replacements_from_region_list()'s matching docstring for the read
+    side of this same contract.
     """
 
     index: int
@@ -87,9 +103,14 @@ class RegionRecord:
     confidence: float
     original_text: str
     translated_text: str
+    orig_x: int | None = None
+    orig_y: int | None = None
+    orig_width: int | None = None
+    orig_height: int | None = None
+    font_size_px: int = 0
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "index": self.index,
             "x": self.x,
             "y": self.y,
@@ -98,7 +119,21 @@ class RegionRecord:
             "confidence": self.confidence,
             "original_text": self.original_text,
             "translated_text": self.translated_text,
+            "font_size_px": self.font_size_px,
         }
+        # orig_x/y/width/height are only present when a correction
+        # actually moved/resized this entry - an UNCORRECTED region's
+        # JSON shape only ever gains the new "font_size_px" key relative
+        # to before 26.08.2026 (a plain additive field, no
+        # REPORT_SCHEMA_VERSION bump needed per this module's own policy
+        # above - existing report/--regions consumers that read known
+        # keys and ignore unknown ones are unaffected).
+        if self.orig_x is not None:
+            data["orig_x"] = self.orig_x
+            data["orig_y"] = self.orig_y
+            data["orig_width"] = self.orig_width
+            data["orig_height"] = self.orig_height
+        return data
 
 
 def regions_from_replacements(replacements: list[TextReplacement]) -> list[RegionRecord]:
@@ -108,19 +143,33 @@ def regions_from_replacements(replacements: list[TextReplacement]) -> list[Regio
     `correct`'s report use this, so a `correct` result can itself be fed
     into another `correct` round unchanged.
     """
-    return [
-        RegionRecord(
-            index=i,
-            x=r.region.x,
-            y=r.region.y,
-            width=r.region.width,
-            height=r.region.height,
-            confidence=r.region.confidence,
-            original_text=r.region.text,
-            translated_text=r.translated_text,
+    records = []
+    for i, r in enumerate(replacements):
+        box = r.render_box or r.region
+        records.append(
+            RegionRecord(
+                index=i,
+                x=box.x,
+                y=box.y,
+                width=box.width,
+                height=box.height,
+                confidence=r.region.confidence,
+                original_text=r.region.text,
+                translated_text=r.translated_text,
+                orig_x=r.region.x if r.render_box is not None else None,
+                orig_y=r.region.y if r.render_box is not None else None,
+                orig_width=r.region.width if r.render_box is not None else None,
+                orig_height=r.region.height if r.render_box is not None else None,
+                # Always from the ORIGINAL region, never `box` - a
+                # corrected box's height reflects how big the human
+                # wanted the DRAW AREA to be, not a claim about the
+                # original glyph size the estimate is meant to
+                # approximate (26.08.2026, see estimated_font_size()'s
+                # own docstring).
+                font_size_px=estimated_font_size(r.region),
+            )
         )
-        for i, r in enumerate(replacements)
-    ]
+    return records
 
 
 @dataclass

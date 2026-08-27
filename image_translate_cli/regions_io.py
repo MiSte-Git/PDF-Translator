@@ -37,6 +37,26 @@ def replacements_from_region_list(data: object) -> list[TextReplacement]:
     `original_text` are optional here (defaulted to 0.0/"") so a caller's
     UI doesn't have to round-trip fields it never needed to look at, only
     `x`/`y`/`width`/`height`/`translated_text` are required.
+
+    `orig_x`/`orig_y`/`orig_width`/`orig_height` (26.08.2026, all
+    optional, each individually defaulting to the same-named `x`/`y`/
+    `width`/`height` value) - the region's TRUE, ORIGINAL OCR position,
+    kept SEPARATE from `x`/`y`/`width`/`height` (which keep their
+    existing meaning: "where this should be drawn now") so a correction
+    UI can move/resize a box without losing track of where the
+    untranslated source text actually still sits (see
+    pipeline.images.inpainting.TextReplacement.render_box's docstring -
+    real user report, Backlog.md 26.08.2026: "die Positionen, Grösse und
+    Korrekturen werden nicht übernommen"). Absent (the common case: a
+    hand-written --regions file, or any entry that was never moved) means
+    "this position IS the original" - `region` and the resulting
+    TextReplacement.render_box (left None) are then identical to what
+    this function has always built, byte-for-byte. When present and
+    different, `region` is built from the orig_* values and `render_box`
+    from the plain x/y/width/height values - image_translate_cli/
+    review_server.py's browser page is the first caller to actually set
+    these (see its collectRegions()), a hand-written --regions file can
+    use them too but rarely needs to.
     """
     if not isinstance(data, list):
         raise RegionsError(f"Regionen müssen eine JSON-Liste sein, nicht {type(data).__name__}")
@@ -48,15 +68,36 @@ def replacements_from_region_list(data: object) -> list[TextReplacement]:
         missing = [f for f in REGION_REQUIRED_FIELDS if f not in entry]
         if missing:
             raise RegionsError(f"regions[{i}]: Pflichtfeld(er) fehlen: {', '.join(missing)}")
+        current_x, current_y = int(entry["x"]), int(entry["y"])
+        current_width, current_height = int(entry["width"]), int(entry["height"])
+        orig_x = int(entry.get("orig_x", current_x))
+        orig_y = int(entry.get("orig_y", current_y))
+        orig_width = int(entry.get("orig_width", current_width))
+        orig_height = int(entry.get("orig_height", current_height))
         region = OcrTextRegion(
             text=str(entry.get("original_text", "")),
-            x=int(entry["x"]),
-            y=int(entry["y"]),
-            width=int(entry["width"]),
-            height=int(entry["height"]),
+            x=orig_x,
+            y=orig_y,
+            width=orig_width,
+            height=orig_height,
             confidence=float(entry.get("confidence", 0.0)),
         )
-        replacements.append(TextReplacement(region=region, translated_text=str(entry["translated_text"])))
+        moved = (orig_x, orig_y, orig_width, orig_height) != (current_x, current_y, current_width, current_height)
+        render_box = (
+            OcrTextRegion(
+                text=region.text,
+                x=current_x,
+                y=current_y,
+                width=current_width,
+                height=current_height,
+                confidence=region.confidence,
+            )
+            if moved
+            else None
+        )
+        replacements.append(
+            TextReplacement(region=region, translated_text=str(entry["translated_text"]), render_box=render_box)
+        )
     return replacements
 
 

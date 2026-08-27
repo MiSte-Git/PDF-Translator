@@ -381,12 +381,22 @@ def test_build_corrected_replacements_ignores_out_of_range_index() -> None:
 
 
 def test_build_corrected_replacements_applies_edited_geometry() -> None:
+    """26.08.2026 (Backlog.md, real user report: "die Positionen, Grösse
+    und Korrekturen werden nicht übernommen"): edited geometry now lands
+    in `render_box`, NOT `region` - `region` must stay exactly the
+    ORIGINAL OCR position forever, so InpaintingBackend.apply() can still
+    erase the real untranslated source text even after a correction moved
+    the drawn text elsewhere. See TextReplacement.render_box's own
+    docstring for the full story."""
     original = [_make_replacement("Hello World", "Hallo Welt")]
 
     corrected = build_corrected_replacements(original, {}, edited_geometry={0: (30, 40, 200, 50)})
 
     region = corrected[0].region
-    assert (region.x, region.y, region.width, region.height) == (30, 40, 200, 50)
+    assert (region.x, region.y, region.width, region.height) == (20, 20, 150, 24)  # UNCHANGED original
+    render_box = corrected[0].render_box
+    assert render_box is not None
+    assert (render_box.x, render_box.y, render_box.width, render_box.height) == (30, 40, 200, 50)
     # Text/confidence must survive untouched - only geometry was edited.
     assert region.text == "Hello World"
     assert region.confidence == 95.0
@@ -407,8 +417,10 @@ def test_build_corrected_replacements_combines_text_and_geometry_edits_independe
 
     assert corrected[0].translated_text == "Hallo Welt (korrigiert)"
     assert corrected[0].region is original[0].region  # untouched geometry
+    assert corrected[0].render_box is None
     assert corrected[1].translated_text == "Zweite Zeile"  # untouched text
-    assert (corrected[1].region.x, corrected[1].region.y) == (10, 10)
+    assert corrected[1].region is original[1].region  # ORIGINAL position stays untouched
+    assert (corrected[1].render_box.x, corrected[1].render_box.y) == (10, 10)
 
 
 def test_build_corrected_replacements_geometry_none_keeps_old_behavior() -> None:

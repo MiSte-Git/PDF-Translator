@@ -208,13 +208,26 @@ def build_corrected_replacements(
     individual boxes by hand rather than accept-or-redo-nothing) - maps a
     `replacements` LIST INDEX to a (x, y, width, height) pixel tuple in
     the SAME coordinate system as OcrTextRegion (top-left origin, whole
-    image). An index present here gets a region rebuilt with this
-    geometry (same `text`/`confidence`, only x/y/width/height replaced -
-    see dataclasses.replace()) independently of whether that same index
-    is also present in `edited_texts`: a row can have its text corrected,
-    its box moved/resized, both, or neither, in any combination. None
-    (the default) behaves exactly like the pre-geometry-editing version
-    of this function - no region is ever touched.
+    image). An index present here gets a NEW TextReplacement.render_box
+    built with this geometry (26.08.2026 - see that field's own
+    docstring: `region` itself is now NEVER touched by a geometry edit,
+    it stays the ORIGINAL recognized position forever, exactly what its
+    own docstring already promised) independently of whether that same
+    index is also present in `edited_texts`: a row can have its text
+    corrected, its box moved/resized, both, or neither, in any
+    combination. None (the default) behaves exactly like the
+    pre-geometry-editing version of this function - no render_box is
+    ever set.
+
+    Before 26.08.2026, `geometry` overwrote `region` in place
+    (`dataclasses.replace(region, x=..., ...)`) - which quietly broke
+    that field's own "keeps the ORIGINAL recognized OcrTextRegion"
+    contract the moment a human dragged a box, and was the real cause of
+    a real user's report (Backlog.md 26.08.2026: "die Positionen, Grösse
+    und Korrekturen werden nicht übernommen") - every InpaintingBackend.
+    apply() erases/estimates style from `region`, so once it silently
+    became "wherever the box was dragged to", the ORIGINAL untranslated
+    source text at its real position was never erased at all.
 
     An index outside `range(len(replacements))` in either dict is
     silently ignored - lets a caller pass a dict built once against a
@@ -229,12 +242,14 @@ def build_corrected_replacements(
         if not text_changed and geometry is None:
             corrected.append(replacement)
             continue
-        region = replacement.region
+        render_box = replacement.render_box
         if geometry is not None:
             x, y, width, height = geometry
-            region = dataclasses.replace(region, x=x, y=y, width=width, height=height)
+            render_box = dataclasses.replace(replacement.region, x=x, y=y, width=width, height=height)
         translated_text = edited_text if text_changed else replacement.translated_text
-        corrected.append(TextReplacement(region=region, translated_text=translated_text))
+        corrected.append(
+            TextReplacement(region=replacement.region, translated_text=translated_text, render_box=render_box)
+        )
     return corrected
 
 
