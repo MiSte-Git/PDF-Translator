@@ -293,16 +293,35 @@ def _fit_text(
     i.e. for every region this behaved the same for before 23.08.2026.
     """
     size = _initial_font_size(region)
+    max_width = max(region.width, 1)
     while True:
         font = _load_font(size, bold=bold, family=family, italic=italic)
-        lines = _wrap_text_to_width(draw, text, font, max(region.width, 1))
+        lines = _wrap_text_to_width(draw, text, font, max_width)
         line_height = max(1, int(size * _LINE_SPACING))
         total_height = line_height * len(lines)
-        if total_height <= max_height or size <= _MIN_FONT_SIZE:
+        # 27.08.2026 - real user report, Backlog.md 27.08.2026, Michael:
+        # "HAUPTBUCH" (a single, unbreakable word - "LEDGER" translated)
+        # rendered far wider than its box, REGARDLESS of that box's width,
+        # manually corrected or not. Root cause: this loop only ever
+        # checked `total_height` (vertical stacking) against `max_height` -
+        # never whether the widest LINE actually fits `region.width`
+        # horizontally. For any single word too long to wrap (see
+        # _wrap_text_to_width()'s own docstring - a lone overlong word
+        # always gets its own line rather than being split mid-word),
+        # `total_height` is trivially small (exactly one line) and the
+        # loop broke on its very FIRST iteration, at the height-derived
+        # _initial_font_size(region) starting size, no matter how narrow
+        # `region.width` was - so a box's WIDTH had no influence at all on
+        # a single-word translation's rendered size. `widest_line` closes
+        # that gap: the shrink loop now keeps reducing `size` until the
+        # text ALSO fits horizontally (or _MIN_FONT_SIZE is reached),
+        # exactly mirroring how it already treated vertical overflow.
+        widest_line = max((draw.textlength(line, font=font) for line in lines), default=0.0)
+        if (total_height <= max_height and widest_line <= max_width) or size <= _MIN_FONT_SIZE:
             break
         size = max(_MIN_FONT_SIZE, size - 2)
 
-    if total_height <= max_height:
+    if total_height <= max_height and widest_line <= max_width:
         return lines, font, line_height, 0.0
 
     extra_total = left_room + right_room
@@ -312,15 +331,23 @@ def _fit_text(
     # Coarse search: grow the wrap width in _HORIZONTAL_FIT_STEPS steps
     # from region.width up to region.width + extra_total, stopping at the
     # first (narrowest) step that fits - or falling through to the
-    # widest attempt as a best-effort if none do.
+    # widest attempt as a best-effort if none do. `candidate_widest` (like
+    # `widest_line` above) is checked alongside height so this widening
+    # step also recognizes a still-too-wide single word rather than
+    # declaring victory on vertical fit alone - for a genuinely
+    # unbreakable word this exhausts `extra_total` (rewrapping a fixed-
+    # size word to a wider box never shrinks it) and lands on the widest
+    # available room, the same "use whatever's genuinely free, then
+    # accept the rest" fallback this branch already existed for.
     step = max(extra_total / _HORIZONTAL_FIT_STEPS, 1.0)
     extra = 0.0
     while True:
         extra = min(extra + step, extra_total)
-        width = max(region.width + extra, 1)
+        width = max(max_width + extra, 1)
         candidate_lines = _wrap_text_to_width(draw, text, font, width)
         candidate_height = line_height * len(candidate_lines)
-        if candidate_height <= max_height or extra >= extra_total:
+        candidate_widest = max((draw.textlength(line, font=font) for line in candidate_lines), default=0.0)
+        if (candidate_height <= max_height and candidate_widest <= width) or extra >= extra_total:
             lines = candidate_lines
             break
 
@@ -574,6 +601,33 @@ def _horizontal_room(
     )
 
 
+# 27.08.2026 - real user report, Backlog.md 27.08.2026, Michael:
+# "Wenn ich anwenden klicke sollte keine andere Routine dazwischen
+# funken und noch etwas automatisch ändern." Reproduced against his real
+# image/OCR data: a manually corrected box that is a bit too SHORT for
+# its translated text at a comfortable font size fell through to
+# _fit_text()'s "last resort: widen using left_room/right_room" branch
+# (see that function's own docstring) exactly like an ordinary,
+# never-corrected region would - and because a region floating alone in
+# open graphic space (no neighbouring text on either side) can have a
+# very large left_room/right_room, that widening silently discarded the
+# user's own explicit box WIDTH and stretched the text into a single
+# oversized line overlapping neighbouring content ("HAUPTBUCH" spilling
+# out of "Spirit - Soul - Meatsuit.jpg"'s sphere graphic into the
+# "Enthält:" text beside it).
+#
+# Every InpaintingBackend.apply() below now zeroes left_room/right_room
+# whenever `replacement.render_box is not None` - i.e. a correction UI
+# (ui/image_correction_dialog.py or the webapp review flow) actually set
+# this box, as opposed to the untouched OCR-derived default every
+# FIRST-pass translation uses. That single condition draws exactly the
+# line Michael asked for: a box the user never touched may still widen
+# to avoid an illegibly small font (QA-Bericht "(12)"'s original footer
+# case, unchanged), but a box the user DID set is a hard cap from then
+# on - _fit_text()'s shrink-to-_MIN_FONT_SIZE loop and (if that still
+# doesn't fit) its own "accept the overflow" fallback still apply
+# unchanged, so a too-small manual box clips or shrinks instead of being
+# silently re-widened behind the user's back.
 def _sample_background_color(image, x: int, y: int, width: int, height: int) -> tuple[int, int, int]:
     """Approximates the region's surrounding color by averaging a thin
     ring of pixels just OUTSIDE the bounding box (clamped to image
@@ -843,6 +897,13 @@ class BoxOverlayBackend:
             text_color = _contrasting_text_color(background_color)
             max_height = _vertical_room_below(draw_region, all_regions)
             left_room, right_room = _horizontal_room(draw_region, all_regions, image.width)
+            if replacement.render_box is not None:
+                # 27.08.2026 - see this file's module-level note next to
+                # _horizontal_room()'s own docstring ("manually corrected
+                # box width is a hard cap") for the full story - a real,
+                # reproduced user report (Michael, "Spirit - Soul -
+                # Meatsuit.jpg", "HAUPTBUCH").
+                left_room, right_room = 0.0, 0.0
             _draw_fitted_text(
                 draw,
                 draw_region,
@@ -956,6 +1017,10 @@ class CvInpaintingBackend:
             text_color = _contrasting_text_color(background)
             max_height = _vertical_room_below(draw_region, all_regions)
             left_room, right_room = _horizontal_room(draw_region, all_regions, result.width)
+            if replacement.render_box is not None:
+                # 27.08.2026 - see the note above _sample_background_color()
+                # ("manually corrected box width is a hard cap").
+                left_room, right_room = 0.0, 0.0
             _draw_fitted_text(
                 draw,
                 draw_region,
@@ -1169,6 +1234,10 @@ class GpuInpaintingBackend:
             text_color = _contrasting_text_color(background)
             max_height = _vertical_room_below(draw_region, all_regions)
             left_room, right_room = _horizontal_room(draw_region, all_regions, image.width)
+            if replacement.render_box is not None:
+                # 27.08.2026 - see the note above _sample_background_color()
+                # ("manually corrected box width is a hard cap").
+                left_room, right_room = 0.0, 0.0
             _draw_fitted_text(
                 draw,
                 draw_region,

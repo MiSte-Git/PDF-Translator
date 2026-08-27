@@ -352,6 +352,112 @@ def test_apply_wraps_long_translation_instead_of_overflowing_box_width(tmp_path:
     )
 
 
+# --- Single-word (unbreakable) translations must also respect box width,
+# not just region height (27.08.2026 - real user report, Backlog.md
+# 27.08.2026, Michael: "Spirit - Soul - Meatsuit.jpg", "LEDGER"->
+# "HAUPTBUCH" rendered far wider than its box, manually corrected or not).
+# _wrap_text_to_width() never splits a single word (see its own test
+# above), so a one-word translation is always exactly ONE line -
+# total_height was therefore always trivially within max_height and
+# _fit_text()'s shrink loop broke on its very first iteration, at the
+# height-derived starting size, regardless of how narrow region.width
+# was. The fix folds a widest-line-fits-region.width check into that same
+# loop. --------------------------------------------------------------
+
+
+def test_fit_text_shrinks_a_single_unbreakable_word_that_overflows_region_width() -> None:
+    """A narrow box (width=60) with a generous max_height (mirrors a
+    region with no vertical neighbour to constrain it - exactly Michael's
+    real case, "LEDGER" sitting alone in open graphic space) and a single
+    word that would render far wider than 60px at the height-derived
+    starting size. Before this fix, font.size stayed at the naive
+    height-derived value and the word overflowed region.width
+    unconstrained; the shrink loop must now keep reducing size until the
+    word actually fits width-wise too."""
+    draw = _measure_draw()
+    region = OcrTextRegion(text="x", x=0, y=0, width=60, height=40, confidence=90.0)
+
+    lines, font, line_height, x_offset = _fit_text(draw, "HAUPTBUCH", region, max_height=1000)
+
+    naive_size = int(region.height * 0.8)
+    assert font.size < naive_size, "expected the width check to shrink below the naive height-derived size"
+    assert lines == ["HAUPTBUCH"]  # never split mid-word, unchanged
+    assert draw.textlength("HAUPTBUCH", font=font) <= region.width
+    assert x_offset == 0.0  # fit by shrinking alone, no widening needed
+
+
+def test_fit_text_widens_a_single_word_that_still_overflows_at_min_font_size() -> None:
+    """When even _MIN_FONT_SIZE still doesn't make the word fit
+    region.width, the existing widen-using-available-room fallback must
+    still engage for a single word exactly like it already does for
+    wrapped multi-word text (test_fit_text_widens_to_the_right_first_
+    without_shifting_x above) - rewrapping a fixed-size unbreakable word
+    to a wider box never shrinks it, so this exhausts the available room
+    rather than finding an exact fit, but must still use it rather than
+    silently accepting an avoidable overflow when room exists."""
+    draw = _measure_draw()
+    region = OcrTextRegion(text="x", x=100, y=50, width=20, height=12, confidence=90.0)
+    word = "Donaudampfschifffahrtsgesellschaft"
+
+    no_room_lines, no_room_font, _, no_room_offset = _fit_text(draw, word, region, max_height=1000)
+    assert draw.textlength(word, font=no_room_font) > region.width, (
+        "control fixture did not actually reproduce the still-too-wide-at-min-size case - "
+        "adjust the fixture, not the assertion"
+    )
+    assert no_room_offset == 0.0
+
+    lines, font, line_height, x_offset = _fit_text(
+        draw, word, region, max_height=1000, right_room=800
+    )
+    assert lines == [word]
+    assert x_offset == 0.0  # right_room alone is enough, no left shift needed
+
+
+def test_apply_shrinks_a_single_unbreakable_word_to_fit_a_manually_corrected_boxs_width(
+    tmp_path: Path,
+) -> None:
+    """End-to-end regression guard for the exact real-world scenario:
+    a `render_box` set by a correction UI (image_translate_cli/
+    review_server.py's browser page, or ui/image_correction_dialog.py) -
+    NOT the wide-open, never-corrected default - translated into a
+    single long word. Before this fix, the rendered text ignored
+    render_box's width entirely (only its height mattered) and could
+    draw far outside it; now it must stay within render_box, mirroring
+    test_apply_wraps_long_translation_instead_of_overflowing_box_width's
+    probe-strip technique."""
+    image = Image.new("RGB", (500, 200), "white")
+    image.save(tmp_path / "source.png")
+    source = tmp_path / "source.png"
+    output = tmp_path / "out.png"
+
+    original_region = OcrTextRegion(text="Short", x=20, y=20, width=60, height=30, confidence=95.0)
+    # A correction UI moved/resized this to a modest box elsewhere on the
+    # canvas - deliberately NOT tiny (a human dragging a resize handle a
+    # little, not down to the absolute minimum) so this also proves the
+    # fix isn't merely "always shrink to the floor".
+    corrected_box = OcrTextRegion(text="Short", x=200, y=100, width=110, height=40, confidence=95.0)
+    replacement = TextReplacement(
+        region=original_region, translated_text="HAUPTBUCH", render_box=corrected_box
+    )
+
+    BoxOverlayBackend().apply(str(source), [replacement], str(output))
+
+    result = Image.open(output).convert("RGB")
+    pixels = result.load()
+    # Probe strip well to the right of the CORRECTED box (not the
+    # original) - must stay pure background, no text leaking past the
+    # box the user actually set.
+    probe_pixels = [
+        pixels[x, y]
+        for x in range(corrected_box.x + corrected_box.width + 20, 480)
+        for y in range(corrected_box.y, corrected_box.y + corrected_box.height)
+    ]
+    assert all(p == (255, 255, 255) for p in probe_pixels), (
+        "expected no text pixels to the right of the manually corrected box - "
+        "a single-word translation overflowed its width"
+    )
+
+
 # --- _load_font(bold=) / _estimate_is_bold() (real user, 21.08.2026: a
 # real infographic uses a uniformly bold/semi-bold display typeface for
 # EVERY line - headline, section headers, even small body captions - but

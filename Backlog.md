@@ -5549,3 +5549,93 @@ bisherigen, mit `run_pdf_correction_job()` geteilten Entwurf abweichen
 ("Übernehmen" ersetzt die bestehende Übersetzung, analog zur PDF-
 Variante) und sollte erst mit Michael abgestimmt werden, bevor daran
 etwas geändert wird.
+
+## 27.08.2026 - Der eigentliche "HAUPTBUCH"-Fehler gefunden: eine manuell verkleinerte Box wurde beim Rendern nicht respektiert, weil ein einzelnes Wort gar nicht umgebrochen werden kann
+
+Fortsetzung desselben Tickets, nachdem der `obstacle_regions`-Fix vom
+selben Tag Michaels Symptom NICHT vollständig erklärte. Michael, nach
+Rückfrage: "Ich hatte alle Boxen manuell korrigiert, wie Du im
+Screenshot vom Browser Fenster siehst und diese Änderungen wurden aber
+nicht übernommen ... Wenn ich anwenden klicke sollte keine andere
+Routine dazwischen funken und noch etwas automatisch ändern." Mit zwei
+Screenshots belegt (Korrektur-Browser-Ansicht vs. das nach "Anwenden"
+tatsächlich gespeicherte Bild) - "total unterschiedlich ... in fast
+jeder Textbox".
+
+**Diagnoseweg (der eigentlich zum Fund führte):** Ein direkter
+Reproduktionstest mit dem echten Bild, dem echten PaddleOCR-Ergebnis
+und `CvInpaintingBackend` (das Rückschreibe-Backend, dessen visueller
+Stil - kein Hintergrundkasten, direkt auf den rekonstruierten
+Hintergrund gezeichnet - zu Michaels Screenshots passt) zeigte: ein
+unveränderter Korrektur-Durchlauf (keine Bearbeitung) rendert sauber.
+Ein simulierter manueller Edit mit einer SEHR kleinen Box (50x46) auch.
+Aber ein realistischerer, moderater manueller Edit (95x46 - ungefähr,
+was ein Ziehen am Grössenziehpunkt tatsächlich ergeben würde) rendert
+wieder genauso kaputt wie Michaels Screenshot - erst dieser dritte,
+gezielt nachgestellte Fall reproduzierte den echten Fehler.
+
+**Ursache:** `pipeline/images/inpainting.py::_fit_text()`s Schrumpf-
+Schleife prüfte bisher NUR die GESAMTHÖHE des umgebrochenen Textblocks
+gegen `max_height` - nie, ob die breiteste Zeile tatsächlich in
+`region.width` passt. Für ein einzelnes, nicht umbrechbares Wort (wie
+"HAUPTBUCH" - "LEDGER" übersetzt: kein Leerzeichen, `_wrap_text_to_
+width()` trennt Wörter grundsätzlich nie mitten durch, siehe dessen
+eigener Docstring) ist die Gesamthöhe IMMER nur eine Zeile - die
+Schleife brach deshalb sofort bei der aus der BOX-HÖHE abgeleiteten
+Startgrösse ab, völlig unabhängig davon, wie schmal die Box war. Die
+Box-BREITE hatte damit für ein Einzelwort schlicht keinerlei Einfluss
+auf die gerenderte Grösse - weder die ursprüngliche schmale
+OCR-Box noch Michaels manuell gesetzte.
+
+**Zwei Fixes, zusammen nötig:**
+
+1. `_fit_text()`s Schrumpf-Schleife prüft jetzt zusätzlich, ob die
+   breiteste Zeile (`draw.textlength()`) in `region.width` passt, und
+   schrumpft weiter (bis `_MIN_FONT_SIZE`), falls nicht - genau die
+   gleiche Behandlung, die vertikaler Überlauf schon immer bekam, jetzt
+   auch für horizontalen. Der bestehende "notfalls die Box seitlich
+   erweitern"-Mechanismus (`left_room`/`right_room`, 23.08.2026) bleibt
+   als letzter Ausweg erhalten, greift jetzt aber auch für ein
+   einzelnes zu breites Wort, nicht nur für umbrechbaren Mehrwort-Text.
+
+2. Alle drei `InpaintingBackend.apply()`-Implementierungen setzen
+   `left_room`/`right_room` jetzt auf 0, sobald `replacement.render_box`
+   gesetzt ist (also eine Korrektur-UI diese Box aktiv verändert hat).
+   Michaels eigentliche Forderung: eine manuell gesetzte Box ist eine
+   HARTE Obergrenze, keine Empfehlung - der automatische
+   "seitlich erweitern, um nicht zu klein zu werden"-Mechanismus bleibt
+   für NIE korrigierte Boxen (der ursprüngliche QA-Bericht "(12)"-Fall,
+   ein frei stehender Fusszeilen-Text ohne jede Korrektur) unverändert
+   bestehen, greift aber nicht mehr, sobald ein Mensch die Box bewusst
+   gesetzt hat - dann wird notfalls weiter geschrumpft oder der Überlauf
+   akzeptiert, aber nie mehr stillschweigend über die gesetzte Breite
+   hinaus vergrössert.
+
+Ohne Fix 1 hätte Fix 2 allein nicht geholfen (die Schrumpf-Schleife
+bricht ja schon vorher ab, bevor die Breiten-Erweiterung überhaupt
+erreicht wird) - erst beide zusammen ergeben das gewünschte Verhalten:
+schrumpfen wenn nötig, Überlauf akzeptieren wenn selbst das nicht
+reicht, aber Michaels Box nie eigenmächtig vergrössern.
+
+**Verifiziert:** Der reale 95x46-Fall von oben liefert nach dem Fix
+`font_size=14` statt vorher `font_size=36` und bleibt sichtbar innerhalb
+der Box statt über "Enthält:" hinweg zu laufen (Crop-Vergleich vor/nach
+geprüft). Neue Tests in `tests/test_image_inpainting.py`:
+`test_fit_text_shrinks_a_single_unbreakable_word_that_overflows_
+region_width`, `test_fit_text_widens_a_single_word_that_still_
+overflows_at_min_font_size` (der bestehende Erweiterungs-Mechanismus
+funktioniert auch für Einzelwörter weiter, wenn wirklich nötig),
+`test_apply_shrinks_a_single_unbreakable_word_to_fit_a_manually_
+corrected_boxs_width` (Ende-zu-Ende, Pixel-Sonde rechts der Box wie
+beim bestehenden Mehrwort-Test). Gesamter Testlauf (`tests/`, ohne
+`test_ui_images_mode.py`): 263 passed (vorher 260), 1 skipped - keine
+Regression in den bestehenden 49 (jetzt 49, unverändert plus 3 neue)
+Tests von `test_image_inpainting.py` oder den Backend-spezifischen
+Suiten (`test_image_cv_inpainting.py`, `test_image_gpu_inpainting.py`).
+
+**Offen/ehrlich:** Der 27.08.2026-`obstacle_regions`-Fix vom selben
+Ticket bleibt unverändert richtig und nötig (schützt vor Überlappung
+mit bekannten Nachbar-Regionen), war aber für Michaels konkretes
+"HAUPTBUCH"-Symptom nicht die vollständige Erklärung - erst dieser
+zweite, per echtem Reproduktionsversuch gefundene Fehler war es. Noch
+nicht durch Michael selbst am echten Fall bestätigt.
