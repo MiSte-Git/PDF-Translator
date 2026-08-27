@@ -31,10 +31,26 @@ import ui.image_job as image_job_module
 from pipeline.images.ocr import tesseract_available
 from pipeline.translation.base import TranslationResult
 from webapp import server as webapp_server
+from webapp import settings_store
 
 pytestmark = pytest.mark.skipif(not tesseract_available(), reason="Tesseract binary not installed")
 
 _FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+
+@pytest.fixture(autouse=True)
+def _isolated_settings_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """27.08.2026, Task #14: start_job() below now calls settings_store.save()
+    for real (see webapp/job_bridge.py's own comment on that call) - without
+    this, every test in this file that starts a job would write into the
+    REAL per-user config file (settings_store.config_dir(), e.g.
+    ~/.config/pdf-translator/settings.json on Linux) on whatever machine
+    runs this suite, exactly the leak tests/conftest.py's QSettings fixture
+    already prevents for the Qt app. Kept file-local (not in conftest.py)
+    because tests/test_webapp_settings_store.py's own test_config_dir_*
+    tests deliberately exercise config_dir()'s real platform branching - a
+    suite-wide patch there would break the tests meant to verify it."""
+    monkeypatch.setattr(settings_store, "config_dir", lambda: tmp_path / "webapp-config")
 
 
 class FakeProvider:
@@ -163,6 +179,83 @@ def test_start_job_runs_a_real_batch_end_to_end(
     assert file_entry["has_correctable_regions"] is True
     assert Path(file_entry["output"]).is_file()
     assert Path(file_entry["qa_report"]).is_file()
+
+
+def test_start_job_persists_form_state_for_the_next_session(
+    running_server: str, fake_deepl_credential: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """27.08.2026 regression guard - real user report, Backlog.md
+    27.08.2026, Michael: "Im Web View werden die Einstellungen der
+    vorigen Sitzung nicht gespeichert." Root cause: settings_store.save()
+    was never called anywhere in webapp/ - start_job() above now calls it
+    once a submitted request has passed every fail-fast check. Proves both
+    ends of the fix: the JSON file on disk (settings_store.load(), the
+    same function build_config() itself uses to prefill a NEW session's
+    form - i.e. what a page reload/app restart would actually see) AND
+    the live /api/config response reflect the just-submitted values
+    afterwards, without a second request or restart needed."""
+    monkeypatch.setattr(image_job_module, "build_provider", lambda name: FakeProvider())
+    source = tmp_path / "photo.png"
+    _build_image(source, "Hello")
+    output_dir = tmp_path / "out"
+
+    status, start_payload = _post_json(
+        f"{running_server}/api/jobs",
+        {
+            "source_paths": [str(source)],
+            "output_dir": str(output_dir),
+            "provider": "deepl",
+            "source_language": "EN",
+            "target_language": "FR",
+            "protected_terms": ["Acme", "Foo"],
+            "ocr_engine": "tesseract",
+            "inpainting_backend": "box_overlay",
+        },
+    )
+    assert status == 200
+    assert start_payload["ok"] is True
+    _poll_until_finished(running_server, start_payload["job_id"])
+
+    on_disk = settings_store.load()
+    assert on_disk["provider"] == "deepl"
+    assert on_disk["last_output_dir"] == str(output_dir)
+    assert on_disk["last_source_dir"] == str(source.parent)
+    assert on_disk["form"]["source_lang"] == "EN"
+    assert on_disk["form"]["target_lang"] == "FR"
+    assert on_disk["form"]["protected_terms"] == "Acme\nFoo"
+    assert on_disk["form"]["ocr_engine"] == "tesseract"
+    assert on_disk["form"]["inpainting_backend"] == "box_overlay"
+
+    status, config_payload = _get_json(f"{running_server}/api/config")
+    assert status == 200
+    assert config_payload["last_form_state"]["form"]["target_lang"] == "FR"
+    assert config_payload["last_form_state"]["last_output_dir"] == str(output_dir)
+
+
+def test_start_job_does_not_persist_a_rejected_request(
+    running_server: str, tmp_path: Path
+) -> None:
+    """The other half of the fix's own docstring claim ("a request that
+    gets rejected below never reaches here, so a typo'd form never
+    overwrites a good remembered one") - a request missing credentials
+    fails start_job()'s fail-fast checks BEFORE settings_store.save(), so
+    the on-disk file must stay exactly at DEFAULTS."""
+    source = tmp_path / "photo.png"
+    _build_image(source, "Hello")
+
+    status, payload = _post_json(
+        f"{running_server}/api/jobs",
+        {
+            "source_paths": [str(source)],
+            "output_dir": str(tmp_path / "out"),
+            "provider": "deepl",
+            "target_language": "FR",
+        },
+    )
+    assert status == 400
+    assert payload["ok"] is False  # no DEEPL_API_KEY set in this test
+
+    assert settings_store.load() == settings_store.DEFAULTS
 
 
 def test_start_job_enforces_checks_without_a_prior_analyze_call(

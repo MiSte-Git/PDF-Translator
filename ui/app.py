@@ -1068,12 +1068,25 @@ class MainWindow(QMainWindow):
 
         from ui.image_correction_dialog import ImageCorrectionDialog
 
+        # 26.08.2026 - see run_image_correction_job()'s matching
+        # docstring: regions the original job recognized but never
+        # translated (skipped, or a translatable=False layout obstacle)
+        # must still be protected as collision obstacles when this dialog
+        # re-renders, exactly like translate_image() itself protects them
+        # on the FIRST run - identity-based (`is`), same style
+        # translate_image.py's own obstacle_regions computation uses.
+        translated_region_ids = {id(replacement.region) for replacement in target.stats.replacements}
+        obstacle_regions = [
+            region for region in target.stats.regions if id(region) not in translated_region_ids
+        ]
+
         dialog = ImageCorrectionDialog(
             self.language,
             target.source_path,
             target.output_path,
             target.stats.replacements,
             inpainting_backend_name=self._job_inpainting_backend,
+            obstacle_regions=obstacle_regions,
             parent=self,
         )
         dialog.exec()

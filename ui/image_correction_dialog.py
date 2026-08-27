@@ -504,6 +504,7 @@ class ImageCorrectionDialog(QDialog):
         destination: Path,
         replacements: list[TextReplacement],
         inpainting_backend_name: str = "box_overlay",
+        obstacle_regions: list[OcrTextRegion] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -512,6 +513,13 @@ class ImageCorrectionDialog(QDialog):
         self.destination = Path(destination)
         self.replacements = replacements
         self.inpainting_backend_name = inpainting_backend_name
+        # 26.08.2026 - regions the ORIGINAL job recognized but never
+        # translated (skipped, or a translatable=False layout obstacle -
+        # see run_image_correction_job()'s matching docstring). Passed
+        # straight through to that function in _apply() - never shown as
+        # an editable box on the canvas, only protects real, still-visible
+        # content from being grown over when this dialog re-renders.
+        self.obstacle_regions = obstacle_regions or []
         self.last_result: ImageJobResult | None = None
         self.last_corrected_replacements: list[TextReplacement] | None = None
         """Set by _apply() to the exact replacements list a successful
@@ -892,6 +900,7 @@ class ImageCorrectionDialog(QDialog):
             result = run_image_correction_job(
                 self.source, self.destination, corrected_replacements,
                 inpainting_backend_name=self.inpainting_backend_name,
+                obstacle_regions=self.obstacle_regions,
             )
         except Exception as exc:  # noqa: BLE001 - surfaced to the user, not silently swallowed
             self.status_label.setText(t("image_correction.failed", error=str(exc)))

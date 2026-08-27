@@ -85,7 +85,7 @@ def start_correction(job_id: str, file_index: int) -> dict[str, Any]:
     lookup = job_bridge.get_correctable_file(job_id, file_index)
     if isinstance(lookup, dict):
         return lookup  # {"ok": False, "errors": [...]}
-    source_path, destination_path, replacements, inpainting_backend_name = lookup
+    source_path, destination_path, replacements, inpainting_backend_name, obstacle_regions = lookup
 
     key = (job_id, file_index)
     with _CORRECTIONS_LOCK:
@@ -114,6 +114,7 @@ def start_correction(job_id: str, file_index: int) -> dict[str, Any]:
                         destination_path,
                         edited,
                         inpainting_backend_name=inpainting_backend_name,
+                        obstacle_regions=obstacle_regions,
                     )
                 except Exception as exc:  # noqa: BLE001 - surfaced via status polling, not raised across threads
                     state.status = "failed"

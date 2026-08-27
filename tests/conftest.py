@@ -28,6 +28,25 @@ two-argument constructor defaults to NativeFormat, which on Linux happens
 to also be an .ini-style file but is a DIFFERENT Format enum value with
 its own, separately-configured path; redirecting only IniFormat (a natural
 first guess) silently does nothing for it.
+
+autouse=True + function scope redirects EVERY
+QSettings("PDF-Translator", "Document Translator") construction, in every
+test file, to a fresh temp directory for the duration of that one test -
+no test ever sees another test's persisted state, and the real
+per-machine settings file used by the actual application is never touched
+by the test suite at all. QSettings.setPath() must target Format.
+NativeFormat specifically (not IniFormat) - ui/app.py's QSettings(org, app)
+two-argument constructor defaults to NativeFormat, which on Linux happens
+to also be an .ini-style file but is a DIFFERENT Format enum value with
+its own, separately-configured path; redirecting only IniFormat (a natural
+first guess) silently does nothing for it.
+
+(webapp/settings_store.py's own isolation - Task #14, 27.08.2026 - lives
+as a file-local autouse fixture in tests/test_webapp_jobs_api.py instead
+of here: unlike QSettings, tests/test_webapp_settings_store.py's own
+test_config_dir_* tests deliberately exercise config_dir()'s real
+platform branching, so a suite-wide patch of that one function here would
+break exactly the tests meant to verify it.)
 """
 from __future__ import annotations
 

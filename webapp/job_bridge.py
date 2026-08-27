@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from pipeline.images.inpainting import TextReplacement
+from pipeline.images.ocr import OcrTextRegion
 from pipeline.registry import (
     INPAINTING_BACKEND_FACTORIES,
     OCR_ENGINE_FACTORIES,
@@ -253,6 +254,36 @@ def start_job(body: dict[str, Any]) -> dict[str, Any]:
     max_chars = body.get("max_chars_per_run")
     max_chars = int(max_chars) if max_chars else settings_store.load().get("max_chars", DEFAULT_MAX_CHARS_PER_RUN)
 
+    # 27.08.2026 - real user report, Backlog.md 27.08.2026: "Im Web View
+    # werden die Einstellungen der vorigen Sitzung nicht gespeichert."
+    # build_config() above has always LOADED settings_store.load() to
+    # prefill the form (see its own docstring) - nothing ever called
+    # settings_store.save() to put anything back, on ANY form change or
+    # job start, in this module OR webapp/static/app.js. This is that
+    # missing write side: once every validation above has passed (a
+    # request that gets rejected below never reaches here, so a typo'd
+    # form never overwrites a good remembered one), persist exactly the
+    # fields ui/app.py::_persist_form_state() persists for the Qt app -
+    # same DEFAULTS shape settings_store.py already documents. Chosen to
+    # fire on a real job start rather than on every keystroke/field
+    # change (no dedicated PATCH endpoint exists, and this is the moment
+    # ui/app.py's own closeEvent()-based persistence most closely mirrors:
+    # values the user actually committed to, not a mid-edit draft).
+    settings_store.save(
+        {
+            "provider": request.provider,
+            "last_output_dir": str(output_dir),
+            "last_source_dir": str(Path(request.source_paths[0]).parent) if request.source_paths else "",
+            "form": {
+                "source_lang": request.source_language or "",
+                "target_lang": request.target_language,
+                "protected_terms": "\n".join(request.protected_terms),
+                "ocr_engine": request.ocr_engine,
+                "inpainting_backend": request.inpainting_backend,
+            },
+        }
+    )
+
     with _JOBS_LOCK:
         if _ACTIVE_JOB_ID is not None and _JOBS[_ACTIVE_JOB_ID].status == "running":
             return {"ok": False, "errors": ["Ein Lauf ist bereits aktiv."]}
@@ -455,17 +486,33 @@ def job_qa_report(job_id: str, file_path: str) -> dict[str, Any]:
 
 def get_correctable_file(
     job_id: str, file_index: int
-) -> tuple[Path, Path, list[TextReplacement], str] | dict[str, Any]:
+) -> tuple[Path, Path, list[TextReplacement], str, list[OcrTextRegion]] | dict[str, Any]:
     """Looks up file `file_index` of job `job_id`'s stored result and
     returns (source_path, output_path, replacements, inpainting_backend
-    name) if that file actually has correctable regions, else an
-    {"ok": False, "errors": [...]} dict - review_bridge.start_correction()
-    uses this instead of reaching into _JOBS directly. `replacements` is
-    copied out of the stored ImageJobResult (list(...) below) so a
-    concurrent correction round on a DIFFERENT file of the same job can't
-    ever see a partially-mutated list - each file's replacements are only
-    ever replaced wholesale, never edited in place, but this keeps that
-    guarantee explicit rather than relying on it.
+    name, obstacle_regions) if that file actually has correctable
+    regions, else an {"ok": False, "errors": [...]} dict -
+    review_bridge.start_correction() uses this instead of reaching into
+    _JOBS directly. `replacements` is copied out of the stored
+    ImageJobResult (list(...) below) so a concurrent correction round on
+    a DIFFERENT file of the same job can't ever see a partially-mutated
+    list - each file's replacements are only ever replaced wholesale,
+    never edited in place, but this keeps that guarantee explicit rather
+    than relying on it.
+
+    `obstacle_regions` (26.08.2026, see run_image_correction_job()'s
+    matching docstring for the real bug this fixes - Backlog.md
+    26.08.2026, "HAUPTBUCH" rendered oversized/overlapping after a
+    correction round): every region in `target.stats.regions` that never
+    became one of `target.stats.replacements` - recognized by OCR but
+    skipped (low confidence/outlier height) or, since today, a
+    translatable=False layout obstacle. Computed the same identity-based
+    way translate_image() itself computes it at the end of a normal run,
+    and the same way ui/app.py::_open_image_correction_dialog() now also
+    computes it for the Qt dialog - review_bridge.start_correction()
+    passes this through to run_image_correction_job() so a webapp
+    correction round protects the same still-visible content the
+    original translation run did, instead of silently losing that
+    protection.
     """
     with _JOBS_LOCK:
         job = _JOBS.get(job_id)
@@ -483,11 +530,16 @@ def get_correctable_file(
         target = results[file_index]
         if not target.stats.replacements:
             return {"ok": False, "errors": ["Dieses Bild hat keine korrigierbaren Regionen."]}
+        translated_region_ids = {id(replacement.region) for replacement in target.stats.replacements}
+        obstacle_regions = [
+            region for region in target.stats.regions if id(region) not in translated_region_ids
+        ]
         return (
             target.source_path,
             target.output_path,
             list(target.stats.replacements),
             job.request.inpainting_backend,
+            obstacle_regions,
         )
 
 

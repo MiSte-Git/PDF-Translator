@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Callable
 
 from pipeline.images.inpainting import TextReplacement
+from pipeline.images.ocr import OcrTextRegion
 from pipeline.images.translate_image import (
     DEFAULT_MAX_HEIGHT_RATIO,
     DEFAULT_MIN_OCR_CONFIDENCE,
@@ -155,6 +156,7 @@ def run_image_correction_job(
     destination: Path,
     replacements: list[TextReplacement],
     inpainting_backend_name: str = "box_overlay",
+    obstacle_regions: list[OcrTextRegion] | None = None,
 ) -> ImageJobResult:
     """Re-render a Bildübersetzung from a corrected list of TextReplacement
     (see pipeline.images.translate_image.build_corrected_replacements()) -
@@ -182,6 +184,33 @@ def run_image_correction_job(
     translated_text) - see ui/app.py for why that lets the correction
     dialog call this directly on the UI thread instead of via a
     background QThreadPool worker.
+
+    `obstacle_regions` (26.08.2026, was unconditionally `None` before -
+    see this parameter's own history below) - regions recognized by OCR
+    but never translated (low-confidence/outlier-height skips, and, since
+    today, pipeline.images.ocr.PaddleOcrEngine's `translatable=False`
+    layout blocks kept only as collision obstacles - see OcrTextRegion.
+    translatable's docstring). Real user report, Backlog.md 26.08.2026,
+    "Spirit - Soul - Meatsuit.jpg": a correction round on that image
+    rendered a badly oversized, overlapping "HAUPTBUCH" where the
+    original translation run had rendered it cleanly - traced to exactly
+    this parameter having ALWAYS been passed as None here (see the old
+    docstring text this replaces: "Pass None ... e.g.
+    run_image_correction_job()'s direct apply() call, whose `replacements`
+    list is already the complete, user-approved final set"). That
+    assumption held while the only non-translated regions were rare
+    confidence/height-outlier skips - it silently broke the day a
+    deliberate, ALWAYS-present obstacle (the "image"-block's own reserved
+    area around Spirit - Soul - Meatsuit.jpg's scattered list) was added:
+    without it, _vertical_room_below()/_horizontal_room() see "no
+    neighbour there" for space that is very much still occupied, and can
+    let a region's shrink-to-fit loop claim far more room than is really
+    free (`_NO_NEIGHBOR_HEIGHT_ALLOWANCE`). Every caller (ui/app.py's
+    ImageCorrectionDialog, webapp/review_bridge.py) now computes this the
+    same way translate_image() itself does - the regions in the ORIGINAL
+    job's `stats.regions` that never became a replacement - and passes it
+    through. Kept OUT of the review UI itself (never shown as an editable
+    box there) - only used for this final re-render step.
     """
     source = Path(source)
     destination = Path(destination)
@@ -192,11 +221,19 @@ def run_image_correction_job(
 
     inpainting_backend = build_inpainting_backend(inpainting_backend_name)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    inpainting_backend.apply(str(source), replacements, str(destination))
+    inpainting_backend.apply(
+        str(source), replacements, str(destination), obstacle_regions=obstacle_regions
+    )
 
+    # obstacle_regions folded into `regions` too (26.08.2026), not just
+    # passed to apply() above - so a SECOND correction round (this
+    # result's own `stats` becomes the next round's starting point, e.g.
+    # webapp/job_bridge.py::apply_correction_result()'s splice) can
+    # recompute the same obstacle set again instead of silently losing it
+    # after just one round.
     stats = ImageTranslationStats(
         translated=len(replacements),
-        regions=[replacement.region for replacement in replacements],
+        regions=[replacement.region for replacement in replacements] + list(obstacle_regions or []),
         replacements=replacements,
     )
 

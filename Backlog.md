@@ -5424,3 +5424,128 @@ tatsächliche Bild und das echte, gespeicherte PaddleOCR-Ergebnis
 (nicht Teil der automatisierten Suite). `tests/test_image_ocr.py`
 allein: 43 passed (vorher 42). Gesamter Testlauf (`tests/`, ohne
 `test_ui_images_mode.py`): 255 passed (vorher 254), 1 skipped.
+
+## 27.08.2026 - Web-View-Einstellungen wurden nie gespeichert (nur gelesen); Korrektur-Runde verlor Kollisionsschutz für nicht übersetzte Regionen
+
+Michaels Meldung, mit zwei Screenshots und einem echten QA-Bericht
+belegt: "Im Web View werden die Einstellungen der vorigen Sitzung nicht
+gespeichert. Ist das noch machbar?" und: "Nachdem ich die Felder und
+den Text korrigiert habe, wurde zwar Bild gespeichert, aber nicht so
+wie ich es im Browser korrigiert hatte." Zwei getrennte, echte Bugs,
+in dieser Reihenfolge untersucht und behoben.
+
+**Bug 1 - Einstellungen wurden nur gelesen, nie geschrieben:**
+`webapp/settings_store.py::load()` wird zwar an zwei Stellen aufgerufen
+(`build_config()` zum Vorbefüllen von `/api/config`, und als
+`max_chars`-Fallback in `start_job()`) - `save()` dagegen wurde im
+gesamten Code (`webapp/*.py` und `webapp/static/app.js`, per grep
+geprüft) an KEINER Stelle aufgerufen. Die Schreibseite fehlte schlicht
+komplett, seit dieses Modul existiert - kein Regressions-, sondern ein
+von Anfang an unvollständiges Feature.
+
+Behoben in `webapp/job_bridge.py::start_job()`: sobald eine
+Job-Anfrage alle serverseitigen Prüfungen bestanden hat (Zugangsdaten,
+OCR-Engine, Rückschreibe-Methode, Validierung - siehe RoadMap.md-
+Leitprinzip), werden genau die Felder gespeichert, die
+`ui/app.py::_persist_form_state()` für die Qt-App auch immer schon
+persistiert hat (Anbieter, Ausgangs-/Zielordner, Ausgangs-/Zielsprache,
+geschützte Begriffe, OCR-Engine, Rückschreibe-Methode). Bewusst beim
+tatsächlichen Start eines Laufs statt bei jeder Tastatureingabe -
+es gibt keinen eigenen Endpunkt für Zwischenstände, und ein Lauf-Start
+ist der Moment, der `closeEvent()`s eigenem "was der Nutzer wirklich
+übernommen hat" am nächsten kommt. Eine abgelehnte Anfrage (z.B.
+fehlender API-Schlüssel) erreicht diesen Code-Pfad nicht - ein
+Tippfehler im Formular überschreibt also nie eine zuvor gespeicherte,
+funktionierende Einstellung.
+
+Da beim Testen dieser Änderung auffiel, dass mehrere bestehende Tests
+in `tests/test_webapp_jobs_api.py` durch diesen neuen echten
+`save()`-Aufruf plötzlich in die ECHTE Konfigurationsdatei des
+jeweiligen Testrechners geschrieben hätten (z.B.
+`~/.config/pdf-translator/settings.json` unter Linux) - genau die Art
+Verschmutzung, die `tests/conftest.py`s bestehende QSettings-Isolation
+für die Qt-App schon verhindert -, wurde eine gleichwertige, auf
+`tests/test_webapp_jobs_api.py` begrenzte Isolation ergänzt
+(`config_dir()` wird pro Test auf ein `tmp_path`-Verzeichnis
+umgeleitet). Bewusst NICHT in `tests/conftest.py` selbst, weil
+`tests/test_webapp_settings_store.py`s eigene `test_config_dir_*`-Tests
+genau die echte Plattform-Fallunterscheidung in `config_dir()` prüfen
+sollen - eine testweite Umleitung dort hätte diese Tests kaputt
+gemacht.
+
+**Bug 2 - Korrektur-Runde rendert anders als im Browser gesehen
+("HAUPTBUCH"-Screenshot):** `pipeline.images.inpainting.
+InpaintingBackend.apply()` bekommt seit dem 22.08.2026 einen
+`obstacle_regions`-Parameter (Regionen, die nicht neu gezeichnet
+werden, deren Originalpixel aber noch sichtbar sind und deshalb beim
+Größerwerden einer benachbarten Übersetzung respektiert werden müssen -
+siehe `_vertical_room_below()`/`_horizontal_room()`). Beim
+ursprünglichen Übersetzungslauf wird das schon korrekt befüllt
+(`translate_image()`), aber `ui/image_job.py::run_image_correction_job()`
+- die Funktion, die JEDE Korrektur-Runde tatsächlich rendert, sowohl im
+Qt-Dialog (`ui/image_correction_dialog.py`) als auch im neuen
+Web-View-Pfad (`webapp/review_bridge.py`) - hat diesen Parameter beim
+`apply()`-Aufruf noch NIE weitergereicht. Das war bislang folgenlos,
+weil eine Korrektur-Runde meist keine eigenen Hindernis-Regionen hatte
+- seit dem gerade erst ausgelieferten Listen-Übersetzungs-Fix (Eintrag
+vom 26.08.2026, "Buch in der Kugel") hat aber JEDES Bild mit einem
+solchen Listen-Block jetzt einen dauerhaften, unübersetzten
+Hindernis-Block ("image"-Label) - genau der Fall, den Michaels
+"HAUPTBUCH"-Bild betrifft.
+
+Behoben an allen drei Stellen: `ui/image_job.py::run_image_correction_
+job()` reicht `obstacle_regions` jetzt an `apply()` durch und faltet sie
+zusätzlich in das zurückgegebene `stats.regions`, damit eine ZWEITE
+Korrektur-Runde denselben Schutz nicht wieder verliert.
+`ui/image_correction_dialog.py` und `ui/app.py::_open_image_correction_
+dialog()` berechnen die Hindernis-Regionen genau wie
+`translate_image()` selbst (identitätsbasiert: alles in `stats.regions`,
+was nicht in `stats.replacements` vorkommt) und reichen sie durch.
+`webapp/job_bridge.py::get_correctable_file()` liefert sie jetzt als
+fünftes Tupel-Element, `webapp/review_bridge.py::start_correction()`
+reicht sie an `run_image_correction_job()` weiter.
+
+**Ehrlich dazu gesagt, statt es zu verschweigen:** Eine Nachstellung mit
+dem echten Bild und dem echten, gespeicherten PaddleOCR-Ergebnis (LEDGER
+→HAUPTBUCH, unverändertes `render_box`) zeigte MIT und OHNE
+`obstacle_regions` keinen sichtbaren Unterschied - der Fix ist also
+real und durch eigene Tests belegt, erklärt aber vermutlich nicht
+allein das exakte Erscheinungsbild in Michaels Screenshot. Eine zweite
+Nachstellung, bei der zusätzlich die `render_box` der LEDGER-Region
+künstlich vergrössert wurde (simuliert ein Ziehen am Grössenziehpunkt,
+wie Michael ihn tatsächlich benutzt), erzeugte ein deutlich
+grösseres, über den Rand der Grafik hinausragendes "HAUPTBUCH" mit
+sichtbarem Hintergrund-Rechteck - eine teilweise, aber nicht exakte
+Übereinstimmung mit dem gemeldeten Bild. Vermutung: eine Kombination
+aus dem jetzt behobenen `obstacle_regions`-Fehlen UND dem inhärenten
+Verhalten von `_fit_text()` (wählt die grösstmögliche, noch passende
+Schriftgrösse für die vergrösserte Box) plus `BoxOverlayBackend`s
+Hintergrund-erst-dann-Text-Vorgehen bei einer stark vergrösserten Box -
+letzteres wäre kein Bug, sondern erwartetes Verhalten bei einer sehr
+grossen Handkorrektur, aber noch nicht abschliessend an Michaels
+genauem Fall verifiziert.
+
+**Getestet:** `tests/test_image_correction_job.py`, drei neue Tests -
+`test_correction_job_without_obstacle_regions_can_overwrite_a_real_
+neighbour` (belegt den alten Fehler), `test_correction_job_passes_
+obstacle_regions_through_and_protects_a_real_neighbour` (belegt den
+Fix), `test_correction_job_folds_obstacle_regions_into_the_returned_
+stats_regions` (belegt die Weitergabe an eine zweite Korrektur-Runde).
+`tests/test_webapp_jobs_api.py`, zwei neue Tests -
+`test_start_job_persists_form_state_for_the_next_session` (belegt
+Bug 1s Fix end-to-end über echte HTTP-Aufrufe, inklusive `/api/config`
+danach), `test_start_job_does_not_persist_a_rejected_request` (belegt,
+dass eine abgelehnte Anfrage nichts überschreibt). Gesamter Testlauf
+(`tests/`, ohne `test_ui_images_mode.py`): 260 passed (vorher 255),
+1 skipped.
+
+**Noch offen, aus derselben Meldung:** Font-Editierung im Korrektur-
+Browser-Fenster (Familie/Stil) fehlt weiterhin - noch nicht begonnen,
+vermutlich ein eigenes, grösseres Thema wie schon die
+Font-Erkennung selbst. Michaels Vorschlag, die Korrektur nicht das
+Original überschreiben zu lassen, sondern als separate Datei zu
+speichern, ist bewusst noch nicht umgesetzt - das würde vom
+bisherigen, mit `run_pdf_correction_job()` geteilten Entwurf abweichen
+("Übernehmen" ersetzt die bestehende Übersetzung, analog zur PDF-
+Variante) und sollte erst mit Michael abgestimmt werden, bevor daran
+etwas geändert wird.
