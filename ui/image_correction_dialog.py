@@ -14,10 +14,32 @@ no OCR/provider/network call involved.
 Deliberately SIMPLER than PdfCorrectionDialog: plain-text editing only (a
 QPlainTextEdit, no rich-text toolbar/shortcuts) - raster-drawn image text
 via PIL's ImageDraw.text() has no bold/italic/underline concept the way a
-PDF's rich-text box does, so there is no formatting to preserve or toggle
-here (see pipeline.images.translate_image.build_corrected_replacements()'s
-docstring). Also no page column - a single image has no page concept, so
-the table is just Original/Übersetzung.
+PDF's rich-text box does, so there is no INLINE (per-character) formatting
+to preserve or toggle here. Also no page column - a single image has no
+page concept, so the table is just Original/Übersetzung.
+
+Font size/bold/alignment (28.08.2026, same day as pipeline.images.
+inpainting.TextReplacement's render_font_size/render_bold/render_centered
+fields - real user report, Backlog.md 28.08.2026: "Wenn ich etwas
+korrigiere, muss es auch genauso korrigiert werden wie ich es im Viewer
+sehe.") ARE now editable here, per box - self.font_size_spin/bold_button/
+centered_button below, one set shared by whichever row is currently active
+(loaded into self.editor), exactly like the editor itself. These are WHOLE-
+BOX choices, not per-character rich text (still no bold-just-one-word), so
+they don't contradict the paragraph above - "no formatting" always meant
+"no inline formatting", never "the whole box's size/weight/alignment can't
+be changed at all". Before this date, _ResizableRegionItem.paint()'s live
+preview drew every box's translated-text preview unconditionally centered
+(Qt.AlignmentFlag.AlignCenter, regardless of any per-box state, because
+there was none) while the real renderer had no alignment concept at all -
+so the preview not only couldn't be trusted for alignment, it actively
+lied about it for every box. See _ResizableRegionItem.paint()'s own
+updated docstring for the fix, and pipeline.images.translate_image.
+build_corrected_replacements()'s edited_font_size/edited_bold/
+edited_centered docstring for the tri-state ("untouched this round" vs.
+"explicitly cleared back to auto" vs. "explicit new value") contract
+_apply() below now feeds from self._edited_font_size/_edited_bold/
+_edited_centered.
 
 A user testing the OCR-driven box placement (see Backlog.md 18.08.2026's
 three-layer fix in pipeline/images/ocr.py and pipeline/images/
@@ -44,10 +66,10 @@ from PySide6.QtGui import QBrush, QColor, QFontMetricsF, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QGraphicsItem, QGraphicsRectItem, QGraphicsScene,
     QGraphicsView, QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit, QPushButton,
-    QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from pipeline.images.inpainting import TextReplacement
+from pipeline.images.inpainting import TextReplacement, estimated_font_size
 from pipeline.images.ocr import OcrTextRegion
 from pipeline.images.translate_image import build_corrected_replacements
 from ui.i18n import LanguageManager
@@ -103,9 +125,32 @@ size, which would make it invisible and unrecoverable without the reset
 button."""
 _MIN_PREVIEW_FONT_SIZE = 5.0
 _MAX_PREVIEW_FONT_SIZE = 18.0
+"""Only the FALLBACK now (27.08.2026, see _ResizableRegionItem's
+`font_size_px` constructor param) - used only for a manually added box
+(ImageCorrectionDialog._on_new_box_drawn(), no OCR region to estimate a
+real font size from). Real user report, Backlog.md 27.08.2026 (WebViewer
+round 3, then confirmed present here too): this preview used to compute
+its OWN font size from half the box's height, hard-capped at 18pt with
+no relation whatsoever to pipeline.images.inpainting.estimated_font_size()
+(the SAME OCR-line-height-based estimate the real renderer and (since
+26.08.2026) review_server.py's WebViewer both start from) - so a big
+title (estimated ~48px in the real render) always looked capped-small
+here, "der Font ist noch sehr schlecht". Every box built FROM a real
+OcrTextRegion now passes its real estimate in instead."""
 _INACTIVE_PEN_COLOR = QColor(220, 30, 30)
 _ACTIVE_PEN_COLOR = QColor(30, 140, 230)
 _FILL_COLOR = QColor(220, 30, 30, 40)
+
+_MIN_FONT_SIZE_SPIN = 1
+_MAX_FONT_SIZE_SPIN = 9999
+"""Range for ImageCorrectionDialog.font_size_spin (28.08.2026). No hard
+tie to pipeline.images.inpainting._MIN_FONT_SIZE/_MAX_FONT_SIZE (9/48) on
+purpose - those bound the AUTO-ESTIMATE only; a deliberately human-chosen
+render_font_size is passed straight through as _fit_text()'s `start_size`
+and is free to ask for a much bigger headline than any auto-estimate would
+ever guess (it can still shrink further from there if it doesn't fit the
+box - see _fit_text()'s own docstring). This range is just wide enough to
+never get in the way, not a claim about what looks good."""
 
 
 class _ResizableRegionItem(QGraphicsRectItem):
@@ -135,6 +180,10 @@ class _ResizableRegionItem(QGraphicsRectItem):
         text: str = "",
         on_changed=None,
         on_selected=None,
+        font_size_px: float | None = None,
+        font_size_override: int | None = None,
+        bold: bool = False,
+        centered: bool = False,
     ) -> None:
         super().__init__(0, 0, width, height)
         self.row = row
@@ -142,6 +191,30 @@ class _ResizableRegionItem(QGraphicsRectItem):
         self._show_preview = True
         self._on_changed = on_changed
         self._on_selected = on_selected
+        # 27.08.2026 - see _MAX_PREVIEW_FONT_SIZE's own updated docstring:
+        # the real, OCR-line-height-based estimate for this region
+        # (pipeline.images.inpainting.estimated_font_size(replacement.region))
+        # when the caller has one, None for a manually added box that has
+        # no underlying OcrTextRegion to estimate from - paint() falls back
+        # to the old box-height heuristic only in that case.
+        self._font_size_px = font_size_px
+        # 28.08.2026 - the human-set overrides ImageCorrectionDialog now
+        # tracks per row (self._row_font_size/_row_bold/_row_centered),
+        # mirrored into this item by set_font_size_override()/set_bold()/
+        # set_centered() every time that row's control changes AND on
+        # construction/_load_row() so a box built from an already-corrected
+        # replacement (render_box/render_font_size/... from an earlier
+        # round, see the constructor loop in ImageCorrectionDialog.__init__)
+        # starts out showing exactly that, not the plain auto-estimate.
+        # `font_size_override` (None = no override, use `font_size_px`/the
+        # box-height fallback below exactly like before this date) is
+        # deliberately a SEPARATE field from `font_size_px` rather than
+        # overwriting it - `font_size_px` stays the true OCR-derived
+        # estimate so clearing the override (the "Automatisch" button) can
+        # fall back to it without the dialog needing to re-supply it.
+        self._font_size_override = font_size_override
+        self._bold = bold
+        self._centered = centered
         self._resizing = False
         self._resize_start_scene_pos: QRectF | None = None
         self._resize_start_rect: QRectF | None = None
@@ -184,6 +257,42 @@ class _ResizableRegionItem(QGraphicsRectItem):
         if show == self._show_preview:
             return
         self._show_preview = show
+        self.update()
+
+    def set_font_size_override(self, size: int | None) -> None:
+        """Update the live PREVIEW's font size (see paint()) - called from
+        ImageCorrectionDialog._on_font_size_changed()/_reset_active_font_size()
+        every time the active row's font-size spinbox changes or is reset
+        to "Automatisch" (28.08.2026, see this class's constructor
+        docstring). `None` (also this item's own construction default)
+        means "no override" - paint() falls back to `font_size_px` (the
+        real OCR estimate) or, lacking that, the old box-height guess,
+        exactly the pre-28.08.2026 behaviour."""
+        if size == self._font_size_override:
+            return
+        self._font_size_override = size
+        self.update()
+
+    def set_bold(self, bold: bool) -> None:
+        """Update the live PREVIEW's font weight (see paint()) - called
+        from ImageCorrectionDialog._on_bold_toggled() every time the
+        active row's "Fett" button is toggled (28.08.2026)."""
+        if bold == self._bold:
+            return
+        self._bold = bold
+        self.update()
+
+    def set_centered(self, centered: bool) -> None:
+        """Update the live PREVIEW's horizontal alignment (see paint()) -
+        called from ImageCorrectionDialog._on_centered_toggled() every
+        time the active row's "Zentriert" button is toggled (28.08.2026).
+        `False` (also this item's own construction default) draws left-
+        aligned, matching what the real renderer has always done and what
+        every box drew here too BEFORE this date, once this fix replaced
+        paint()'s old unconditional Qt.AlignmentFlag.AlignCenter."""
+        if centered == self._centered:
+            return
+        self._centered = centered
         self.update()
 
     def set_active(self, active: bool) -> None:
@@ -275,12 +384,35 @@ class _ResizableRegionItem(QGraphicsRectItem):
         try:
             painter.setClipRect(rect)
             font = painter.font()
-            size = max(_MIN_PREVIEW_FONT_SIZE, min(_MAX_PREVIEW_FONT_SIZE, rect.height() * 0.5))
+            # 28.08.2026 - a human-set size override (self.
+            # _font_size_override, see set_font_size_override()'s
+            # docstring) now takes priority over both the real OCR
+            # estimate and the box-height fallback below, exactly
+            # mirroring pipeline.images.inpainting.TextReplacement.
+            # render_font_size overriding the auto-estimate in the real
+            # renderer (see that field's docstring) - the whole point
+            # being that this preview and the real render start from the
+            # SAME number. Below it, unchanged from 27.08.2026: start from
+            # the REAL estimate (see _MAX_PREVIEW_FONT_SIZE's own updated
+            # docstring) when this box has one; only a manually added box
+            # (no OcrTextRegion behind it, and never explicitly sized by
+            # hand either) falls back to the old box-height-derived guess.
+            if self._font_size_override is not None:
+                size = max(_MIN_PREVIEW_FONT_SIZE, float(self._font_size_override))
+            elif self._font_size_px is not None:
+                size = max(_MIN_PREVIEW_FONT_SIZE, self._font_size_px)
+            else:
+                size = max(_MIN_PREVIEW_FONT_SIZE, min(_MAX_PREVIEW_FONT_SIZE, rect.height() * 0.5))
+            font.setBold(self._bold)
             # Simple shrink-to-fit, mirroring (loosely - this is a fast
             # canvas PREVIEW, not the actual PIL rendering) pipeline.images.
             # inpainting._fit_text()'s wrap-and-shrink idea: try
             # progressively smaller sizes until the word-wrapped block's
-            # measured height fits inside the box.
+            # measured height fits inside the box. Runs even for an
+            # explicit override - exactly like the real renderer's
+            # start_size, a human-chosen size is a STARTING point, not a
+            # promise to overflow the box rather than shrink (see
+            # pipeline.images.inpainting._fit_text()'s own docstring).
             while size > _MIN_PREVIEW_FONT_SIZE:
                 font.setPointSizeF(size)
                 metrics = QFontMetricsF(font)
@@ -293,8 +425,34 @@ class _ResizableRegionItem(QGraphicsRectItem):
             font.setPointSizeF(size)
             painter.setFont(font)
             painter.setPen(QPen(self.pen().color()))
+            # 28.08.2026, real user report, Backlog.md 28.08.2026: "Wenn
+            # ich etwas korrigiere, muss es auch genauso korrigiert werden
+            # wie ich es im Viewer sehe." Before this date this was an
+            # UNCONDITIONAL Qt.AlignmentFlag.AlignCenter, regardless of
+            # this box's own state (there was none) and regardless of what
+            # the real renderer did (nothing - it had no alignment concept
+            # at all until pipeline.images.inpainting._draw_fitted_text()'s
+            # `centered` parameter, same day) - every preview lied about
+            # alignment, and the one hard-coded case it happened to render
+            # correctly (centered) was itself never an available choice, it
+            # was every box, always, whether the user wanted that or not.
+            # AlignTop (new here too, not just the H-alignment half) rather
+            # than AlignCenter's vertical centering - the real renderer has
+            # always drawn each wrapped line starting at `region.y` and
+            # stacking downward (pipeline.images.inpainting.
+            # _draw_fitted_text(): `y = region.y`, then `y += line_height`
+            # per line), never vertically centered within the box, so only
+            # AlignTop matches it; AlignVCenter here would reintroduce the
+            # exact same "preview shows something the render doesn't"
+            # mismatch this whole fix exists to close, just on the other
+            # axis.
+            horizontal_flag = (
+                Qt.AlignmentFlag.AlignHCenter if self._centered else Qt.AlignmentFlag.AlignLeft
+            )
             painter.drawText(
-                rect, int(Qt.TextFlag.TextWordWrap) | int(Qt.AlignmentFlag.AlignCenter), self._text
+                rect,
+                int(Qt.TextFlag.TextWordWrap) | int(Qt.AlignmentFlag.AlignTop) | int(horizontal_flag),
+                self._text,
             )
         finally:
             painter.restore()
@@ -536,6 +694,53 @@ class ImageCorrectionDialog(QDialog):
         text. Only ever overwritten by _flush_active_row() for a row
         _dirty actually contains - mirrors PdfCorrectionDialog._row_html."""
         self._dirty: set[int] = set()
+
+        self._row_font_size: list[int | None] = [
+            replacement.render_font_size for replacement in replacements
+        ]
+        self._row_bold: list[bool] = [bool(replacement.render_bold) for replacement in replacements]
+        self._row_centered: list[bool] = [replacement.render_centered for replacement in replacements]
+        """Per-row CURRENT font-size/bold/centered choice, index-aligned
+        with `replacements` (28.08.2026, see the module docstring's
+        matching entry) - mirror `_row_text` above exactly: each starts as
+        whatever the replacement ALREADY had (None/False/False for a
+        never-corrected region, or a previous round's render_font_size/
+        render_bold/render_centered if this dialog is reopened on an
+        already-corrected image - same reasoning as `render_box` seeding
+        the canvas box position in the constructor loop below), and only
+        `_on_font_size_changed()`/`_on_bold_toggled()`/
+        `_on_centered_toggled()`/`_reset_active_font_size()` ever write to
+        them afterward - loading a row into the controls (`_load_row()`)
+        only READS these, it never itself counts as a change (guarded by
+        `self._loading`, exactly like the plain-text editor already is).
+
+        Deliberately three SEPARATE lists rather than one per-row dict
+        (unlike `_edited_geometry`/the new `_edited_font_size`/
+        `_edited_bold`/`_edited_centered` below) - these track the CURRENT
+        value for every row all the time (needed so switching rows can
+        restore the right controls state, same as `_row_text`), whereas
+        the `_edited_*` dicts below track only which rows were actually
+        TOUCHED this dialog session (needed for build_corrected_
+        replacements()'s tri-state contract - see that function's
+        docstring) - two genuinely different questions with two different
+        natural shapes, exactly why `_row_text`/`_dirty` are already split
+        the same way instead of being one structure."""
+        self._edited_font_size: dict[int, int | None] = {}
+        self._edited_bold: dict[int, bool] = {}
+        self._edited_centered: dict[int, bool] = {}
+        """Per-row font-size/bold/centered override the user actually
+        CHANGED this dialog session - mirrors `_edited_geometry` exactly
+        (index absent = row untouched this round, keep whatever the
+        replacement's render_font_size/render_bold/render_centered already
+        was). Threaded into build_corrected_replacements()'s
+        edited_font_size/edited_bold/edited_centered parameters by
+        _apply(). `_edited_font_size` alone can hold an explicit `None`
+        value (via `_reset_active_font_size()`'s "Automatisch" button) -
+        that means "the user explicitly cleared a previously-set override
+        back to auto-estimate", NOT "untouched"; see that function's
+        docstring for why `_edited_bold`/`_edited_centered` have no such
+        "clear" value - a checkable button is only ever True/False, there
+        is nothing else for it to explicitly request."""
         self._active_row: int | None = None
         self._loading = False
         self._syncing_selection = False
@@ -643,6 +848,22 @@ class ImageCorrectionDialog(QDialog):
                 row, box.x, box.y, box.width, box.height,
                 text=replacement.translated_text,
                 on_changed=self._on_region_item_changed, on_selected=self._on_region_item_selected,
+                # Always from replacement.region (the TRUE original OCR
+                # position), never `box` - mirrors report.py::
+                # regions_from_replacements()'s own font_size_px field:
+                # a corrected/grown box's height reflects how big the
+                # human/auto-grow wanted the DRAW AREA to be, not a claim
+                # about the original glyph size the estimate approximates.
+                font_size_px=estimated_font_size(replacement.region),
+                # 28.08.2026 - seed the preview from whatever this row's
+                # _row_font_size/_row_bold/_row_centered already start as
+                # (see those lists' own docstring above) so a reopened,
+                # already-corrected replacement's box shows its real
+                # previous choice immediately, not the plain auto-estimate/
+                # left-aligned default it would otherwise start from.
+                font_size_override=self._row_font_size[row],
+                bold=self._row_bold[row],
+                centered=self._row_centered[row],
             )
             self.scene.addItem(item)
             self._region_items.append(item)
@@ -686,6 +907,39 @@ class ImageCorrectionDialog(QDialog):
         reset_row.addStretch(1)
         right_layout.addLayout(reset_row)
 
+        # 28.08.2026 - font size/bold/alignment per box, one shared control
+        # set for whichever row is currently active (see the module
+        # docstring's matching entry and _load_row()/_on_font_size_changed()/
+        # _reset_active_font_size()/_on_bold_toggled()/_on_centered_toggled()
+        # below) - real user report, Backlog.md 28.08.2026: "Wenn ich etwas
+        # korrigiere, muss es auch genauso korrigiert werden wie ich es im
+        # Viewer sehe."
+        format_row = QHBoxLayout()
+        format_row.addWidget(QLabel(t("image_correction.font_size_label")))
+        self.font_size_spin = QSpinBox(self)
+        self.font_size_spin.setRange(_MIN_FONT_SIZE_SPIN, _MAX_FONT_SIZE_SPIN)
+        # editingFinished (not valueChanged) is deliberately NOT used here -
+        # valueChanged also fires for the every-single-step change a user
+        # makes while dragging the spinner, which is fine: _on_font_size_
+        # changed()/_row_font_size/_edited_font_size just record the latest
+        # value, exactly like every keystroke in self.editor already updates
+        # _row_text's live canvas preview (see _on_editor_text_changed()).
+        self.font_size_spin.valueChanged.connect(self._on_font_size_changed)
+        format_row.addWidget(self.font_size_spin)
+        self.font_size_auto_button = QPushButton(t("image_correction.font_size_auto"))
+        self.font_size_auto_button.clicked.connect(self._reset_active_font_size)
+        format_row.addWidget(self.font_size_auto_button)
+        self.bold_button = QPushButton(t("image_correction.bold"))
+        self.bold_button.setCheckable(True)
+        self.bold_button.toggled.connect(self._on_bold_toggled)
+        format_row.addWidget(self.bold_button)
+        self.centered_button = QPushButton(t("image_correction.centered"))
+        self.centered_button.setCheckable(True)
+        self.centered_button.toggled.connect(self._on_centered_toggled)
+        format_row.addWidget(self.centered_button)
+        format_row.addStretch(1)
+        right_layout.addLayout(format_row)
+
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
         right_layout.addWidget(self.status_label)
@@ -723,6 +977,23 @@ class ImageCorrectionDialog(QDialog):
         self._loading = True
         try:
             self.editor.setPlainText(self._row_text[row])
+            # 28.08.2026 - same _loading guard as the editor above, so
+            # populating these controls from `row`'s state never itself
+            # looks like the user touching them (see _on_font_size_changed()/
+            # _on_bold_toggled()/_on_centered_toggled()'s own guards). A row
+            # with no font-size override yet (`_row_font_size[row] is None`)
+            # still shows a NUMBER, not a blank/zero spinbox - the real
+            # OCR-based estimate this row would auto-render at, purely for
+            # reference (see the module docstring and _MIN_FONT_SIZE_SPIN's
+            # own comment) - showing it here does NOT itself set an
+            # override; only actually changing the spinbox does.
+            font_size = self._row_font_size[row]
+            display_size = font_size if font_size is not None else estimated_font_size(
+                self.replacements[row].region
+            )
+            self.font_size_spin.setValue(display_size)
+            self.bold_button.setChecked(self._row_bold[row])
+            self.centered_button.setChecked(self._row_centered[row])
         finally:
             self._loading = False
         self._sync_canvas_active(row)
@@ -768,6 +1039,77 @@ class ImageCorrectionDialog(QDialog):
         self._edited_geometry.pop(row, None)
         region = self.replacements[row].region
         self._region_items[row].set_geometry(region.x, region.y, region.width, region.height)
+
+    def _on_font_size_changed(self, value: int) -> None:
+        """self.font_size_spin's valueChanged - guarded by self._loading
+        exactly like _on_editor_text_changed() (see _load_row(), which sets
+        the spinbox's DISPLAY value under that same guard without this
+        counting as a change) so populating the spinbox for a newly loaded
+        row is never mistaken for the user picking a new size. Records an
+        explicit override for the ACTIVE row in both self._row_font_size
+        (survives switching rows and back) and self._edited_font_size (fed
+        into build_corrected_replacements() by _apply(), see that dict's
+        own docstring on the constructor) - and updates the canvas preview
+        immediately, mirroring how _on_editor_text_changed() live-updates
+        the box's text preview on every keystroke rather than only at
+        _apply() time."""
+        if self._loading or self._active_row is None:
+            return
+        row = self._active_row
+        self._row_font_size[row] = value
+        self._edited_font_size[row] = value
+        self._region_items[row].set_font_size_override(value)
+
+    def _reset_active_font_size(self) -> None:
+        """"Automatisch" button - clears the active row's font-size
+        override back to auto-estimate, the size counterpart of
+        _reset_active_geometry() above. Unlike that method, this DOES
+        explicitly record the change (self._edited_font_size[row] = None,
+        not a dict removal) - build_corrected_replacements()'s tri-state
+        contract needs an explicit None here to distinguish "the user
+        asked to clear a previously-set override" from "this row's size
+        was never touched this round" (see that function's docstring;
+        _edited_geometry has no such distinction because a geometry reset
+        always has a real, non-None fallback - the region's own original
+        position - to restore instead)."""
+        if self._active_row is None:
+            return
+        row = self._active_row
+        self._row_font_size[row] = None
+        self._edited_font_size[row] = None
+        self._region_items[row].set_font_size_override(None)
+        self._loading = True
+        try:
+            self.font_size_spin.setValue(estimated_font_size(self.replacements[row].region))
+        finally:
+            self._loading = False
+
+    def _on_bold_toggled(self, checked: bool) -> None:
+        """self.bold_button's toggled - see _on_font_size_changed()'s
+        docstring for the _loading guard/live-preview-update reasoning,
+        identical here. No separate "reset to auto" control for bold (see
+        the module docstring/self._edited_bold's own docstring) - toggling
+        this button always records an explicit True/False override."""
+        if self._loading or self._active_row is None:
+            return
+        row = self._active_row
+        self._row_bold[row] = checked
+        self._edited_bold[row] = checked
+        self._region_items[row].set_bold(checked)
+
+    def _on_centered_toggled(self, checked: bool) -> None:
+        """self.centered_button's toggled - see _on_font_size_changed()'s
+        docstring for the _loading guard/live-preview-update reasoning,
+        identical here. `checked=True` means centered, `False` (also the
+        button's/every never-touched row's default) means left-aligned -
+        matches pipeline.images.inpainting.TextReplacement.render_centered's
+        own default exactly."""
+        if self._loading or self._active_row is None:
+            return
+        row = self._active_row
+        self._row_centered[row] = checked
+        self._edited_centered[row] = checked
+        self._region_items[row].set_centered(checked)
 
     def _on_zoom_in(self) -> None:
         self.view.zoom_in()
@@ -819,6 +1161,16 @@ class ImageCorrectionDialog(QDialog):
         row = len(self.replacements)
         self.replacements.append(replacement)
         self._row_text.append("")
+        # 28.08.2026 - keep _row_font_size/_row_bold/_row_centered index-
+        # aligned with `replacements`/_row_text (see those lists' own
+        # docstring in __init__) - a brand-new box starts exactly like the
+        # TextReplacement just created above (render_font_size=None,
+        # render_bold=None -> False, render_centered=False, its dataclass
+        # defaults), i.e. auto-estimate/regular/left, same as every never-
+        # corrected OCR-recognized row.
+        self._row_font_size.append(None)
+        self._row_bold.append(False)
+        self._row_centered.append(False)
 
         self.table.insertRow(row)
         original_item = QTableWidgetItem(t("image_correction.manual_region_label"))
@@ -896,6 +1248,19 @@ class ImageCorrectionDialog(QDialog):
         try:
             corrected_replacements = build_corrected_replacements(
                 self.replacements, self._current_edits(), edited_geometry=self._edited_geometry or None,
+                # 28.08.2026 - see self._edited_font_size/_edited_bold/
+                # _edited_centered's own docstring in __init__ and
+                # build_corrected_replacements()'s matching parameter
+                # docstring for the tri-state contract. `or None` mirrors
+                # `edited_geometry` immediately above exactly - an empty
+                # dict (no row touched this round) becomes None, not an
+                # empty-but-truthy dict, purely so a caller inspecting the
+                # dict's own truthiness elsewhere can't mistake "nothing
+                # touched" for "touched with an empty set of changes"; the
+                # function itself treats both the same either way.
+                edited_font_size=self._edited_font_size or None,
+                edited_bold=self._edited_bold or None,
+                edited_centered=self._edited_centered or None,
             )
             result = run_image_correction_job(
                 self.source, self.destination, corrected_replacements,

@@ -147,17 +147,42 @@
     <button type="button" id="cancel-button" class="hidden" data-i18n="job.cancel">
       Abbrechen
     </button>
-    <!-- Unbestimmter Balken (kein "value"-Attribut) solange ein Lauf
-         aktiv ist - echter Fortschritt ist nur auf Dateiebene bekannt
-         (siehe ui/image_job.py::ImageBatchStats' Docstring), bei einem
+    <!-- Unbestimmter Balken solange ein Lauf aktiv ist - echter
+         Fortschritt ist nur auf Dateiebene bekannt (siehe
+         ui/image_job.py::ImageBatchStats' Docstring), bei einem
          Ein-Bild-Batch mit vielen OCR-Regionen bliebe ein Prozentwert
          die ganze Zeit bei 0% "hängen". Realer Nutzer-Feedback
          (26.08.2026): "Was fehlt ist eine Fortschrittsanzeige. Ich sehe
          nur in der Shell dass etwas passiert." - dieser Balken plus die
          bereits vorhandene Detailzeile (#start-status,
          job.progress_prefix) sollen das im Fenster selbst sichtbar
-         machen. -->
-    <progress id="job-progress-bar" class="hidden" max="100"></progress>
+         machen.
+
+         28.08.2026 - Nachbesserung (Michaels Testlauf (25), analog zum
+         selben Tag behobenen Fund in ui/app.py::_start()/
+         _tick_busy_progress() für die Qt-App, siehe Backlog.md): ein
+         natives <progress> OHNE value-Attribut ist zwar per HTML-Spec
+         "indeterminate" und würde in den meisten Browsern von sich aus
+         eine Marquee-Animation zeigen - aber webapp/static/app.css setzte
+         bisher einen eigenen, statischen background auf
+         ::-webkit-progress-value (damit der Balken zum Karten-Look passt,
+         siehe deren früherer Kommentar). Das ersetzt Chromiums eigene,
+         auf einem wandernden Gradient basierende Indeterminate-Animation
+         durch eine reine Vollfarbe OHNE Bewegung - der Balken sah in der
+         QtWebEngine-Ansicht (webapp/__main__.py's gui="qt") die ersten
+         ~30 Sekunden komplett STATISCH aus, exakt Michaels "am Anfang
+         geht es gut 30 Sekunden bevor sich etwas tut". Fix: kein
+         natives <progress> mehr, sondern ein einfaches div-Paar mit
+         einer selbst definierten CSS-@keyframes-Sweep-Animation (siehe
+         app.css) - dieselbe "nicht auf die native Browser-Animation
+         verlassen, sondern selbst steuern"-Idee wie beim Qt-Fix, nur
+         hier per CSS statt QTimer. app.js's classList.remove("hidden")/
+         .add("hidden") auf #job-progress-bar bleibt unverändert - beide
+         Aufrufe zielen weiterhin auf dieselbe ID, nur jetzt ein div statt
+         ein progress-Element. -->
+    <div id="job-progress-bar" class="hidden" role="progressbar" aria-label="Fortschritt">
+      <div id="job-progress-bar-fill"></div>
+    </div>
     <p class="status-line" id="start-status" data-i18n="start.blocked_no_analysis">
       Bitte zuerst „Dokument analysieren und Kosten schätzen“ ausführen.
     </p>

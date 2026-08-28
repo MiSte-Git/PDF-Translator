@@ -30,7 +30,12 @@ import statistics
 from dataclasses import dataclass, field
 from typing import Callable
 
-from pipeline.images.inpainting import InpaintingBackend, InpaintingError, TextReplacement
+from pipeline.images.inpainting import (
+    InpaintingBackend,
+    InpaintingError,
+    TextReplacement,
+    auto_grow_replacements,
+)
 from pipeline.images.ocr import (
     OcrEngine,
     OcrTextRegion,
@@ -127,6 +132,26 @@ def _max_plausible_height(
     return statistics.median(heights) * max_height_ratio
 
 
+def _image_size(image_path: str) -> tuple[int, int]:
+    """(width, height) of the source image - needed by
+    auto_grow_replacements() below (`image_width`, for
+    _horizontal_room()'s own image-edge clamp) BEFORE
+    inpainting_backend.apply() has opened the image itself. Wrapped the
+    same way apply() itself already wraps its own Image.open() failure
+    (InpaintingError, identical message) - this now runs before apply()
+    ever gets a chance to raise that same error, so a caller must see the
+    same failure mode either way, not an unwrapped PIL exception from
+    here instead.
+    """
+    from PIL import Image
+
+    try:
+        with Image.open(image_path) as image:
+            return image.size
+    except Exception as exc:
+        raise InpaintingError(f"Bild konnte nicht geöffnet werden: {exc}") from exc
+
+
 @dataclass
 class ImageTranslationStats:
     """translate_image()'s result. Flat (translated/skipped/failed), like
@@ -181,6 +206,9 @@ def build_corrected_replacements(
     replacements: list[TextReplacement],
     edited_texts: dict[int, str],
     edited_geometry: dict[int, tuple[int, int, int, int]] | None = None,
+    edited_font_size: dict[int, int | None] | None = None,
+    edited_bold: dict[int, bool | None] | None = None,
+    edited_centered: dict[int, bool] | None = None,
 ) -> list[TextReplacement]:
     """Turn a correction-table UI's edits back into a new list of
     TextReplacement ready for a fresh InpaintingBackend.apply() call -
@@ -233,13 +261,42 @@ def build_corrected_replacements(
     silently ignored - lets a caller pass a dict built once against a
     possibly-stale `replacements` length without needing to defensively
     filter it first.
+
+    `edited_font_size`/`edited_bold`/`edited_centered` (28.08.2026 - real
+    user report, Backlog.md 28.08.2026: "Wenn ich etwas korrigiere, muss
+    es auch genauso korrigiert werden wie ich es im Viewer sehe." - see
+    pipeline.images.inpainting.TextReplacement's matching
+    render_font_size/render_bold/render_centered docstring for the full
+    story). Same "maps a `replacements` LIST INDEX -> the current
+    edited value" shape as `edited_texts`/`edited_geometry` above, and the
+    same "index absent -> nothing changed for this field on this row"
+    rule - but note what "nothing changed" means here is "keep whatever
+    this replacement's render_font_size/render_bold/render_centered
+    already was" (its PREVIOUS correction-round value, defaulting to
+    None/None/False for a never-corrected replacement), NOT "keep
+    estimating from OCR pixels" - that estimation happens once, in
+    InpaintingBackend.apply(), only when the field is still None/False.
+    An index present with value `None` (font_size/bold only - `centered`
+    has no such "clear it" value, only True/False) explicitly clears a
+    PREVIOUSLY set override back to "estimate again", e.g. a human who
+    corrected the size once and then wants the auto-estimate back rather
+    than picking a different number by hand.
     """
     corrected: list[TextReplacement] = []
     for index, replacement in enumerate(replacements):
         edited_text = edited_texts.get(index)
         text_changed = edited_text is not None and edited_text != replacement.translated_text
         geometry = edited_geometry.get(index) if edited_geometry else None
-        if not text_changed and geometry is None:
+        font_size_changed = edited_font_size is not None and index in edited_font_size
+        bold_changed = edited_bold is not None and index in edited_bold
+        centered_changed = edited_centered is not None and index in edited_centered
+        if (
+            not text_changed
+            and geometry is None
+            and not font_size_changed
+            and not bold_changed
+            and not centered_changed
+        ):
             corrected.append(replacement)
             continue
         render_box = replacement.render_box
@@ -247,8 +304,18 @@ def build_corrected_replacements(
             x, y, width, height = geometry
             render_box = dataclasses.replace(replacement.region, x=x, y=y, width=width, height=height)
         translated_text = edited_text if text_changed else replacement.translated_text
+        render_font_size = edited_font_size[index] if font_size_changed else replacement.render_font_size
+        render_bold = edited_bold[index] if bold_changed else replacement.render_bold
+        render_centered = edited_centered[index] if centered_changed else replacement.render_centered
         corrected.append(
-            TextReplacement(region=replacement.region, translated_text=translated_text, render_box=render_box)
+            TextReplacement(
+                region=replacement.region,
+                translated_text=translated_text,
+                render_box=render_box,
+                render_font_size=render_font_size,
+                render_bold=render_bold,
+                render_centered=render_centered,
+            )
         )
     return corrected
 
@@ -455,6 +522,28 @@ def translate_image(
     # brand-new UNION region, whose id() never matches any of `regions`'
     # original per-line objects at all.
     obstacle_regions = [region for region in stats.regions if id(region) not in translated_original_ids]
+
+    # 27.08.2026 - real user request, Michael: "Was wäre, wenn wir den
+    # Font immer so lassen würden wie er erkannt wurde und die Box so
+    # gross wie möglich machen ... Dann hätten wir ein sauberes Bild und
+    # erstmal weniger an den Textboxen manuell zu korrigieren." Every
+    # UNTOUCHED replacement (nothing has set render_box yet - always true
+    # here, this is the first, automatic pass) gets a render_box grown
+    # into whatever room is free on all four sides, at its ALREADY-
+    # ESTIMATED, fixed font size, wherever that alone is enough to avoid
+    # inpainting_backend.apply()'s own shrink-first behaviour - see
+    # pipeline.images.inpainting.auto_grow_replacements()'s own docstring
+    # for the full story, including why this must run BEFORE apply()
+    # (not inside it): `stats.replacements` is the exact same list a
+    # caller's report (image_translate_cli.report.
+    # regions_from_replacements(), review_server.py's WebViewer) is built
+    # from - growing the geometry here, before either apply() or the
+    # report ever run, is what keeps the two in sync instead of each
+    # computing its own, independent box.
+    image_size = _image_size(source_path)
+    stats.replacements = auto_grow_replacements(
+        stats.replacements, obstacle_regions, image_size[0], image_size[1]
+    )
 
     try:
         inpainting_backend.apply(

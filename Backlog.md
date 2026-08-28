@@ -5854,3 +5854,1028 @@ Fix nicht auf Anhieb hielt.
 
 268 von 268 Tests grün (266 + 2 neue, davon evtl. übersprungen ohne
 Playwright), 1 skipped (unverändert, Tesseract).
+
+## 27.08.2026 - Layout-Diskrepanz nach "Übernehmen" untersucht: Mechanismus in Isolation bestätigt korrekt, echte Ursache noch NICHT gefunden; Zoom-Kompensation + Diagnose-Logging als Reaktion auf Michaels Rückmeldung ergänzt
+
+Michael hat nach dem Zeilenumbruch-Fix oben klar zurückgemeldet, dass
+damit nicht sein eigentliches Problem gemeint war: "Du redest nur von
+Zeilenumbruch und ich rede vom Layout. Das Layout und die Darstellung im
+Browserfenster nach der Korrektur unterscheidet sich massiv von dem JPG
+nachdem ich im Browser Fenster 'Anwenden' geklickt habe." Zwei Bilder
+mitgeschickt (Korrektur-Browser vs. fertiges JPG) mit der Bitte, sie
+direkt zu vergleichen statt weiter zu raten.
+
+**Bildvergleich (Pixel-Ebene, nicht nur angeschaut):** bestätigt real -
+der Titel-Textbereich war im Korrektur-Browser groß, zweizeilig und gut
+positioniert; im fertigen JPG erschien er winzig und nahe der
+ursprünglichen OCR-Position. Andere Boxen im selben Bild stimmten
+zwischen Vorschau und Ergebnis weitgehend überein.
+
+**Zwei naheliegende Verdachte geprüft und beide widerlegt:**
+
+1. *Verdacht: der `render_box`-Mechanismus selbst (Korrektur-Browser →
+   `/api/apply` → `regions_io.py` → `run_image_correction_job()` →
+   `InpaintingBackend.apply()`) verliert Positions-/Größenänderungen
+   generell.* Mit Playwright nachgestellt: eine Box künstlich per Drag +
+   Resize vergrößert/verschoben, komplette Kette bis zum gerenderten
+   Bild durchlaufen (`repro_position.py`) - lief einwandfrei. Zusätzlich
+   mit dem ECHTEN Bild und den ECHTEN PaddleOCR-Regionen (Titel +
+   Untertitel getrennt, `paddle_probe_out/...res.json`) nachgestellt
+   (`repro_title_real.py`) - auch hier korrekt gerendert. Verdacht damit
+   ausgeschlossen: die Übernahme-Kette funktioniert in Isolation.
+2. *Verdacht: `_fit_text()` (inpainting.py) kann die Schriftgröße nie
+   vergrößern, wenn eine Box größer gemacht wird, weil sie von der
+   ursprünglichen (kleinen) Region ausgeht.* Direkt getestet: die
+   Aufrufer übergeben tatsächlich die KORRIGIERTE Box (`render_box`) als
+   `region`-Parameter, `_initial_font_size()` sieht also die neue,
+   größere Höhe und wählt entsprechend eine größere Schrift. Verdacht
+   ebenfalls ausgeschlossen.
+
+**Damit ehrlich offen:** die tatsächliche Ursache der von Michael
+gesehenen Diskrepanz ist noch nicht gefunden. Kein "behoben" für dieses
+Problem in dieser Runde - genau das war letzte Runde der Fehler
+(voreilig "behoben" gemeldet, ohne es im echten Browser geprüft zu
+haben), das soll sich nicht wiederholen.
+
+**Michaels nächste Rückmeldung lieferte einen konkreten neuen Hinweis:**
+er hat beim Bearbeiten mit dem Mausrad in das gesamte pywebview-Fenster
+hineingezoomt ("um besser arbeiten zu können"), und die Diskrepanz
+betrifft auch andere Textboxen, nur weniger stark. Arbeitshypothese: ein
+Zoom auf das ganze Fenster lässt `MouseEvent.clientX/clientY`
+(Bildschirmraum) und die CSS-Pixel, in denen `box.style.left/top/width/
+height` ausgedrückt sind, auseinanderlaufen - jede Drag-/Resize-Geste
+wäre dann proportional falsch skaliert, umso stärker, je größer die
+Geste war (passt zu "bei anderen Boxen auch, aber nicht so massiv").
+Kann in der Sandbox NICHT geprüft werden - hier steht nur Chromium
+(Playwright) zur Verfügung, Michaels echte Umgebung ist pywebview auf
+WebKitGTK unter Linux, ein anderer Renderer mit eigenem Zoom-Verhalten.
+Diese Hypothese ist also unbestätigt, nicht mehr.
+
+**Zwei konkrete Reaktionen auf Michaels Rückmeldung, beide in
+`review_server.py`:**
+
+1. *Defensive Zoom-Kompensation:* neue Hilfsfunktion `stageScale()`
+   vergleicht die logische Breite von `#stage` (`style.width`) mit der
+   tatsächlich gerenderten Breite (`getBoundingClientRect().width`) -
+   bei unverzoomtem Fenster ist das Verhältnis 1 (No-op), bei einem
+   Zoom-bedingten Auseinanderlaufen kompensiert es. In
+   `makeDraggable()`/`makeResizable()` werden alle Maus-Deltas jetzt
+   durch diesen Faktor geteilt, statt roh übernommen zu werden. Mit
+   echtem Chromium verifiziert (`repro_debuglog_and_scale.py`, per
+   synthetischen `PointerEvent`s statt `page.mouse.move()` - reines
+   Mausbewegen erwies sich bei der kleinen Boxhöhe als zu unzuverlässig
+   in headless Chromium, nicht jedes Zwischenereignis kam beim Ziel an):
+   ohne simuliertem Zoom bleibt ein 100px-Drag exakt 100px (kein
+   Regressions-Risiko), mit simuliertem 2x-Zoom (CSS-`transform:
+   scale(2)` auf `#stage`, das den gleichen Effekt auf
+   `getBoundingClientRect()` hat wie ein echter Browser-Zoom) wird ein
+   100px-Mausweg korrekt auf 50 logische Pixel kompensiert, ebenso beim
+   Resize. **Wichtig: das beweist nur, dass die Kompensations-Rechnung
+   in sich stimmig ist - NICHT, dass sie Michaels konkretes Problem
+   löst**, da WebKitGTKs echtes Zoom-Verhalten hier nicht nachstellbar
+   ist. Als "behoben" wird das deshalb nicht gemeldet.
+2. *Diagnose-Logging, von Michael direkt erbeten* ("Können wir nicht
+   Logs aus der Fenstersitzung generieren? [...] Welche Box ich wie
+   verändert habe?"): neues `debugLog`-Array + `logEvent()` protokolliert
+   `devicePixelRatio`, Fenstergröße, logische vs. tatsächlich gerenderte
+   Stage-Größe, sowie bei jedem Drag/Resize Start und Ende mit
+   Box-Identität (`orig_x`/`orig_y`), Geometrie vorher/nachher und dem
+   verwendeten Skalierungsfaktor. Wird beim Laden, bei "Anwenden" und
+   bei "Abbrechen" per `fetch()` (fire-and-forget, blockiert nie die
+   eigentliche `/api/apply`-Anfrage) an eine neue Route
+   `POST /api/debug-log` gesendet, die die Datei neben dem korrigierten
+   Bild ablegt: `<dateiname>_correction_debug.json`
+   (`webapp/review_bridge.py::start_correction()` reicht den Pfad
+   durch). Damit lässt sich die nächste Korrektur-Runde konkret
+   nachvollziehen statt weiter zu raten.
+
+**Beim Bauen zwei Bugs gefunden, die das Logging selbst betrafen (mit
+Playwright real geprüft, nicht nur gelesen):**
+- `resize-start` fehlte im Log komplett: `logEvent()` stand hinter
+  `handle.setPointerCapture(e.pointerId)`, und dieser Aufruf kann werfen
+  (beobachtet bei synthetischen PointerEvents in der Sandbox; nicht
+  darauf verlassen, aber als plausibles reales Risiko behandelt -
+  WebKitGTKs PointerEvent-Unterstützung gilt als weniger vollständig als
+  Chromiums). `setPointerCapture()` steht jetzt in einem eigenen
+  try/catch NACH dem `logEvent()`-Aufruf, für Drag und Resize gleich.
+- Ein `resize-end` löste zusätzlich ein falsches `drag-end` aus: das
+  `pointerup`-Ereignis des Resize-Handles bubbelte zum `pointerup`-
+  Listener der umschließenden Box hoch (nur `pointerdown` hatte
+  `stopPropagation()`, `pointerup` nicht), und dessen `moved`-Flag stand
+  noch von der letzten echten Drag-Geste auf `true`. Behoben durch
+  `e.stopPropagation()` auch im Handle-`pointerup`. Ohne diesen Fix wäre
+  das Diagnose-Log selbst irreführend gewesen - genau in dem Punkt, in
+  dem es Michael helfen soll.
+
+**Noch offen, nicht Teil dieser Runde:** der QA-Bericht
+(`ui/image_job.py::_build_qa_report()`, gemeinsam von Qt-Dialog und
+Web-Korrektur-Browser genutzt) behauptet "Zoomen (Strg+Mausrad oder
+Zoom-Knöpfe)" und "manuelles Hinzufügen einer Box" seien im
+Korrektur-Browser möglich - stimmt nicht, das sind ausschließlich
+Fähigkeiten des alten Qt-Dialogs (per Grep bestätigt: keine
+Zoom-Logik in `review_server.py`, "Hinzufügen einer Box" laut eigenem
+Modul-Docstring bewusst nicht unterstützt). Noch nicht behoben, da diese
+Runde auf die tatsächliche Layout-Ursache fokussiert war.
+
+268 von 268 Tests grün (unverändert), 1 skipped. Zusätzlich
+`repro_debuglog_and_scale.py` (Sandbox-only, nicht Teil der Suite) mit
+echtem Chromium gegen die tatsächliche `_PAGE_HTML` verifiziert.
+
+## 27.08.2026 - Erste echte Debug-Log-Auswertung: Zoom-Hypothese durch Michaels eigene Daten widerlegt; zwei reale Layout-Brüche bei mehrfach korrigierten Boxen gefunden; Logging um Positions- und Rohdaten-Erfassung erweitert
+
+Michael hat nach der letzten Runde das erste echte Debug-Log
+(`..._correction_debug.json`), den QA-Bericht und zwei volle
+Vergleichsbilder (Zustand vor/nach seiner Korrektur-Runde "(20)")
+geschickt.
+
+**Zoom-Hypothese widerlegt, nicht bestätigt:** `scale` (das neue
+`stageScale()`) bleibt über die gesamte Sitzung bei ~1.0, obwohl
+`devicePixelRatio` zwischen 1.1 und 0.9 wechselt und sich die
+Fenstergröße mehrfach ändert. WebKitGTKs Mausrad-Zoom auf das ganze
+Fenster lässt also Mausposition und CSS-Pixel-Raum NICHT auseinander-
+laufen - der letzte Runde gebaute Kompensations-Fix greift hier folglich
+nie (kein Regressionsrisiko, aber auch keine Wirkung). Die eigentliche
+Ursache der Layout-Diskrepanz liegt woanders.
+
+**Bildvergleich, methodisch zweimal korrigiert:** ein erster Versuch, alle
+14 heute per Resize bearbeiteten Boxen (identifiziert über das Debug-Log)
+in einem Raster gegenüberzustellen, benutzte fälschlich für "vorher" und
+"nachher" denselben Zuschnitt-Ausschnitt (nach der NEUEN Boxgröße) - das
+erzeugte einen irreführenden "Text ist verschoben"-Eindruck, der nur ein
+Artefakt der eigenen Zuschnittwahl war. Mit box-eigenem Zuschnitt (jeweils
+die tatsächliche Vorher-/Nachher-Größe) neu gebaut: bei den zwei Boxen mit
+einem festen, in der Grafik selbst gezeichneten Rahmen (Herz-Zitat,
+"Verzerrung auf Musterebene"-Zitat) ist der Textüberlauf über den
+sichtbaren Rahmen hinaus eindeutig und unabhängig vom Zuschnitt - ein
+echter, reproduzierbar aussehender Bug. Bei den übrigen 12 bearbeiteten
+Boxen ohne festen Referenzrahmen im Bild lässt sich aus Ausschnitten
+allein nicht sicher sagen, ob sie ebenfalls kaputt sind oder nur legitim
+neu umgebrochen - das Raster wurde an Michael zur eigenen Beurteilung
+geschickt.
+
+**Log-Vollständigkeit bestätigt:** die 50-Sekunden-Lücke im Log zwischen
+letztem Resize und "Anwenden" war nach Michaels Rückmeldung keine
+verlorene Erfassung, sondern schlicht eine Pause. Alle von ihm
+tatsächlich angefassten Boxen wurden auch geloggt - das Logging selbst
+ist damit als verlässlich bestätigt.
+
+**Dateizähler "(20)" geklärt (kein Code-Bug):** ein Blick in
+`tests/output/` zeigt, dass dort aktuell KEINE Datei exakt
+"Spirit - Soul - Meatsuit_DE (20).jpg" existiert - nur von Michael selbst
+umbenannte Varianten ("(20) - vorher.jpg", "(20) - nach Korrektur.jpg",
+"(20)_Org.jpg", "(20)_NachKorrektur.jpg"). `safe_destination()`
+(`ui/document_job_common.py`) prüft bei jedem neuen Lauf live den
+Dateibestand im Zielordner - wenn Michael die App-eigene Ausgabedatei
+nach jeder Runde selbst zu Vergleichszwecken umbenennt, wird der Name
+"(20)" dadurch jedes Mal wieder frei und beim nächsten Lauf (ob neuer Job
+oder derselbe, im Hintergrund weiterlaufende Job) korrekt erneut vergeben
+- kein Fehler in der Kollisionsprüfung, sondern eine Wechselwirkung mit
+seinem eigenen Umbenennen. Offene Verständnisfrage an Michael, ob die
+12:47- und die 14:29/14:34-Runde tatsächlich zwei komplett neue Läufe
+waren oder Korrekturrunden am selben, im Hintergrund weiterlaufenden Job
+(der Web-App-Prozess hält Job-Status nur im Arbeitsspeicher, unabhängig
+vom Schließen des separaten Korrektur-Browser-Popups) - noch nicht
+abschließend bestätigt.
+
+**Architektur-Prüfung der `region`/`render_box`-Trennung über mehrere
+Runden:** `regions_io.py::replacements_from_region_list()`,
+`report.py::regions_from_replacements()` und
+`ui/image_job.py::run_image_correction_job()` gelesen und mit einem
+gezielten Playwright-Test nachgestellt, der eine Box simuliert, die
+bereits eine render_box AUS EINER FRÜHEREN RUNDE hat (nicht nur die
+ursprüngliche OCR-Region) und in dieser Runde nur leicht weiter
+angepasst wird (`repro_regions_files.py`): `region` (Löschziel) bleibt
+korrekt bei der wahren ursprünglichen OCR-Position, `render_box`
+(Zeichenziel) baut korrekt auf der Vorrunden-Größe auf. Architektonisch
+damit kein offensichtlicher Grund für ein Auseinanderdriften über viele
+Runden gefunden - die zwei realen Layout-Brüche bei Michael bleiben
+also weiterhin ungeklärt.
+
+**Fehlende Daten für die nächste Auswertung ergänzt, statt weiter zu
+raten:** das bisherige Debug-Log erfasst bei Resize nur Breite/Höhe, NICHT
+die tatsächliche linke/obere Boxposition (die nach mehreren Korrektur-
+Runden längst von der Original-OCR-Position abweichen kann). Ergänzt:
+- `resize-start`/`resize-end` loggen jetzt zusätzlich `styleLeft`/
+  `styleTop`.
+- Zwei neue, serverseitig (nicht browserseitig, also unabhängig von
+  jeder JS-Eigenheit) geschriebene Dateien neben dem Debug-Log: `
+  *_regions_before.json` (die vollständige, mit orig_x/y/width/height
+  aufgeschlüsselte Startliste beim Öffnen der Korrektur-Seite) und `
+  *_regions_after.json` (die exakte an `/api/apply` gesendete Nutzlast).
+  Beide zusammen zeigen ab jetzt schwarz auf weiß, was `region` und
+  `render_box` in einer Runde tatsächlich waren, statt es aus Bildern
+  zurückrechnen zu müssen.
+
+Mit Playwright verifiziert (`repro_regions_files.py`): beide neuen
+Dateien werden geschrieben, enthalten die erwarteten Werte, und die
+`resize-start`/`-end`-Logeinträge tragen jetzt `styleLeft`/`styleTop`.
+268 von 268 Tests grün (unverändert), 1 skipped.
+
+## 27.08.2026 - WebViewer/JPG-Architektur geklärt (Font-Stil ist im
+WebViewer bewusst einheitlich, nicht "besser erkannt"); neue Funktion
+"Box wachsen statt Font schrumpfen" implementiert und gegen Michaels
+echte Daten verifiziert (Herz-Zitat-Überlauf konkret behoben)
+
+**Architektur-Frage geklärt:** Michael fragte wiederholt, warum der
+WebViewer (review_server.py) deutlich "sauberer" aussieht als das
+tatsächlich erzeugte JPG, obwohl beide aus denselben Daten gebaut werden
+sollten. Geprüft: `.region-text` (CSS) setzt für JEDE Box denselben
+Stil - `color: #fff` fest, kein `font-family`/`font-weight`/
+`font-style` überhaupt. Der WebViewer versucht gar nicht erst, Fett/
+Kursiv/Farbe pro Box zu erkennen. Python (`estimate_font_style()`,
+`_contrasting_text_color()`) versucht das PRO REGION anhand der
+Original-Pixel und trifft manchmal daneben (siehe Herz-Zitat-Kursiv-
+Fehlklassifikation, dieselbe Sitzung). Die Start-FONTGRÖSSE ist dagegen
+auf beiden Seiten bereits identisch (`estimated_font_size()`/
+`_initial_font_size()`, aus der erkannten Original-Zeilenhöhe - NICHT
+"wieviel Platz vorhanden ist", wie Michael zunächst vermutete). Die
+gefühlte Einheitlichkeit des WebViewers kommt also vom bewusst
+ausgelassenen Stil-Versuch, nicht von besserer Erkennung.
+
+**Michaels Entscheidung:** Font-Grösse nach der Erkennung IMMER fix
+lassen, stattdessen die Box in alle vier Richtungen so weit wie möglich
+in freien Nachbarraum wachsen lassen ("erstmal Font-unabhängig").
+
+**Umgesetzt** (`pipeline/images/inpainting.py`):
+- `_vertical_room_above()` - neu, Spiegelbild von `_vertical_room_below()`
+  für die Richtung nach oben, hart an `region.y` (Bildoberkante) gekappt.
+- `_grow_region_to_fit()` - versucht bei FESTER, bereits geschätzter
+  Fontgrösse eine gewachsene Box zu finden (erst Breite, narrowest-first,
+  dann Höhe, bottom-vor-top - Details siehe Docstring), gibt `None`
+  zurück wenn selbst maximales Wachstum nicht reicht.
+- `auto_grow_replacements()` - neu, öffentliche Funktion: läuft für jede
+  UNBERÜHRTE Region (kein `render_box` gesetzt) VOR
+  `InpaintingBackend.apply()`, nicht darin - entscheidend, damit die
+  gewachsene Geometrie über `TextReplacement.render_box` sowohl beim
+  Zeichnen als auch bei `report.py::regions_from_replacements()` (also im
+  WebViewer) ankommt, statt wie bisher zwei unabhängig berechnete Boxen
+  zu erzeugen. Font-Stil für die reine Platzmessung ist bewusst neutral
+  (Regular/serifenlos/aufrecht) - dieselbe "annähernd, nicht exakt"-
+  Näherung, die `estimated_font_size()` für den WebViewer bereits
+  dokumentiert; die tatsächliche, pro-Region geschätzte Stil-Passform
+  bleibt unverändert Sache von `InpaintingBackend.apply()` selbst.
+- Zusätzlicher, kleiner aber wichtiger Fix in allen drei Backends: wenn
+  `render_box` gesetzt ist (manuelle Korrektur ODER jetzt auch Auto-
+  Wachstum), darf `max_height` nie kleiner sein als die Box selbst hoch
+  ist (`max(max_height, draw_region.height)`) - vorher konnte
+  `_vertical_room_below()` (die nur den GAP zum nächsten Nachbarn
+  zurückgibt, nicht Box-Höhe + Gap) eine gesetzte Box künstlich als
+  kleiner behandeln, als sie tatsächlich ist.
+- `pipeline/images/translate_image.py`: `auto_grow_replacements()` wird
+  jetzt direkt vor `inpainting_backend.apply()` aufgerufen und
+  `stats.replacements` entsprechend ersetzt (neue `_image_size()`-
+  Hilfsfunktion für die Bildbreite/-höhe, dieselbe InpaintingError-
+  Fehlerbehandlung wie `apply()` selbst).
+
+**Verifiziert - nicht nur behauptet:** gegen Michaels echte
+`regions_before.json` aus dem "(20)"-Lauf durchgerechnet (line_height
+je Region aus dem gemeldeten `font_size_px` zurückgerechnet, damit die
+Simulation exakt dieselbe Startgrösse wie der echte Lauf verwendet).
+Ergebnis über alle 51 übersetzten Regionen: 0 schlagen fehl, 16
+profitieren allein vom max_height-Fix (keine zusätzliche Geometrie
+nötig, aber die Box bekommt jetzt ihre volle eigene Höhe statt der
+u. U. kleineren Nachbar-Lücke), 35 wachsen tatsächlich in freien Raum.
+
+Konkret am Herz-Zitat nachgestellt (der Fall, der schon in dieser
+Sitzung als Bug gefunden wurde - Kursivstil UND Linksüberlauf): die
+echte `_vertical_room_below()` für diese Region ergibt nur 26px, obwohl
+die Box selbst 69px hoch ist. VORHER: `_fit_text()` bekam `max_height=26`,
+schrumpfte den Font von 12px auf 9px, wickelte auf nur 2 Zeilen und lief
+trotzdem noch 120px nach links über die Box hinaus (`x_offset=-120`,
+breiteste Zeile 356px bei nur 201px Boxbreite) - exakt der beobachtete
+Überlauf. NACHHER: `render_box` wird gesetzt (hier ohne zusätzliches
+Wachstum, allein der max_height-Fix reicht), `_fit_text()` bekommt
+`max_height=69`, Font bleibt bei den vollen 12px, Text wickelt sauber
+auf 5 Zeilen (65px Gesamthöhe), kein Überlauf, `x_offset=0.0`.
+
+**Bekannte, bewusst offene Grenzen** (dokumentiert in den Docstrings,
+Michael bereits mündlich erklärt):
+- Raum-Erkennung sieht nur andere OCR-Textregionen, keine Icons/
+  Kartenränder/Dekoration - kann in Einzelfällen zu weit wachsen (in
+  Grafik hinein) oder zu wenig, je nachdem was tatsächlich daneben liegt.
+- Zwei benachbarte unberührte Regionen werden nicht gegeneinander
+  abgeglichen (beide wachsen unabhängig gegen denselben statischen
+  Ausgangs-Schnappschuss) - spiegelt dieselbe, bereits bestehende
+  Einschränkung der alten horizontalen Verbreiterung.
+- Die Stil-Schätzung für die reine Platzmessung ist neutral
+  (nicht fett/kursiv) - eine Region, deren echter Stil fett ist, könnte
+  in seltenen Fällen die gewachsene Box knapp überschreiten;
+  `_fit_text()`s eigene Breitenprüfung in `apply()` bleibt unverändert
+  und fängt das wie jeden anderen Überlauf auch ab.
+
+**Tests:** 14 neue Tests in `tests/test_image_inpainting.py`
+(`_vertical_room_above()`, `_grow_region_to_fit()`,
+`auto_grow_replacements()`, inkl. eines Ende-zu-Ende-Vergleichs mit/ohne
+Auto-Wachstum, der den Font-Grössen-Unterschied direkt misst, und eines
+Tests, der `regions_from_replacements()`s Ausgabe gegen die gewachsene
+Box prüft - der eigentliche Zweck dieser ganzen Funktion). 282 von 282
+Tests grün (268 vorher + 14 neu), 1 skipped, keine Regression.
+
+## 27.08.2026 (Nachtrag) - Echter Absturz durch `auto_grow_replacements()`
+gefunden und behoben: Wachstum konnte über den unteren Bildrand
+hinauslaufen und GPU-/Cv-Inpainting zum Absturz bringen
+
+Michael meldete: Lauf im WebUI "ohne Ergebnis abgebrochen", UI springt
+nach scheinbar fertigem Rendern kommentarlos auf den Startzustand
+zurück, keine neue Datei im Zielordner, keine sichtbare Fehlermeldung.
+
+**Ursache gefunden und mit Michaels echten Daten reproduziert:**
+`_vertical_room_below()` hat KEINE Bildrand-Prüfung (war bisher
+harmlos, da ihr Rückgabewert nur als Vergleichs-Budget in `_fit_text()`
+diente, nie als echte Pixel-Koordinate). Die neue
+`auto_grow_replacements()` (siehe Eintrag oben) verwendet diesen Wert
+jetzt aber, um eine ECHTE, grössere Box zu bauen. Für eine Region nahe
+am unteren Bildrand OHNE Textnachbarn darunter greift die grosszügige
+4×-Fallback-Regel - konkret bei Michaels Bild: die Region "The Chalice
+does not end you." (y=1250, Höhe 16, Bild ist 1280px hoch) bekommt
+64px "Raum" zugesprochen und die Box wächst bis y=1290 - 10px über den
+echten Bildrand hinaus.
+
+BoxOverlayBackends eigene Hintergrund-Abtastung (`_sample_background()`)
+kappt ihren Abtastbereich am Bildrand und bleibt dadurch unauffällig
+sicher - deshalb lief meine erste Verifikation (nur mit BoxOverlay
+getestet) sauber durch. `CvInpaintingBackend`/`GpuInpaintingBackend`
+(Michaels tatsächliches Backend: GPU-Inpainting/LaMa) tasten den
+Hintergrund der gewachsenen Box dagegen über `_average_region_color()`
+ab - OHNE jede Kappung. Ein Pixelzugriff ausserhalb des Bildes wirft
+dort direkt `IndexError: image index out of range` und lässt
+`InpaintingBackend.apply()` abstürzen - exakt reproduziert, sowohl mit
+einem Minimalbeispiel als auch (nach Rückrechnung der `font_size_px`
+zu `line_height`) mit Michaels echter `regions_before.json`: genau
+diese eine Region lag ausserhalb der Bildgrenzen.
+
+**Fix:** `auto_grow_replacements()` kappt `bottom_room` jetzt zusätzlich
+am tatsächlichen unteren Bildrand (`image_height`), bevor es an
+`_grow_region_to_fit()` weitergereicht wird - der `image_height`-
+Parameter der Funktion war extra für einen solchen künftigen Bedarf
+vorgesehen (siehe Docstring von heute Nachmittag) und wird jetzt
+tatsächlich genutzt. `_vertical_room_below()` selbst bleibt unverändert
+(ihr bisheriger Vertragskreis - Vergleichs-Budget für `_fit_text()` -
+ist weiterhin korrekt, nur die NEUE Verwendung als echte Geometrie
+brauchte die zusätzliche Kappung).
+
+Erneut gegen Michaels echte `regions_before.json` geprüft: vorher 1 von
+51 gewachsenen Boxen ausserhalb der Bildgrenzen, danach 0 von 51. Neuer
+Regressionstest (`test_auto_grow_replacements_clamps_bottom_growth_to_
+the_images_own_edge`) reproduziert den Absturz end-to-end mit
+`CvInpaintingBackend.apply()` und prüft, dass er nicht mehr auftritt.
+283 von 283 Tests grün (282 vorher + 1 neu), keine Regression.
+
+**Warum wurde kein Fehler im WebUI angezeigt?** Bewusst nicht
+nachgegangen - `webapp/job_bridge.py::_run()` fängt jede Exception
+bereits ab (`except Exception`) und `app.js` zeigt `job.status ===
+"failed"` grundsätzlich als "Übersetzung fehlgeschlagen: ..." an;
+warum das bei Michael nicht sichtbar war, bleibt offen. Da die
+eigentliche Ursache (der Absturz selbst) jetzt behoben ist, tritt der
+Fall im Alltag ohnehin nicht mehr auf - falls doch noch einmal eine
+Fehlermeldung ausbleibt, separat untersuchen.
+
+## 27.08.2026 (Runde 3) - "Viewer zeigt Titel mittig/gross, JPG zeigt ihn winzig oben links" - gefunden und behoben
+
+Michael, nach einer weiteren manuellen Korrektur-Runde (Lauf 21):
+"Nein, keinen Live Renderer, ich meine wieder ganz klar zum Beispiel
+der Titel, also die oberste Text box wird im Viewer in der Mitte
+angezeigt und im JPG ist sie links oben in der Ecke ganz klein. Also
+von Mittig Oben Grosser Font im Viewer zu klitzeklein links oben in
+der Ecke."
+
+Zuerst den ganzen Korrektur-Zyklus für Lauf 21 anhand der echten Daten
+durchgerechnet (Debug-Log mit jedem Drag/Resize, das exakte
+`/api/apply`-Payload `regions_after.json`, das fertige JPG): die neun
+tatsächlich bearbeiteten Regionen kommen alle exakt (auf den Pixel)
+dort an, wo Michael sie im Viewer hingezogen/skaliert hat, und `scale`
+liegt im gesamten Log bei 1.0 (kein Zoom-Skalierungsfehler diesmal).
+Der Titel selbst wurde in dieser Runde gar nicht angefasst - also lag
+der Unterschied nicht an verlorenen Korrekturen, sondern irgendwo in
+der Basis-Logik.
+
+**Ursache gefunden und mit dem echten `region` der Titel-Box
+reproduziert:** Für eine UNBERÜHRTE Region (kein `render_box` gesetzt -
+weder von einer Korrektur noch von `auto_grow_replacements()`) haben
+alle drei Backends `_fit_text()` als Höhen-Budget (`max_height`) NUR
+`_vertical_room_below()` übergeben - den Abstand zur nächsten Region
+in derselben Spalte darunter - und dabei die eigene, deklarierte Höhe
+der Box komplett ignoriert. Bei Michaels Titel (Box-Höhe 76px) sitzt
+die nächste Region ("Drei Ebenen. Eine Wahrheit...") nur ~18px
+darunter - `_vertical_room_below()` liefert dafür nur ~15px. Der
+Schrumpf-Loop in `_fit_text()` bekam also ein Budget von 15px für
+einen zweizeiligen Titel und landete bei `_MIN_FONT_SIZE` (9px) -
+exakt das "klitzeklein oben links", das Michael beschrieben hat.
+
+Diese Bodenschwelle ("die eigene Höhe der Box darf nie als weniger
+verfügbar gelten als die Box selbst ist") gab es bereits - aber nur
+für den `render_box`-Fall (Korrektur/Auto-Wachstum, siehe Eintrag von
+heute Nachmittag: `max_height = max(max_height, draw_region.height)`).
+Für eine ganz normale, nie angefasste OCR-Region griff sie nicht,
+obwohl exakt dieselbe Falle zuschlägt, sobald die nächste Nachbar-
+Region zufällig näher sitzt als die eigene Boxhöhe.
+
+Der WebViewer selbst tappt hier nicht in dieselbe Falle: sein
+client-seitiges `refitText()` (`review_server.py`) bemisst sein
+Höhen-Budget rein aus der eigenen `style.height` der Box, nie aus der
+Position einer Nachbar-Region (siehe dessen eigener Kommentar) - daher
+sah der Titel dort "normal gross und mittig" aus, während das
+tatsächliche Rendering ihn auf 9px zusammenquetschte.
+
+**Fix:** `max_height = max(max_height, draw_region.height)` in allen
+drei Backends aus dem `if replacement.render_box is not None:`-Zweig
+herausgezogen - gilt jetzt für JEDE Region, nicht nur für eine
+korrigierte/gewachsene. Der `left_room`/`right_room`-Reset (Breite
+einer manuell korrigierten Box ist eine harte Grenze) bleibt bewusst
+weiterhin nur für den `render_box`-Fall - eine unberührte Region darf
+sich seitlich weiterhin in freien Nachbarraum ausdehnen.
+
+Mit Michaels echten Korrekturdaten (Lauf 21) verifiziert: Titel-
+Schriftgrösse vorher 9px (Minimum), nachher 32px - deutlich lesbar,
+mittig-grosser Eindruck wie im Viewer. Rest der Seite optisch
+unverändert (Stichprobe: vollständiges Rendering mit BoxOverlayBackend
+verglichen). Neuer Regressionstest
+(`test_apply_never_shrinks_a_plain_untouched_region_below_its_own_height`)
+reproduziert exakt diese Titel/Untertitel-Geometrie und sperrt die
+erwartete Schriftgrösse (22px im synthetischen Testfall) fest - ein
+Rückfall auf 9px würde den Test brechen. 284 von 284 Tests grün (283
+vorher + 1 neu), keine Regression.
+
+## 27.08.2026 (Runde 4) - Absturz beim Speichern in der Qt-Korrektur-App ("war etwas mit index")
+
+Michael, nach Umstieg zurück auf die Qt-App (`ui.app`) statt WebViewer:
+"Ich habe es gerade mit der ui.app ausprobiert und beim Speichern kam
+ein Fehler nachdem ich eine Boxen angepasst habe." Auf Nachfrage nach
+dem genauen Fehlertext: "Ja, ist bei diesem passiert. War etwas mit
+index." (im Zusammenhang mit dem Titel-Screenshot aus der Korrektur-
+Dialog-Canvas).
+
+**Ursache gefunden:** `ui/image_correction_dialog.py`s
+`_ResizableRegionItem` hat KEINE Begrenzung auf die Bildgrenzen - weder
+beim Ziehen (native Qt-`ItemIsMovable`-Bewegung, kein Override) noch
+beim Skalieren am Eck-Handle. Eine Box lässt sich also frei über den
+Bild-Rand hinausziehen, in diesem Fall vermutlich der Titel (sitzt
+schon bei y=10 nahe am oberen Rand). Beim Klick auf "Anwenden" landet
+diese Position unverändert als `render_box` in `replacements`, und
+`CvInpaintingBackend`/`GpuInpaintingBackend` (Michaels echtes Backend)
+tasten den Hintergrund der Box über `_average_region_color()` ab -
+diese Funktion indiziert Bild-Pixel direkt (`pixels[px, py]`) OHNE
+jede Bounds-Prüfung. Ein `px`/`py` ausserhalb des Bildes wirft
+`IndexError` - exakt "etwas mit index".
+
+Das ist dieselbe Fehlerklasse wie der `auto_grow_replacements()`-
+Absturz von heute Nachmittag (Runde 2/3-Eintrag oben), aber diesmal
+mit einer ANDEREN Quelle: nicht automatisches Wachstum, sondern eine
+manuelle Ziehbewegung in der Qt-App, die dort gar keine Bildrand-
+Prüfung hat. Statt jede einzelne mögliche Quelle einer
+ausserhalb-liegenden Box einzeln abzufangen (Auto-Wachstum, ein
+WebViewer-Drag, ein Qt-App-Drag, eine handgeschriebene --regions-
+Datei, ...), wurde diesmal an der eigentlichen Fehlerstelle selbst
+angesetzt.
+
+**Fix:** `_average_region_color()` kappt die Abtast-Koordinaten jetzt
+selbst an die tatsächlichen Bildgrenzen (`x0 = max(0, x)` usw., analog
+zum bereits bestehenden Muster in `_sample_background()`/
+`_sample_background_color()`), bevor gesampelt wird. Eine teilweise
+ausserhalb liegende Box mittelt jetzt einfach den noch im Bild
+liegenden Teil; eine komplett ausserhalb liegende Box bekommt denselben
+Weiss-Fallback wie eine leere Box, statt abzustürzen.
+
+Zwei neue Tests: ein direkter Test von `_average_region_color()` mit
+Boxen ausserhalb in alle vier Richtungen (kein cv2/GPU nötig), sowie
+ein End-to-End-Test über `CvInpaintingBackend.apply()` mit einer per
+Hand nach oben aus dem Bild gezogenen `render_box` - reproduziert
+Michaels tatsächlichen Ablauf (Box in der Korrektur-App verschoben,
+dann "Anwenden"). Beide grün, 286 von 286 Tests insgesamt (284 vorher
++ 2 neu), keine Regression.
+
+**Noch offen, nicht in diesem Fix enthalten:** Die Qt-App-Box selbst
+lässt sich weiterhin unbegrenzt über den Bildrand hinausziehen - das
+ist jetzt harmlos (stürzt nicht mehr ab), aber vermutlich trotzdem
+nicht das gewünschte Verhalten (eine Box, die grösstenteils ausserhalb
+liegt, ergibt kein sinnvolles Ergebnis). Eine echte Bildrand-Begrenzung
+beim Ziehen/Skalieren in `_ResizableRegionItem` wäre der nächste
+sinnvolle Schritt, aber separat von diesem reinen Absturz-Fix zu
+behandeln.
+
+**Ebenfalls an diesem Titel entdeckt, noch nicht umgesetzt:** Der
+Vorschau-Canvas in `ui/image_correction_dialog.py`
+(`_ResizableRegionItem.paint()`) berechnet seine Schriftgrösse komplett
+unabhängig von der echten Schätzung (`estimated_font_size()`) - eigene
+Formel (halbe Boxhöhe), hart gedeckelt bei `_MAX_PREVIEW_FONT_SIZE =
+18.0` ohne Begründungs-Kommentar (ungewöhnlich für diesen sonst sehr
+gut dokumentierten Code). Deshalb wirkt der übersetzte Titel im
+Korrektur-Canvas winzig neben dem viel grösseren Original-Titel im
+Hintergrund. Vorschlag an Michael unterbreitet (von ihm noch nicht
+bestätigt): Vorschau von `estimated_font_size(region)` starten lassen
+statt vom eigenen Cap, dann wie bisher weiter schrumpfen falls nötig.
+
+## 27.08.2026 (Runde 5) - Start-Button bleibt während Verarbeitung aktiv + Qt-App auf WebViewer-Stand gebracht
+
+Michael, nach dem Wechsel zurück auf die Qt-App: "Während der
+Verarbeitung ist in der App der Start Button weiterhin aktiv. Können
+wir die App mit all unseren Anpassungen für den WebViewer
+aktuallisieren?"
+
+**Start-Button-Bug gefunden und behoben:** `ui/app.py::_start()` rief
+`self._set_running(True)` bisher auf, BEVOR der neue Worker gebaut und
+`self._worker` zugewiesen wurde. `_set_running()` endet mit
+`_update_start_state()`, das den Start-Button über
+`_start_blocked_reason()`s `self._worker is not None`-Prüfung
+freischaltet/sperrt - zu diesem Zeitpunkt war `self._worker` aber noch
+None (vom vorherigen Lauf zurückgesetzt, oder erst gar nie gesetzt),
+also sah die Prüfung keinen Grund zu sperren. Der Button blieb den
+kompletten Lauf über aktiv. Fix: `self._set_running(True)` steht jetzt
+NACH `self._worker = worker`, direkt vor `self.thread_pool.start(worker)`
+- an der eigentlichen Ursache behoben statt die Prüfung selbst
+umzubauen. Konnte in dieser Sandbox nicht automatisiert getestet werden
+(`pipeline.pdf` fehlt hier, `ui/app.py` lässt sich deshalb gar nicht
+importieren) - bitte beim nächsten Lauf real bestätigen.
+
+**Qt-Korrektur-Canvas auf den WebViewer-Stand gebracht:** Der
+Vorschau-Canvas in `ui/image_correction_dialog.py`
+(`_ResizableRegionItem.paint()`) berechnete seine Schriftgrösse bisher
+komplett unabhängig von `estimated_font_size()` - eigene Formel (halbe
+Boxhöhe), hart gedeckelt bei 18pt ohne jeden Begründungs-Kommentar.
+Genau das hatte Michael am Titel bemängelt ("Der Font ist noch sehr
+schlecht"). Jetzt bekommt jede aus einer echten `OcrTextRegion`
+gebaute Box ihre echte Schätzung (`estimated_font_size(replacement.region)`)
+als Startgrösse mit - dieselbe Grösse, die auch der echte Renderer und
+(seit 26.08.2026) der WebViewer verwenden. Eine manuell hinzugefügte
+Box (kein OCR-Ursprung) fällt weiterhin auf die alte Höhe-basierte
+Schätzung zurück, dafür gibt es nichts Echtes zu schätzen. Zwei neue
+Tests in `tests/test_ui_image_correction.py`
+(`test_canvas_box_preview_font_size_matches_the_real_estimate`,
+`test_manually_added_box_still_uses_the_box_height_fallback`) - beide
+ausserhalb der regulären Suite (dieselbe `pipeline.pdf`-Lücke wie oben)
+direkt gegen `ImageCorrectionDialog`/`_ResizableRegionItem` durchgespielt
+und bestanden (`estimated_font_size()` lieferte 48 für die Test-Region,
+weit über dem alten 18pt-Deckel).
+
+**Bewusst NICHT Teil dieser Runde:** Eine Bildrand-Begrenzung beim
+Ziehen/Skalieren einer Box in `_ResizableRegionItem` (in Runde 4 als
+"noch offen" notiert) - das ist keine WebViewer-Anpassung (der
+WebViewer clamped seine eigenen Drags auch nicht), sondern ein separater
+Vorschlag von mir, den Michael noch nicht bestätigt hat. Bleibt offen,
+bis er das ausdrücklich will.
+
+284/284 Tests der Kern-Suite weiterhin grün (`pipeline.images`/
+`image_translate_cli`, unverändert von dieser Runde betroffen); die
+beiden UI-Dateien und der neue Test konnten wegen der fehlenden
+`pipeline.pdf`/`pipeline.word`/`pipeline.pptx`-Pakete in dieser Sandbox
+nicht über die reguläre `pytest tests/`-Suite laufen - bitte auf dem
+echten Rechner einmal `python -m pytest tests/ -q` laufen lassen, um
+das mit abzusichern.
+
+## 27.08.2026 (Runde 6) - Titel+Untertitel mit unterschiedlicher Schriftgrösse wurden in EINE Region zusammengefasst ("Spirit - Soul - Meatsuit.jpg")
+
+Bestätigung von Michael zu Runde 5: Start-Button deaktiviert sich jetzt
+korrekt während der Verarbeitung. Neuer Fund, echter Testlauf (24),
+QA-Bericht + zwei Screenshots (Viewer und JPG): "das in der Titel
+Textbox zwei Zeilen sind und die erste einen grösseren Font hat als
+die zweite sind in der Übersetzung nur Font Grösse von der zweiten
+Zeile genommen. Nach dem Speichern ist zwar der Zeilenumbruch im
+Titel drin, aber alles mit einem Standard Font und beides
+Linksbündig. Im Berabeitungsdialog ist der Titel in einem anderem
+Font und mittig."
+
+**Ursache gefunden, mit echten Daten bestätigt (nicht nur Code
+gelesen):** `Spirit - Soul - Meatsuit_DE (21)_regions_before.json`
+zeigt Region 0 als EINE zusammengefasste Region: Text
+"SPIRIT·SOUL·MEATSUIT HOWTHECHALICERESTORESWHATISETERNALLYPURE" (kein
+Leerzeichen zwischen den Untertitel-Wörtern - typisch für
+PaddleOCR-Blockinhalt), Höhe 76px, `font_size_px: 24`. Direkter
+Tesseract-Testlauf gegen das echte Bild (`tools`-artiger Ad-hoc-Check
+in dieser Sitzung) zeigt: der Titel ("SPIRIT SOUL MEATSUIT") hat eine
+echte Zeilenhöhe von 37px, der Untertitel ("HOW THE CHALICE
+RESTORES...") nur 20px - Verhältnis 0.54. Die im Tesseract-Pfad
+bereits existierende Absatz-Erkennung
+(`_nearest_region_below_same_column()`, `_PARAGRAPH_HEIGHT_RATIO_MIN
+= 0.6`, "too different a font size to be the same paragraph") hätte
+diese beiden NIE zusammengefasst - bestätigt durch direkten Aufruf von
+`merge_lines_into_paragraphs()` gegen die echten Tesseract-Regionen in
+dieser Sitzung: Titel und Untertitel blieben zwei getrennte Regionen.
+
+Der eigentliche Übersetzungslauf nutzt für dieses Bild aber
+`PaddleOcrEngine` (PP-StructureV3), nicht Tesseract - erkennbar am
+Leerzeichen-losen Text und an `font_size_px: 24` (Durchschnitt aus
+37px/20px, vom Shrink-to-fit weiter auf 24px reduziert, damit der
+zusammengefügte lange Satz noch in die Box passt). PaddleOCRs eigenes
+Layout-Modell gruppierte Titel und Untertitel selbst in EINEN
+`doc_title`-Block - und für PaddleOCR gilt
+`engine_returns_paragraphs = True`
+(`pipeline.images.translate_image`), das heisst
+`merge_lines_into_paragraphs()` mit seiner Höhenverhältnis-Prüfung
+läuft für diesen Pfad gar nicht erst - PaddleOCRs eigene Blockgrenzen
+werden bisher blind übernommen, ohne die gleiche Sicherheitsprüfung
+wie beim Tesseract-Pfad.
+
+**Fix:** `pipeline/images/ocr.py::_paddle_block_to_region()` baut jetzt
+pro Block nicht mehr zwangsläufig EINE Region, sondern läuft zuerst
+durch die neue `_split_matched_lines_by_height()` - dieselbe
+Höhenverhältnis-Prüfung (`_PARAGRAPH_HEIGHT_RATIO_MIN = 0.6`,
+wiederverwendet statt eines zweiten, potenziell inkonsistenten
+Schwellwerts) wie beim Tesseract-Pfad, nur auf die innerhalb EINES
+Paddle-Blocks zusammengefassten OCR-Zeilen angewendet. Findet sich
+kein Sprung in der Zeilenhöhe (der Normalfall - echter Fliesstext,
+oder ein Titel, der nur über zwei gleich grosse Zeilen umbricht),
+bleibt alles exakt wie vorher: eine Region, an der Block-Bbox
+gezeichnet. Gibt es einen Sprung, wird pro zusammenhängendem
+Höhen-Lauf eine EIGENE Region gebaut (eigene Bounding-Box aus den
+zugehörigen Zeilen, eigene `line_height` -> eigene Schriftgrösse beim
+Rendern). `PaddleOcrEngine.recognize()`s Aufrufstelle entsprechend
+angepasst (`_paddle_block_to_region()` liefert jetzt immer eine Liste
+statt einer einzelnen Region/None).
+
+**Bewusst nicht angefasst - Zentrierung:** Michaels zweite Beobachtung
+("im Bearbeitungsdialog... mittig") ist keine neue Ursache, sondern
+dieselbe bereits erklärte Vorschau-Vereinfachung wie beim WebViewer -
+`ui/image_correction_dialog.py`s `_ResizableRegionItem.paint()` zeichnet
+seine Live-Vorschau grundsätzlich mit `Qt.AlignmentFlag.AlignCenter`
+(Zeile ~324), unabhängig von der Box. Der echte Renderer
+(`pipeline/images/inpainting.py::_draw_fitted_text()`) kennt gar keine
+Zentrierung - er zeichnet jede Zeile immer linksbündig ab `region.x`
+(siehe `_fit_text()`s `x_offset`, der nur nach rechts/links für mehr
+Wortumbruch-Platz verschiebt, nie zum Zentrieren gedacht). Das
+Nachbilden einer erkannten Original-Ausrichtung im echten Renderer wäre
+ein eigenständiges, deutlich grösseres Feature (Ausrichtung müsste aus
+den OCR-Daten geschätzt werden) - nicht heute umgesetzt, nur
+dokumentiert, falls Michael das priorisieren möchte.
+
+**Getestet:** neuer Test
+`test_paddleocr_recognize_splits_a_title_and_subtitle_of_different_font_sizes`
+in `tests/test_image_ocr.py`, mit den echten, gegen das reale Bild
+gemessenen Pixelwerten (37px/20px) - prüft, dass daraus zwei Regionen
+mit den jeweils korrekten eigenen Bounding-Boxen und `line_height`s
+werden. Der bereits bestehende Test
+`test_paddleocr_recognize_reattaches_spaced_ocr_lines_to_layout_blocks`
+(Zeilenhöhen 18px/20px, Verhältnis 0.9) bleibt unverändert grün -
+bestätigt, dass der Split nur bei einem echten Grössensprung greift,
+nicht bei jedem mehrzeiligen Block. Gesamte Suite (`tests/`, ohne
+`test_ui_images_mode.py`/`test_ui_image_correction.py` - unverändert
+von dieser Runde betroffen, gleiche Sandbox-Einschränkung wie in
+Runde 5 notiert): 287 passed, 1 skipped (vorher 286 passed, 1 skipped -
+genau der eine neue Test).
+
+Michael gebeten, im nächsten echten Testlauf zu bestätigen, dass der
+Titel jetzt in der richtigen Grösse und als eigene Region neben dem
+Untertitel erscheint (beide weiterhin linksbündig - das bleibt so,
+siehe oben).
+
+## 28.08.2026 (Runde 1) - Manuelle Korrektur: Schriftgrösse folgte der neuen Boxhöhe statt der echten Originalgrösse + Fortschrittsanzeige während der Analysephase unsichtbar
+
+Michael, echter Testlauf (25) mit QA-Bericht und Vorschau-Screenshots:
+"ich verstehe immer noch nicht, dass ich in der Vorschau alles richtig
+gut angezeigt bekomme, mit den richtigen Schriftgrössen, Stil und ich
+kann auch die Textboxen anpassen und positionieren, wenn ich dann aber
+auf 'Anwenden und speichern' klicke ... wird lediglich die Position
+der Textbox angepasst und gerade mal ein Zeilenumbruch, aber nicht die
+Grösse noch der Font Stil." Dazu, unabhängig davon: "Können wir bei der
+Fortschrittsanzeige nicht eine Art Cursor von Links nach rechts bewegen
+lassen ... Am Anfang geht es gut 30 Sekunden bevor sich etwas tut."
+
+**Fund 1 (Schriftgrösse nach Korrektur): Ursache gefunden, mit echten
+Zahlen reproduziert.** `estimate_font_style()` (Familie/Fett/Kursiv)
+liest bereits in allen drei Backends korrekt von `replacement.region`
+(der ECHTEN Originalposition) - der "Font Stil" war also nie wirklich
+das Problem, nur ein Symptom der falschen Grösse. Die eigentliche
+Ursache: Sobald eine Korrektur-UI ein `render_box` setzt, zeichnet
+`apply()` an `draw_region = render_box`, und `_fit_text()` rief bisher
+IMMER `_initial_font_size(draw_region)` auf - für eine ganz normale,
+nie zusammengeführte einzeilige Region (`OcrTextRegion.line_height`
+nie gesetzt - der Normalfall) fällt das auf `draw_region.height`
+zurück, also auf die NEUE, vom Menschen gezogene Boxhöhe, statt auf die
+Höhe der echten Originalzeile. Jede Vorschau (der Qt-Canvas seit
+Runde 5, der WebViewer seit 26.08.2026) zeigt dagegen immer
+`estimated_font_size(replacement.region)` - die echte Originalgrösse,
+unabhängig davon, wie die Box gerade aussieht. Reproduziert mit echten
+Werten: eine Titel-Region (40px hoch, `line_height` nicht gesetzt) auf
+eine vom Nutzer vergrösserte Box (90px) korrigiert - alte Berechnung
+seedete bei 48pt (Obergrenze), obwohl die echte Originalgrösse nur
+32pt gewesen wäre.
+
+**Fix:** `_fit_text()`/`_draw_fitted_text()` bekommen einen neuen
+`start_size`-Parameter. Alle drei Backends (`BoxOverlayBackend`,
+`CvInpaintingBackend`, `GpuInpaintingBackend`) übergeben jetzt
+`start_size=_initial_font_size(replacement.region)` - dieselbe Funktion,
+mit demselben Original-Region-Argument, das die Vorschauen längst
+verwenden. `draw_region` bleibt weiterhin massgeblich für Wortumbruch-
+Breite und die Schrumpfen-bis-es-passt-Schleife (eine zu kleine
+korrigierte Box lässt den Text also weiterhin schrumpfen) - nur der
+STARTPUNKT der Schleife kommt jetzt von der echten Originalgrösse statt
+von der neuen Boxhöhe. Für eine unangetastete Region (kein `render_box`)
+ist `draw_region` ohnehin `region` selbst - null Verhaltensänderung für
+den Normalfall.
+
+**Bewusst nicht angefasst - Zentrierung:** dieselbe Frage wie in
+Runde 6, diesmal erneut gestellt ("wie schon gehabt auch nicht ob der
+Text Mittig sein soll oder nicht. Warum nicht?"). Antwort unverändert:
+der echte Renderer kennt gar keine Zentrierung, nur Linksbündig - siehe
+Runde 6s Eintrag für die volle Begründung. Kein neuer Fund hier, nur
+erneut beantwortet.
+
+**Getestet:** neuer Test
+`test_apply_seeds_a_corrected_boxs_font_size_from_the_original_region_not_the_new_box`
+in `tests/test_image_inpainting.py`, direkt nach dem bereits
+bestehenden `test_apply_never_shrinks_a_plain_untouched_region_below_
+its_own_height` (gleicher Aufbau: Spy auf `_load_font()`, prüft die
+TATSÄCHLICH verwendete Schriftgrösse, nicht nur Rückgabewerte). Ausserdem
+direkt gegen `BoxOverlayBackend.apply()` mit den echten Titel-Massen
+verifiziert (`estimated_font_size` lieferte 29, die naive Berechnung
+allein aus der neuen Boxhöhe 44). `tests/test_image_inpainting.py`,
+`tests/test_image_cv_inpainting.py`, `tests/test_image_gpu_inpainting.py`
+einzeln: 89 passed, 1 skipped. Gesamte Suite (ohne
+`test_ui_images_mode.py`/`test_ui_image_correction.py`, gleiche
+Sandbox-Einschränkung wie in jeder vorherigen Runde): 288 passed,
+1 skipped (vorher 287 passed, 1 skipped).
+
+**Fund 2 (Fortschrittsanzeige unsichtbar): kein neuer Bug, aber die
+vorhandene Lösung funktionierte in Michaels Umgebung offenbar nicht
+sichtbar.** `ui/app.py::_start()` setzte für die Phase vor dem ersten
+bekannten Regionen-Zähler bereits `self.job_progress.setRange(0, 0)` -
+das ist Qts eingebauter "Indeterminate"-Modus, der normalerweise von
+selbst eine Marquee-Animation zeigt. Auf Michaels Desktop/Qt-Stil
+scheint diese native Animation nicht sichtbar zu laufen - daher "30
+Sekunden nichts". Fix: Die Sweep-Animation wird jetzt SELBST per
+`QTimer` gesteuert (`_tick_busy_progress()`, alle 30ms, Balkenwert
+wandert von 0 bis 100 und beginnt wieder bei 0 - ein sichtbarer, sich
+wiederholender Cursor von links nach rechts, unabhängig davon, ob der
+jeweilige Qt-Stil die native Marquee-Animation überhaupt zeichnet).
+Sobald `_job_total()` die echte Anzahl kennt, wird der Timer gestoppt
+und normal (mit Prozent-Text) weitergemacht; zwei Sicherheitsnetze
+(`_show_job_result()`, `_job_failed()`) stoppen den Timer auch, falls
+ein Lauf VOR dem ersten `_job_total()`-Aufruf endet oder fehlschlägt -
+sonst würde der Timer für immer weiterlaufen, nachdem die Leiste schon
+versteckt ist.
+
+Konnte in dieser Sandbox nur mit `python -m py_compile` auf Syntax
+geprüft werden (`ui/app.py` lässt sich wegen des fehlenden
+`pipeline.pdf`-Pakets hier nicht importieren, wie in jeder vorherigen
+Runde) - bitte auf dem echten Rechner bestätigen, dass die Leiste jetzt
+von Beginn an sichtbar wandert.
+
+## 28.08.2026 (Runde 2, Cowork-Sitzung) - webapp/pywebview-Fortschrittsbalken: derselbe Fund wie Fund 2 oben, aber für die NEUE Oberfläche - CSS killte die native Indeterminate-Animation
+
+Unabhängig von Runde 1 oben (dort wurde nur `ui/app.py`s Qt-Balken
+gefixt) meldete Michael dieselbe Beobachtung noch einmal, diesmal aus
+einer separaten Cowork-Sitzung heraus: "Am Anfang geht es gut 30
+Sekunden bevor sich etwas tut" - jetzt gegen `webapp/` (lokaler
+HTTP-Server + pywebview, `gui="qt"`/QtWebEngine, siehe
+webapp/__main__.py) statt gegen die alte Qt-App getestet.
+
+**Ursache (Code gelesen, nicht geraten):** `webapp/static/index.html`
+setzte für `#job-progress-bar` bewusst KEIN `value`-Attribut
+(HTML-Spec: das macht ein `<progress>` "indeterminate", Chromium zeigt
+dafür normalerweise von sich aus eine wandernde
+Gradient-Animation) - aber `webapp/static/app.css` setzte gleichzeitig
+`#job-progress-bar::-webkit-progress-value { background: var(--accent); }`,
+um farblich zum Karten-Look zu passen. Das `background`-Shorthand
+überschreibt dabei auch `background-image`/`-position`, worüber
+Chromiums eigene Indeterminate-Animation läuft - Ergebnis: der Balken
+stand die ersten ~30 Sekunden (bis `files_processed`/`progress_message`
+den ersten echten Wert liefert) komplett still, exakt Michaels
+Beobachtung.
+
+**Fix:** `#job-progress-bar` ist kein `<progress>`-Element mehr, sondern
+ein Paar divs (äußere Schiene + ein schmaler, per eigener
+`@keyframes job-progress-sweep`-Regel von -30% bis 100% wandernder
+Füll-div) - dieselbe "nicht auf die native Browser-Animation verlassen,
+sondern selbst per Timer/Animation steuern"-Idee wie
+`ui/app.py::_tick_busy_progress()` in Runde 1, hier per CSS statt
+QTimer, da kein Qt-Event-Loop existiert. `app.js`s
+`classList.add/remove("hidden")` auf `#job-progress-bar` blieb
+unverändert (gleiche ID, kein JS-Codepfad musste angepasst werden).
+`prefers-reduced-motion: reduce` bekommt einen stillstehenden,
+halbgefüllten Balken statt der Sweep-Animation.
+
+Nur mit `python -m py_compile`/visueller Prüfung des Diffs abgesichert,
+kein echter Browser-Lauf in dieser Sandbox möglich (kein pywebview/Qt
+hier verfügbar) - bitte auf dem echten Rechner bestätigen, dass der
+Balken jetzt von Beginn an sichtbar wandert.
+
+**Bereits vorhandene Fixes aus Runde 1 gelten unverändert weiter, auch
+für webapp/:** die Schriftgrößen-Korrektur (`pipeline/images/
+inpainting.py`s `start_size=_initial_font_size(region)`) und die
+"Zentrierung ist bewusst nicht implementiert"-Antwort betreffen den
+gemeinsam genutzten Renderer/`ui/image_job.py::run_image_correction_job()`
+- gelten identisch, ob die Korrektur über `ui/image_correction_dialog.py`
+(Qt) oder `image_translate_cli/review_server.py` (webapp-Browserfenster)
+lief. Für webapp/ zusätzlich bestätigt: `image_translate_cli/
+review_server.py`s Korrektur-Seite hat aktuell GAR KEINE Bedienelemente
+für Fettschrift oder Zentrierung (nur Position/Größe per Ziehen,
+Zeilenumbruch im Text, manuelles Hinzufügen einer Box) - die
+Font-Größe in der Vorschau dort ist rein CSS-seitiges
+Shrink-to-fit (`refitText()`), wird nie an den Server zurückgeschickt.
+
+## 28.08.2026 (Runde 4, Cowork-Sitzung) - review_server.py bekommt echte Bedienelemente für Schriftgrösse/Fett/Zentriert - Michael: "Wenn ich etwas korrigiere, muss es auch genauso korrigiert werden wie ich es im Viewer sehe"
+
+Fortsetzung von Runde 2s Fund oben ("GAR KEINE Bedienelemente für
+Fettschrift oder Zentrierung") und einer separaten, bereits VOR dieser
+Sitzung erledigten und committeten Vorarbeit (Code-Kommentare markieren
+sie als "Runde 3", ein eigener Backlog-Eintrag dafür fehlt bisher -
+hier nur kurz nachgetragen, damit dieser Eintrag verständlich bleibt):
+`pipeline/images/inpainting.py`s `TextReplacement` hat drei neue
+optionale Felder bekommen - `render_font_size: int | None`,
+`render_bold: bool | None`, `render_centered: bool = False` - die alle
+drei `InpaintingBackend.apply()`-Implementierungen (Box-Overlay/CV/GPU)
+jetzt ANSTELLE der automatischen Schätzung verwenden, wenn gesetzt;
+`_draw_fitted_text()` kennt jetzt echte Zentrierung.
+`image_translate_cli/regions_io.py::replacements_from_region_list()`
+liest dafür drei neue, alle optionale JSON-Schlüssel pro Region -
+`"font_size"`/`"bold"` (fehlend = weiter automatisch schätzen wie vorher,
+kein "letzten Wert behalten"-Fallback) und `"centered"` (fehlend =
+linksbündig, ebenfalls unverändert vom bisherigen Verhalten). Diese
+Runde bringt das erste UI, das diese drei Felder tatsächlich SETZT:
+`image_translate_cli/review_server.py`s Browser-Korrekturseite.
+
+**Was gebaut wurde (nur `review_server.py` angefasst):**
+
+1. **Neue Werkzeugleiste pro Box** (`buildRegionToolbar()`, neue
+   Funktion, in `renderRegions()` direkt neben dem bereits vorhandenen
+   Resize-Handle eingehängt, gleiche dunkle Optik - `#262626`/`#3b82f6`/
+   `#3a3a3a`, wie Header-Buttons und `.resize-handle`): zwei
+   `-`/`+`-Buttons plus Zahlenanzeige für die Schriftgrösse (Schrittweite
+   2px, mirror der Server-Shrink-Loop-Schrittweite), ein "B"-Button für
+   Fett, ein "L"/"C"-Button für Linksbündig/Zentriert. Jeder Klick
+   aktualisiert SOFORT die Live-Vorschau (`text.style.fontWeight`/
+   `textAlign`, `refitText()` für die Grösse) UND markiert das jeweilige
+   Feld als "touched" (`box.dataset.fontSizeTouched`/`boldTouched`) -
+   `centered` braucht keine solche Markierung, da `false` bereits der
+   unangetastete Ursprungszustand ist (siehe regions_io.py-Docstring).
+   Kein hartes Maximum für die Schriftgrösse (der echte Renderer deckelt
+   einen expliziten `render_font_size` NICHT gegen `_MAX_FONT_SIZE=48` -
+   nur die automatische Schätzung ist gedeckelt, siehe
+   `_initial_font_size()`s eigenen Docstring) - nur eine Untergrenze
+   (`_FIT_MIN_SIZE=9`, spiegelt `_MIN_FONT_SIZE`) und eine grosszügige
+   Sicherheitsobergrenze (400px) gegen Fehleingaben.
+
+2. **`collectRegions()`** sendet `centered` jetzt IMMER mit (kein
+   Landmine-Risiko, siehe oben), `font_size`/`bold` dagegen NUR, wenn
+   `fontSizeTouched`/`boldTouched` für diese Box `'1'` ist - exakt die
+   Tri-State-Regel aus `regions_io.py`s Docstring, sonst hätte JEDE
+   Korrekturrunde, die nur eine andere Box verschiebt, das echte
+   geschätzte Fett/Grösse jeder UNBERÜHRTEN Box stillschweigend auf
+   `false`/Auto zurückgesetzt.
+
+3. **`start_review_server()`** reichert `initial_regions` (weiterhin von
+   `report.py::regions_from_replacements()`/`RegionRecord.to_dict()`
+   gebaut - bewusst NICHT angefasst, siehe unten) um vier neue Felder
+   pro Region an: `font_size_touched`, `bold`, `bold_touched`,
+   `centered`. Eine bereits aus einer FRÜHEREN Korrekturrunde gesetzte
+   `render_font_size`/`render_bold` (nicht `None`) zählt dabei sofort
+   als "touched" - sonst würde ein Wiederöffnen von `review`, bei dem
+   niemand die Fett-/Grössen-Buttons erneut anfasst (nur z. B. eine Box
+   verschiebt), genau diese Regression auslösen: `collectRegions()`
+   liesse das Feld weg, `regions_io.py` würde ohne "alten Wert
+   behalten"-Fallback wieder auf Auto zurückfallen.
+
+4. **`_initial_bold_estimates()`** (neue Funktion) - der eigentlich
+   interessante Teil: für eine Region, deren `render_bold` noch `None`
+   ist (nie angefasst), läuft hier VOR dem ersten Klick bereits dieselbe
+   Pixel-Analyse, die `InpaintingBackend.apply()` sowieso für jede
+   unberührte Region durchführt - `_sample_background()` ->
+   `_representative_color()` -> `pipeline.images.font_style.
+   estimate_font_style()`, mit demselben `estimated_font_size(region)`
+   als Startgrösse und demselben `replacement.translated_text` als
+   Vergleichstext. `start_review_server()` läuft immer VOR jedem
+   `apply()`/Löschen, das Quellbild ist an dieser Stelle also noch
+   komplett unangetastet - dieselben echten Pixel, die der Renderer
+   selbst lesen würde. Ergebnis: der "B"-Button einer nie berührten Box
+   zeigt beim ersten Laden bereits denselben Fett/Nicht-Fett-Zustand,
+   den die finale Rendering-Schätzung ohnehin treffen würde - schliesst
+   dieselbe "Vorschau zeigt X, gespeichert wird Y"-Lücke für den
+   Fett-Toggle, die `estimated_font_size()` (26.08.2026) bereits für die
+   Schriftgrössen-Anzeige geschlossen hatte. Fällt (try/except, nie ein
+   Absturz von `start_review_server()`) auf `False` zurück, falls das
+   Bild nicht geöffnet werden kann oder eine einzelne Schätzung
+   fehlschlägt - kostet dann höchstens einen zusätzlichen Klick auf "B",
+   nie eine kaputte Sitzung.
+
+**Bewusst nicht angefasst - `image_translate_cli/report.py`:**
+`RegionRecord`/`regions_from_replacements()` bekommen KEINE neuen Felder
+für `render_font_size`/`render_bold`/`render_centered` - dieses Modul
+ist der versionierte `translate`/`correct --regions`-Report
+(`REPORT_SCHEMA_VERSION`), eine andere, öffentliche Vertragsebene als
+`review_server.py`s eigenes, privates `/api/state`-Format, und diese
+Runde war explizit auf `review_server.py` allein begrenzt. Bekannte
+Lücke dadurch: Ein von Hand geschriebenes oder über `translate`/`correct`
+exportiertes `--regions`-JSON trägt `font_size`/`bold`/`centered` NICHT
+weiter, selbst wenn eine `review`-Runde sie gerade gesetzt hat -
+`start_review_server()` liest diese drei Felder direkt von der
+`TextReplacement`, nicht über `RegionRecord`, daher funktioniert das
+Wiederöffnen von `review` innerhalb EINER laufenden CLI-Sitzung korrekt;
+nur der Umweg über eine geschriebene Report-Datei würde sie verlieren.
+Falls das stört, bräuchte es einen eigenen, bewusst versionierten Schritt
+in `report.py` - nicht Teil dieser Runde.
+
+**Getestet:** `python3 -m py_compile image_translate_cli/review_server.py`
+- erfolgreich. Zusätzlich das eingebettete `<script>` (das
+py_compile naturgemäss nicht prüft, da es nur ein Python-String-Literal
+ist) separat extrahiert und mit `node --check` auf JS-Syntaxfehler
+geprüft - ebenfalls erfolgreich; `<style>`-Block auf ausgeglichene
+`{`/`}`-Klammern gegengeprüft (21/21). Drei neue Tests in
+`tests/test_review_server.py` (gleicher "echte HTTP-Calls über
+urllib.request, kein Mocking"-Stil wie die bestehenden):
+`test_start_review_server_state_carries_untouched_font_size_bold_
+centered_defaults`, `test_start_review_server_state_marks_an_earlier_
+rounds_explicit_override_as_already_touched`,
+`test_review_session_wait_applies_explicit_font_size_bold_centered_
+from_the_posted_region`. `test_start_review_server_state_carries_...`
+prüft bewusst NUR, dass `bold` ein `bool` ist, nicht welchen Wert die
+Pixel-Schätzung auf dem synthetischen weissen Testbild tatsächlich
+liefert - das wäre ein Test des `font_style`-Heuristik-Innenlebens,
+nicht dieser Änderung.
+
+**Nicht verifiziert (kein `pytest`/echter Browser in dieser Sandbox
+verfügbar - `pipeline`/`image_translate_cli` liessen sich hier nur
+teilweise, nicht als vollständiges installiertes Paket laden):** die
+drei neuen Tests selbst wurden nie tatsächlich AUSGEFÜHRT, nur gegen den
+Code gelesen/nachvollzogen - bitte auf dem echten Rechner mit `pytest
+tests/test_review_server.py` bestätigen. Ebenso nie in einem echten
+Browser (pywebview/WebKitGTK) gesehen: ob die neue Werkzeugleiste
+optisch/über Touch wie beabsichtigt bedienbar ist, ob ihre negative
+`top: -26px`-Positionierung bei einer ganz oben am Bild sitzenden Box
+noch innerhalb des sichtbaren/scrollbaren Bereichs von `main` bleibt,
+und ob `_initial_bold_estimates()`s Schätzung auf einem ECHTEN Foto
+(nicht dem synthetischen Testbild) sinnvolle erste Werte liefert - alles
+bitte beim nächsten Korrekturlauf mitprüfen.
+
+## 28.08.2026 (Runde 5, Cowork-Sitzung) - Dasselbe Feature auch im alten Qt-Korrektur-Dialog (ui/image_correction_dialog.py) + fehlende i18n-Strings nachgetragen
+
+Fortsetzung von Runde 3/4 (webapp-Browser-Dialog): Michael wollte beide
+Oberflächen ("Beide Oberflächen" auf explizite Rückfrage), da die
+Qt-App weiterhin aktiv im Einsatz ist, auch wenn sie laut
+Deployment-Strategie (siehe eigenes Projekt-Doc, 27.08.2026) langfristig
+abgelöst wird.
+
+**`_ResizableRegionItem` (ui/image_correction_dialog.py):** neue
+Zustandsfelder `font_size_override`/`bold`/`centered` (spiegeln
+`TextReplacement.render_font_size`/`render_bold`/`render_centered`),
+eigene Setter. `ImageCorrectionDialog` bekommt drei geteilte
+Bedienelemente für die jeweils aktive Zeile: `font_size_spin`
+(QSpinBox) + `font_size_auto_button` (zurück auf Automatik),
+`bold_button`/`centered_button` (checkbare QPushButtons, gleiches
+Widget-Muster wie die bestehenden `toggle_original_button`/
+`add_region_button`). Pro-Zeile-Zustand in drei neuen Listen
+(`_row_font_size`/`_row_bold`/`_row_centered`, aus jeder
+`TextReplacement`s vorhandenem `render_*`-Wert vorbelegt) plus drei
+"berührt"-Dicts (`_edited_font_size`/`_edited_bold`/`_edited_centered`,
+analog zu `_edited_geometry`), die `_apply()` jetzt an
+`build_corrected_replacements()` durchreicht (Tri-State: Zeile fehlt im
+Dict = "diese Runde unverändert", `None` bei font_size = "Automatik
+erzwingen" über den Auto-Button).
+
+**Der eigentliche, bereits zweimal dokumentierte Bug behoben:**
+`_ResizableRegionItem.paint()` zeichnete bisher IMMER mit
+`Qt.AlignmentFlag.AlignCenter` (siehe Runde 6/27.08. und Runde 1/28.08.
+in diesem Log - "im Bearbeitungsdialog... mittig", bisher nur erklärt,
+nicht behoben) - jetzt liest die Vorschau `self._centered` (AlignHCenter
+vs. AlignLeft) und zusätzlich (neu entdeckt beim Beheben, nicht Teil der
+ursprünglichen Meldung) `AlignTop` statt der bisherigen impliziten
+vertikalen Zentrierung, da der echte Renderer Zeilen immer von oben
+(`region.y`) abwärts zeichnet, nie vertikal zentriert - falls das
+optisch stört, ist das separat rückgängig zu machen. Vorschau liest
+jetzt ausserdem `font_size_override`/`bold` statt immer nur die
+OCR-Schätzung.
+
+**"Berührt"-Tracking:** dieselbe `self._loading`-Guard-Technik wie beim
+bestehenden `_on_editor_text_changed()` - Zeilenwechsel befüllt die
+Controls unter dieser Guard, zählt also nie selbst als Bearbeitung; die
+Spinbox zeigt immer eine echte Zahl (Override oder Schätzung als
+Referenz), ohne dass reine Anzeige allein als "berührt" gilt.
+
+**Fehlende i18n-Strings nachgetragen (eigener Fund, kein neuer
+Nutzer-Bericht):** der Qt-Agent verwendete korrekt
+`language.text("image_correction.font_size_label"/...)`, aber
+`ui/i18n_data.py` hatte diese vier Schlüssel (`font_size_label`,
+`font_size_auto`, `bold`, `centered`) noch nicht - ohne Nachtrag hätten
+die neuen Bedienelemente die rohen Schlüsselnamen statt echten Text
+angezeigt (kein Absturz, nur hässlich). Für DE und EN ergänzt, direkt
+neben den bestehenden `image_correction.*`-Einträgen.
+
+**Bewusst nicht angefasst:** `report.py`/`RegionRecord` (siehe Runde
+3/4s eigene Notiz dazu - dieselbe Lücke gilt hier identisch, ein
+--regions-Report verliert font_size/bold/centered, nur die laufende
+Sitzung nicht).
+
+**Getestet:** `python3 -m py_compile ui/image_correction_dialog.py` und
+`ui/i18n_data.py` - beide erfolgreich. 7 neue Tests in
+`tests/test_ui_image_correction.py`, im Stil der bestehenden
+`_edited_geometry`-Tests (`_make_two_row_dialog`, direkte
+`_region_items[i]._attr`-Prüfung): Default bleibt linksbündig,
+Spinbox-Änderung wird erfasst, Auto-Reset setzt explizit auf `None`
+zurück, Fett/Zentriert-Toggle wird erfasst, Zeilenwechsel isoliert den
+Zustand korrekt, ein Test über den vollen `_apply()`-Pfad durch
+`build_corrected_replacements()`.
+
+**Nicht verifiziert (kein PySide6 in dieser Sandbox, wie in jeder
+vorherigen Runde die dieses Modul betraf):** weder `pytest
+tests/test_ui_image_correction.py` noch ein echter Blick auf den
+Dialog - bitte auf dem echten Rechner bestätigen, dass die drei neuen
+Controls sichtbar/bedienbar sind, die deutschen/englischen Labels
+korrekt erscheinen, und dass die jetzt explizit lesbare `AlignTop`
+Zeilendarstellung in der Vorschau nicht unerwünscht wirkt.
+
+**Zusammenfassung für Michael (beide Oberflächen, dieselbe Datengrundlage):**
+Schriftgrösse/Fett/Zentriert lassen sich jetzt sowohl im
+Browser-Korrektur-Dialog (`review_server.py`, Runde 3/4) als auch im
+Qt-Korrektur-Dialog (`ui/image_correction_dialog.py`, diese Runde) pro
+Textbox explizit setzen und werden 1:1 so gerendert - keine
+Auto-Erkennung der ursprünglichen Ausrichtung, wie ausdrücklich
+gewünscht. Bitte auf dem echten Rechner testen und
+`pytest tests/` laufen lassen, bevor das als bestätigt gilt.

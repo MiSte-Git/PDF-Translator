@@ -381,13 +381,189 @@ def test_apply_uses_edited_geometry_alongside_untouched_rows(
             dialog.replacements, dialog._current_edits(), edited_geometry=dialog._edited_geometry or None,
         )
 
+        # 28.08.2026 - fixed a stale assertion here: this checked
+        # corrected[0].region instead of .render_box, left over from
+        # before render_box existed (26.08.2026 - see
+        # TextReplacement.render_box's own docstring). `region` must
+        # NEVER change (it's still the untranslated pixels' real
+        # position, needed to erase/re-estimate style from) - only
+        # render_box, the NEW target to draw at, reflects a geometry
+        # edit. This test predates that split and was never updated, so
+        # it silently asserted the wrong field for two days without a
+        # full local `pytest tests/` run catching it (see Backlog.md
+        # 28.08.2026 for why - test_ui_image_correction.py needed
+        # PySide6/the full pipeline.pdf package, unavailable in every
+        # sandbox this project's sessions ran in until now).
+        original_region_0 = replacements[0].region
         assert (corrected[0].region.x, corrected[0].region.y, corrected[0].region.width, corrected[0].region.height) == (
-            20, 15, 55, 22,
+            original_region_0.x, original_region_0.y, original_region_0.width, original_region_0.height,
         )
+        assert corrected[0].render_box is not None
+        assert (
+            corrected[0].render_box.x,
+            corrected[0].render_box.y,
+            corrected[0].render_box.width,
+            corrected[0].render_box.height,
+        ) == (20, 15, 55, 22)
         assert corrected[0].translated_text == replacements[0].translated_text
         assert corrected[1].translated_text == "Von Hand korrigiert"
         original_region_1 = replacements[1].region
         assert (corrected[1].region.x, corrected[1].region.y) == (original_region_1.x, original_region_1.y)
+    finally:
+        dialog.deleteLater()
+
+
+# --- font size/bold/alignment controls (28.08.2026, real user report,
+# Backlog.md 28.08.2026: "Wenn ich etwas korrigiere, muss es auch genauso
+# korrigiert werden wie ich es im Viewer sehe.") - mirrors the geometry
+# tri-state tests directly above almost exactly, see
+# ImageCorrectionDialog._row_font_size/_row_bold/_row_centered/
+# _edited_font_size/_edited_bold/_edited_centered's own docstrings.
+
+
+def test_canvas_box_preview_defaults_to_left_alignment_not_centered(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    """Regression test for the exact bug Backlog.md 28.08.2026 describes:
+    _ResizableRegionItem.paint() used to draw every box's preview text
+    unconditionally centered (Qt.AlignmentFlag.AlignCenter), regardless of
+    any per-box state - there was none. A never-corrected row must now
+    default to LEFT alignment/regular weight/no size override, matching
+    what the real renderer has always done by default (see
+    pipeline.images.inpainting.TextReplacement.render_centered's
+    docstring), not the old always-centered preview."""
+    dialog, _ = _make_two_row_dialog(tmp_path)
+    try:
+        assert dialog._region_items[0]._centered is False
+        assert dialog._region_items[1]._centered is False
+        assert dialog._region_items[0]._bold is False
+        assert dialog._region_items[0]._font_size_override is None
+        assert dialog.centered_button.isChecked() is False
+        assert dialog.bold_button.isChecked() is False
+    finally:
+        dialog.deleteLater()
+
+
+def test_changing_font_size_spinbox_records_edited_font_size(qapp: QApplication, tmp_path: Path) -> None:
+    dialog, _ = _make_two_row_dialog(tmp_path)
+    try:
+        assert dialog._edited_font_size == {}
+        new_size = dialog.font_size_spin.value() + 7
+        dialog.font_size_spin.setValue(new_size)
+
+        assert dialog._edited_font_size == {0: new_size}
+        assert dialog._row_font_size[0] == new_size
+        assert dialog._region_items[0]._font_size_override == new_size
+        # Untouched row 1 must stay absent, not implicitly recorded.
+        assert 1 not in dialog._edited_font_size
+    finally:
+        dialog.deleteLater()
+
+
+def test_font_size_auto_button_clears_override_back_to_estimate(qapp: QApplication, tmp_path: Path) -> None:
+    """Mirrors test_reset_geometry_button_clears_override_and_restores_original_box
+    above, but the tri-state contract differs (see build_corrected_
+    replacements()'s docstring): clearing a font-size override must record
+    an EXPLICIT `None` in _edited_font_size, not merely remove the row's
+    key - the only way build_corrected_replacements() can tell "clear a
+    previous round's override" apart from "never touched this round" (row
+    simply absent)."""
+    from pipeline.images.inpainting import estimated_font_size
+
+    dialog, replacements = _make_two_row_dialog(tmp_path)
+    try:
+        dialog.font_size_spin.setValue(dialog.font_size_spin.value() + 7)
+        assert 0 in dialog._edited_font_size
+
+        dialog._reset_active_font_size()  # active row is still 0
+
+        assert dialog._edited_font_size == {0: None}
+        assert dialog._row_font_size[0] is None
+        assert dialog._region_items[0]._font_size_override is None
+        assert dialog.font_size_spin.value() == estimated_font_size(replacements[0].region)
+    finally:
+        dialog.deleteLater()
+
+
+def test_bold_and_centered_toggles_record_edits_and_update_canvas_preview(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    dialog, _ = _make_two_row_dialog(tmp_path)
+    try:
+        assert dialog._edited_bold == {}
+        assert dialog._edited_centered == {}
+
+        dialog.bold_button.setChecked(True)
+        dialog.centered_button.setChecked(True)
+
+        assert dialog._edited_bold == {0: True}
+        assert dialog._edited_centered == {0: True}
+        assert dialog._row_bold[0] is True
+        assert dialog._row_centered[0] is True
+        assert dialog._region_items[0]._bold is True
+        assert dialog._region_items[0]._centered is True
+        # Untouched row 1 must stay absent, not implicitly recorded.
+        assert 1 not in dialog._edited_bold
+        assert 1 not in dialog._edited_centered
+    finally:
+        dialog.deleteLater()
+
+
+def test_switching_rows_restores_each_rows_own_format_controls(qapp: QApplication, tmp_path: Path) -> None:
+    """Mirrors test_switching_rows_without_editing_keeps_original_text's
+    reasoning, for the new controls: switching to row 1 and back to row 0
+    must not leak row 0's bold/centered/font-size choice onto row 1, and
+    must restore row 0's own choice when switching back -
+    ImageCorrectionDialog._load_row()'s self._loading guard (see that
+    method's docstring) is exactly what this test protects."""
+    dialog, _ = _make_two_row_dialog(tmp_path)
+    try:
+        dialog.bold_button.setChecked(True)
+        dialog.centered_button.setChecked(True)
+        new_size = dialog.font_size_spin.value() + 11
+        dialog.font_size_spin.setValue(new_size)
+
+        dialog._load_row(1)
+        assert dialog.bold_button.isChecked() is False
+        assert dialog.centered_button.isChecked() is False
+        assert 1 not in dialog._edited_bold
+        assert 1 not in dialog._edited_font_size
+
+        dialog._load_row(0)
+        assert dialog.bold_button.isChecked() is True
+        assert dialog.centered_button.isChecked() is True
+        assert dialog.font_size_spin.value() == new_size
+    finally:
+        dialog.deleteLater()
+
+
+def test_apply_uses_edited_font_size_bold_centered_alongside_untouched_rows(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    """Format overrides are independent per row, mirrors
+    test_apply_uses_edited_geometry_alongside_untouched_rows immediately
+    above exactly, just for font size/bold/centered instead of geometry."""
+    dialog, replacements = _make_two_row_dialog(tmp_path)
+    try:
+        new_size = dialog.font_size_spin.value() + 9
+        dialog.font_size_spin.setValue(new_size)
+        dialog.bold_button.setChecked(True)
+        dialog.centered_button.setChecked(True)
+
+        corrected = build_corrected_replacements(
+            dialog.replacements, dialog._current_edits(), edited_geometry=dialog._edited_geometry or None,
+            edited_font_size=dialog._edited_font_size or None,
+            edited_bold=dialog._edited_bold or None,
+            edited_centered=dialog._edited_centered or None,
+        )
+
+        assert corrected[0].render_font_size == new_size
+        assert corrected[0].render_bold is True
+        assert corrected[0].render_centered is True
+        # Untouched row 1 must keep its original (unset) render_* values.
+        assert corrected[1].render_font_size == replacements[1].render_font_size
+        assert corrected[1].render_bold == replacements[1].render_bold
+        assert corrected[1].render_centered == replacements[1].render_centered
     finally:
         dialog.deleteLater()
 
@@ -441,10 +617,17 @@ def test_open_correction_dialog_applies_moved_box_end_to_end(
         window._open_correction_dialog()
 
         corrected_file_result = window._job_result.stats.results[0]
-        moved_region = corrected_file_result.stats.replacements[0].region
+        moved_replacement = corrected_file_result.stats.replacements[0]
         original_region = original_result.stats.replacements[0].region
-        assert moved_region.x == original_region.x + 5
-        assert moved_region.y == original_region.y + 5
+        # 28.08.2026 - same stale-assertion fix as
+        # test_apply_uses_edited_geometry_alongside_untouched_rows above:
+        # a moved box lands on render_box, `region` itself must stay put
+        # (see TextReplacement.render_box's docstring, 26.08.2026).
+        assert moved_replacement.region.x == original_region.x
+        assert moved_replacement.region.y == original_region.y
+        assert moved_replacement.render_box is not None
+        assert moved_replacement.render_box.x == original_region.x + 5
+        assert moved_replacement.render_box.y == original_region.y + 5
     finally:
         window.close()
 
@@ -549,6 +732,56 @@ def test_canvas_box_preview_text_updates_live_while_typing(qapp: QApplication, t
         assert dialog._region_items[0]._text == "Neu getippt"
         # _row_text itself is untouched until flush - the two are deliberately independent.
         assert dialog._row_text[0] == "Alt"
+    finally:
+        dialog.deleteLater()
+
+
+def test_canvas_box_preview_font_size_matches_the_real_estimate(qapp: QApplication, tmp_path: Path) -> None:
+    """Real user report, Backlog.md 27.08.2026 (round 4/5, "Der Font ist
+    noch sehr schlecht, wenn man mal den Titel anschaut"): the canvas
+    preview used to pick its own font size from half the box's height,
+    hard-capped at _MAX_PREVIEW_FONT_SIZE (18pt), with no relation
+    whatsoever to pipeline.images.inpainting.estimated_font_size() - the
+    same OCR-line-height-based estimate the real PIL renderer AND (since
+    26.08.2026) review_server.py's WebViewer both start from. A tall
+    title region therefore always looked capped-small here, disconnected
+    from what the real output would show. Each row's _ResizableRegionItem
+    must now carry the real per-region estimate instead.
+    """
+    from pipeline.images.inpainting import TextReplacement, estimated_font_size
+    from pipeline.images.ocr import OcrTextRegion
+    from ui.i18n import LanguageManager
+
+    # A tall region whose real estimate is well above the OLD hardcoded
+    # 18pt cap - if this ever regresses back to the box-height heuristic,
+    # the assertion below catches it.
+    region = OcrTextRegion(text="Titel", x=10, y=10, width=400, height=100, confidence=95.0)
+    replacements = [TextReplacement(region=region, translated_text="Ein Titel")]
+    dialog = ImageCorrectionDialog(
+        LanguageManager("de"), tmp_path / "photo.png", tmp_path / "photo_DE.png", replacements,
+    )
+    try:
+        expected = estimated_font_size(region)
+        assert expected > 18.0, "fixture region must reproduce the old cap being too low to test anything"
+        assert dialog._region_items[0]._font_size_px == expected
+    finally:
+        dialog.deleteLater()
+
+
+def test_manually_added_box_still_uses_the_box_height_fallback(qapp: QApplication, tmp_path: Path) -> None:
+    """A manually added box (RoadMap.md's "manuelles Hinzufügen einer Box
+    für nicht erkannten Text") has no underlying OcrTextRegion to estimate
+    a real font size from - must keep using the old box-height-derived
+    guess (font_size_px=None), not crash or silently invent a region.
+    """
+    from ui.i18n import LanguageManager
+
+    dialog = ImageCorrectionDialog(
+        LanguageManager("de"), tmp_path / "photo.png", tmp_path / "photo_DE.png", [],
+    )
+    try:
+        dialog._on_new_box_drawn(30, 30, 120, 40)
+        assert dialog._region_items[-1]._font_size_px is None
     finally:
         dialog.deleteLater()
 

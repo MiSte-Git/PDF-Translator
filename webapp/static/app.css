@@ -302,12 +302,21 @@ button.primary:disabled {
 }
 
 /* Unbestimmter Fortschrittsbalken während eines laufenden Auftrags -
-   siehe index.html's Kommentar dazu, warum bewusst ohne value-Attribut
-   (indeterminate/"barber pole" statt eines Prozentwerts). Reale
-   Nutzer-Rückmeldung 26.08.2026: "Was fehlt ist eine Fortschrittsanzeige.
-   Ich sehe nur in der Shell dass etwas passiert." Farben über die
-   ::-webkit-/::-moz-progress-*-Pseudo-Elemente gesetzt statt der nativen
-   Browser-Voreinstellung (meist blau), damit er zum Karten-Look passt. */
+   siehe index.html's Kommentar dazu. Reale Nutzer-Rückmeldung
+   (26.08.2026): "Was fehlt ist eine Fortschrittsanzeige. Ich sehe nur in
+   der Shell dass etwas passiert."
+
+   28.08.2026 - Nachbesserung: bewusst KEIN natives <progress> mehr (siehe
+   index.html's ausführlicher Kommentar dazu, warum dessen eigene
+   Indeterminate-Animation hier durch den frueheren
+   ::-webkit-progress-value-Background lahmgelegt wurde - der Balken
+   stand die ersten ~30 Sekunden eines Laufs still). Stattdessen zwei
+   divs: der äußere #job-progress-bar ist nur noch die Schiene
+   (Hintergrund/Rahmen/Overflow-Clip), #job-progress-bar-fill ist ein
+   schmaler, per @keyframes selbst bewegter Balken - dieselbe "nicht auf
+   die native Browser-Animation verlassen, sondern selbst steuern"-Idee
+   wie ui/app.py::_tick_busy_progress()'s QTimer-Sweep für die Qt-App
+   (siehe Backlog.md 28.08.2026), hier rein per CSS. */
 /* "display: block" lebt bewusst unter :not(.hidden) statt direkt am
    ID-Selektor: eine ID hat höhere Spezifität als die generische
    ".hidden"-Regel (siehe deren eigener Kommentar oben, "MUSS eine
@@ -323,6 +332,7 @@ button.primary:disabled {
 }
 
 #job-progress-bar {
+    position: relative;
     height: 6px;
     margin-top: 10px;
     border: none;
@@ -331,18 +341,45 @@ button.primary:disabled {
     background: var(--line);
 }
 
-#job-progress-bar::-webkit-progress-bar {
-    background: var(--line);
+#job-progress-bar-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    /* 30% Breite: schmal genug, dass die Bewegung selbst bei kleinem
+       Balken klar als wandernder Block erkennbar ist, nicht als
+       Farbwechsel der ganzen Leiste. */
+    width: 30%;
     border-radius: var(--radius-pill);
+    background: var(--accent);
+    /* Läuft von -30% (komplett links außerhalb) bis 100% (komplett
+       rechts außerhalb) und beginnt danach wieder von vorn - EXAKT der
+       "Cursor von links nach rechts" aus Michaels Feedback, unabhängig
+       von jeder Browser-/Qt-Stil-spezifischen Indeterminate-Darstellung.
+       animation-fill-mode nicht nötig: @keyframes deckt 0%/100% bereits
+       ab, "infinite" übernimmt den Rest. */
+    animation: job-progress-sweep 1.1s ease-in-out infinite;
 }
 
-#job-progress-bar::-webkit-progress-value {
-    background: var(--accent);
-    border-radius: var(--radius-pill);
+@keyframes job-progress-sweep {
+    0% {
+        left: -30%;
+    }
+    100% {
+        left: 100%;
+    }
 }
 
-#job-progress-bar::-moz-progress-bar {
-    background: var(--accent);
+/* Wer per Betriebssystem-/Browser-Einstellung reduzierte Bewegung
+   verlangt, bekommt hier immerhin einen sichtbaren (aber stillstehenden)
+   halb gefüllten Balken statt der Sweep-Animation - besser als ein
+   Konflikt mit einer Nutzer-Zugänglichkeitseinstellung. */
+@media (prefers-reduced-motion: reduce) {
+    #job-progress-bar-fill {
+        animation: none;
+        left: 0;
+        width: 50%;
+    }
 }
 
 /* "Ordner öffnen"-Button (nur unter pywebview sichtbar, siehe

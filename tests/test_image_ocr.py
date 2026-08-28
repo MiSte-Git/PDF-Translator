@@ -703,6 +703,61 @@ def test_paddleocr_recognize_reattaches_spaced_ocr_lines_to_layout_blocks(
     assert region.line_height == 19  # average of (30-12)=18 and (55-35)=20
 
 
+def test_paddleocr_recognize_splits_a_title_and_subtitle_of_different_font_sizes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real user report, Backlog.md 27.08.2026, Michael: "Spirit - Soul -
+    Meatsuit.jpg"'s own header - a big title line directly above a much
+    smaller subtitle line, both matched into ONE PP-StructureV3 layout
+    block ("doc_title") by the real pipeline. Before this fix,
+    _paddle_block_to_region() joined them with a space into one run-on
+    sentence and rendered them at one averaged font size ("in der
+    Übersetzung nur Font Grösse von der zweiten Zeile genommen... alles
+    mit einem Standard Font und beides Linksbündig" - Michael's exact
+    description). The two rec_boxes below are the REAL pixel values
+    (confirmed by running tesseract directly against the real image,
+    where title and subtitle happen to land in separate Tesseract
+    blocks and so keep their own true heights: 37px and 20px, ratio
+    0.54) - well under _PARAGRAPH_HEIGHT_RATIO_MIN (0.6), so this must
+    now split into two regions instead of one, mirroring exactly what
+    _nearest_region_below_same_column() already does for the Tesseract
+    path. Compare test_paddleocr_recognize_reattaches_spaced_ocr_lines_
+    to_layout_blocks above: its two lines (heights 18/20, ratio 0.9)
+    stay merged into one region - this split only fires on a genuine
+    type-size jump, not on every multi-line block."""
+    source = tmp_path / "irrelevant.png"
+    _build_blank_image(source)
+    monkeypatch.setattr("pipeline.images.ocr.paddleocr_available", lambda: True)
+
+    parsing_res_list = [
+        {
+            "block_label": "doc_title",
+            "block_content": "GLUEDTOGETHER",
+            "block_bbox": [138, 10, 909, 86],
+            "block_id": 0,
+        },
+    ]
+    overall_ocr_res = {
+        "rec_texts": ["SPIRIT SOUL MEATSUIT", "HOW THE CHALICE RESTORES WHAT IS ETERNALLY PURE"],
+        "rec_scores": [0.99, 0.97],
+        "rec_boxes": [[213.0, 15.0, 841.0, 52.0], [144.0, 65.0, 908.0, 85.0]],
+    }
+    result = _paddle_result(parsing_res_list, overall_ocr_res)
+    engine = PaddleOcrEngine()
+    monkeypatch.setattr(engine, "_get_pipeline", lambda: _FakePaddlePipeline(result))
+
+    regions = engine.recognize(str(source))
+
+    assert len(regions) == 2
+    title, subtitle = regions
+    assert title.text == "SPIRIT SOUL MEATSUIT"
+    assert title.line_height == 37
+    assert (title.x, title.y, title.width, title.height) == (213, 15, 628, 37)
+    assert subtitle.text == "HOW THE CHALICE RESTORES WHAT IS ETERNALLY PURE"
+    assert subtitle.line_height == 20
+    assert (subtitle.x, subtitle.y, subtitle.width, subtitle.height) == (144, 65, 764, 20)
+
+
 def test_paddleocr_recognize_handles_numpy_array_result_fields(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

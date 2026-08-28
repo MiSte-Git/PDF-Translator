@@ -16,27 +16,35 @@ import pytest
 from PIL import Image, ImageDraw, ImageFont
 
 from pipeline.images.inpainting import (
+    _LINE_SPACING,
     _MAX_FONT_SIZE,
     _MIN_FONT_SIZE,
+    _NO_NEIGHBOR_HEIGHT_ALLOWANCE,
+    _VERTICAL_SAFETY_MARGIN,
     BoxOverlayBackend,
     GradientBackground,
     InpaintingError,
     TextReplacement,
+    _average_region_color,
     _color_distance,
     _contrasting_text_color,
     _draw_fitted_text,
     _estimate_is_bold,
     _fill_gradient_rect,
     _fit_text,
+    _grow_region_to_fit,
     _horizontal_room,
     _initial_font_size,
     _load_font,
     _representative_color,
     _sample_background,
     _sample_background_color,
+    _vertical_room_above,
+    _vertical_room_below,
     _wrap_text_to_width,
+    auto_grow_replacements,
 )
-from pipeline.images.ocr import OcrTextRegion, TesseractOcrEngine, tesseract_available
+from pipeline.images.ocr import OcrTextRegion, TesseractOcrEngine, region_line_height, tesseract_available
 
 _FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 _FONT_BOLD_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -1157,3 +1165,507 @@ def test_initial_font_size_uses_line_height_not_the_merged_span_when_set() -> No
     # different (much larger) result - confirms the test fixture actually
     # exercises the distinction, not a coincidence where both paths agree.
     assert _initial_font_size(region) != min(max(_MIN_FONT_SIZE, int(90 * 0.8)), _MAX_FONT_SIZE)
+
+
+# --- _vertical_room_above() (27.08.2026, real user request, Michael:
+# "Versuchen die Box nach oben, unten, links und rechts max. vergrössern
+# und nicht den Font anpassen" - mirrors _vertical_room_below()'s own
+# tests almost exactly, just the opposite direction.) --------------------
+
+
+def test_vertical_room_above_no_neighbor_falls_back_to_generous_multiple() -> None:
+    region = OcrTextRegion(text="x", x=100, y=500, width=50, height=20, confidence=90.0)
+    assert _vertical_room_above(region, [region]) == region.height * _NO_NEIGHBOR_HEIGHT_ALLOWANCE
+
+
+def test_vertical_room_above_clamped_by_the_images_own_top_edge() -> None:
+    """Unlike _vertical_room_below() (no hard ceiling of its own - see its
+    docstring), growing upward has an obvious one: region.y itself (can't
+    grow past the image's own top edge, y=0). The generous no-neighbour
+    fallback (height * 4 = 800) must never exceed that."""
+    region = OcrTextRegion(text="x", x=100, y=10, width=50, height=200, confidence=90.0)
+    assert _vertical_room_above(region, [region]) == 10
+
+
+def test_vertical_room_above_finds_nearest_neighbor_in_same_column() -> None:
+    region = OcrTextRegion(text="x", x=100, y=100, width=50, height=20, confidence=90.0)
+    neighbor_above = OcrTextRegion(text="n", x=90, y=50, width=60, height=20, confidence=90.0)
+    result = _vertical_room_above(region, [region, neighbor_above])
+    assert result == 30 - _VERTICAL_SAFETY_MARGIN
+
+
+def test_vertical_room_above_ignores_neighbor_in_different_column() -> None:
+    """Same 'same horizontal/vertical band' reasoning as
+    _vertical_room_below()'s/_horizontal_room()'s own tests - a region
+    with no x-overlap must not constrain this axis."""
+    region = OcrTextRegion(text="x", x=200, y=100, width=50, height=20, confidence=90.0)
+    unrelated_column = OcrTextRegion(text="u", x=0, y=50, width=50, height=20, confidence=90.0)
+    result = _vertical_room_above(region, [region, unrelated_column])
+    assert result == region.height * _NO_NEIGHBOR_HEIGHT_ALLOWANCE
+
+
+def test_vertical_room_above_ignores_a_region_below_it() -> None:
+    region = OcrTextRegion(text="x", x=100, y=100, width=50, height=20, confidence=90.0)
+    below = OcrTextRegion(text="b", x=100, y=200, width=50, height=20, confidence=90.0)
+    result = _vertical_room_above(region, [region, below])
+    assert result == region.height * _NO_NEIGHBOR_HEIGHT_ALLOWANCE
+
+
+# --- _grow_region_to_fit() (27.08.2026 - real user request, Michael: "Was
+# wäre, wenn wir den Font immer so lassen würden wie er erkannt wurde und
+# die Box so gross wie möglich machen ... Dann hätten wir ein sauberes
+# Bild und erstmal weniger an den Textboxen manuell zu korrigieren.")
+# Real motivating example: the "Herz-Zitat" card, Spirit-Soul-Meatsuit.jpg
+# QA-Bericht "(20)" - an untouched, first-pass region whose translation
+# both shrank AND overflowed under the old shrink-first order. -----------
+
+
+def test_grow_region_to_fit_grows_downward_only_when_that_alone_is_enough(tmp_path: Path) -> None:
+    draw = _measure_draw()
+    region = OcrTextRegion(text="Kurz", x=50, y=50, width=200, height=24, confidence=95.0)
+    text = "Dies ist ein deutlich laengerer deutscher Uebersetzungstext als das Original"
+
+    size = _initial_font_size(region)
+    font = _load_font(size, bold=False, family="sans_serif", italic=False)
+    lines = _wrap_text_to_width(draw, text, font, region.width)
+    line_height = max(1, int(size * _LINE_SPACING))
+    needed_height = line_height * len(lines)
+    assert needed_height > region.height, (
+        "control fixture must actually need MORE height than the original "
+        "region - adjust the fixture, not the assertion"
+    )
+
+    grown = _grow_region_to_fit(
+        draw, text, region, bold=False, family="sans_serif", italic=False,
+        left_room=0.0, right_room=0.0, top_room=1000.0, bottom_room=1000.0,
+    )
+
+    assert grown is not None
+    assert grown.width == region.width
+    assert grown.x == region.x
+    assert grown.y == region.y, "bottom room alone should suffice - no need to shift the top edge"
+    assert grown.height == needed_height
+    assert grown.line_height == region_line_height(region)
+
+
+def test_grow_region_to_fit_uses_top_room_when_bottom_room_alone_is_not_enough() -> None:
+    draw = _measure_draw()
+    region = OcrTextRegion(text="Kurz", x=50, y=200, width=200, height=24, confidence=95.0)
+    text = "Dies ist ein deutlich laengerer deutscher Uebersetzungstext als das Original"
+
+    size = _initial_font_size(region)
+    font = _load_font(size, bold=False, family="sans_serif", italic=False)
+    lines = _wrap_text_to_width(draw, text, font, region.width)
+    line_height = max(1, int(size * _LINE_SPACING))
+    needed_height = line_height * len(lines)
+    extra_needed = needed_height - region.height
+    assert extra_needed > 0
+
+    bottom_room = 2.0
+    assert bottom_room < extra_needed, "control fixture must force top_room to be used too"
+
+    grown = _grow_region_to_fit(
+        draw, text, region, bold=False, family="sans_serif", italic=False,
+        left_room=0.0, right_room=0.0, top_room=1000.0, bottom_room=bottom_room,
+    )
+
+    assert grown is not None
+    assert grown.height == needed_height
+    expected_extra_top = extra_needed - bottom_room
+    assert grown.y == region.y - expected_extra_top
+
+
+def test_grow_region_to_fit_widens_before_giving_up_when_vertical_room_alone_is_insufficient() -> None:
+    draw = _measure_draw()
+    region = OcrTextRegion(text="Kurz", x=50, y=50, width=80, height=24, confidence=95.0)
+    text = "Dies ist ein deutlich laengerer deutscher Text"
+
+    # No vertical room at all beyond the region's own height - the only
+    # way this can possibly fit is by widening enough that the whole
+    # text becomes a single line.
+    grown = _grow_region_to_fit(
+        draw, text, region, bold=False, family="sans_serif", italic=False,
+        left_room=0.0, right_room=2000.0, top_room=0.0, bottom_room=0.0,
+    )
+
+    assert grown is not None
+    assert grown.width > region.width
+    assert grown.height == region.height
+    assert grown.y == region.y
+    assert grown.x == region.x  # widened entirely via right_room, no left shift
+
+
+def test_grow_region_to_fit_returns_none_when_nothing_fits() -> None:
+    draw = _measure_draw()
+    region = OcrTextRegion(text="x", x=50, y=50, width=20, height=12, confidence=90.0)
+    text = "Ein sehr viel laengerer Text der garantiert nicht hineinpasst egal wie sehr wir wachsen"
+
+    grown = _grow_region_to_fit(
+        draw, text, region, bold=False, family="sans_serif", italic=False,
+        left_room=0.0, right_room=0.0, top_room=0.0, bottom_room=0.0,
+    )
+
+    assert grown is None
+
+
+# --- auto_grow_replacements() (27.08.2026) - the function translate_image()
+# now calls BEFORE InpaintingBackend.apply(), so a grown box is what BOTH
+# apply() draws AND image_translate_cli.report.regions_from_replacements()
+# reports back to review_server.py's WebViewer. ---------------------------
+
+
+def test_auto_grow_replacements_sets_render_box_for_untouched_replacement() -> None:
+    region = OcrTextRegion(text="Kurz", x=50, y=50, width=200, height=24, confidence=95.0)
+    text = "Dies ist ein deutlich laengerer deutscher Uebersetzungstext als das Original"
+    replacement = TextReplacement(region=region, translated_text=text)
+
+    grown_replacements = auto_grow_replacements(
+        [replacement], obstacle_regions=[], image_width=1000, image_height=1000
+    )
+
+    assert len(grown_replacements) == 1
+    result = grown_replacements[0]
+    assert result.render_box is not None
+    assert result.render_box.height > region.height
+    assert result.region is region  # original OCR region untouched
+    assert result.translated_text == text
+
+
+def test_auto_grow_replacements_leaves_an_already_corrected_replacement_unchanged() -> None:
+    region = OcrTextRegion(text="Kurz", x=50, y=50, width=200, height=24, confidence=95.0)
+    render_box = OcrTextRegion(text="Kurz", x=300, y=300, width=150, height=40, confidence=95.0)
+    replacement = TextReplacement(region=region, translated_text="Hallo", render_box=render_box)
+
+    grown_replacements = auto_grow_replacements(
+        [replacement], obstacle_regions=[], image_width=1000, image_height=1000
+    )
+
+    assert grown_replacements[0] is replacement
+
+
+def test_auto_grow_replacements_leaves_replacement_unchanged_when_growth_fails() -> None:
+    region = OcrTextRegion(text="x", x=100, y=100, width=20, height=12, confidence=90.0)
+    text = "Ein sehr viel laengerer Text der garantiert nicht hineinpasst egal wie sehr wir wachsen"
+    replacement = TextReplacement(region=region, translated_text=text)
+    neighbor_left = OcrTextRegion(text="l", x=80, y=100, width=18, height=12, confidence=90.0)
+    neighbor_right = OcrTextRegion(text="r", x=122, y=100, width=18, height=12, confidence=90.0)
+    neighbor_above = OcrTextRegion(text="a", x=100, y=86, width=20, height=12, confidence=90.0)
+    neighbor_below = OcrTextRegion(text="b", x=100, y=114, width=20, height=12, confidence=90.0)
+
+    grown_replacements = auto_grow_replacements(
+        [replacement],
+        obstacle_regions=[neighbor_left, neighbor_right, neighbor_above, neighbor_below],
+        image_width=1000,
+        image_height=1000,
+    )
+
+    assert grown_replacements[0] is replacement
+    assert grown_replacements[0].render_box is None
+
+
+def test_auto_grow_replacements_grown_box_is_what_report_py_reports() -> None:
+    """The actual point of this whole feature (Michael, this whole
+    session): the box review_server.py's WebViewer shows and the box
+    InpaintingBackend.apply() actually draws must be THE SAME box, not
+    two independently-computed ones."""
+    from image_translate_cli.report import regions_from_replacements
+
+    region = OcrTextRegion(text="Kurz", x=50, y=50, width=200, height=24, confidence=95.0)
+    text = "Dies ist ein deutlich laengerer deutscher Uebersetzungstext als das Original"
+    replacement = TextReplacement(region=region, translated_text=text)
+
+    grown_replacements = auto_grow_replacements(
+        [replacement], obstacle_regions=[], image_width=1000, image_height=1000
+    )
+    grown_box = grown_replacements[0].render_box
+    assert grown_box is not None
+
+    records = regions_from_replacements(grown_replacements)
+    record = records[0]
+
+    assert (record.x, record.y, record.width, record.height) == (
+        grown_box.x, grown_box.y, grown_box.width, grown_box.height,
+    )
+    assert (record.orig_x, record.orig_y, record.orig_width, record.orig_height) == (
+        region.x, region.y, region.width, region.height,
+    )
+
+
+def test_apply_after_auto_grow_avoids_shrinking_when_room_exists_elsewhere(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """End-to-end: a region with a close neighbour directly below it (so
+    _vertical_room_below() alone is tiny - the real "Herz-Zitat" shape,
+    Backlog.md 27.08.2026) but ample free space to the sides/above.
+    Without auto_grow_replacements(), BoxOverlayBackend.apply() shrinks
+    the font to fit the tiny vertical-only budget; with it (mirrors
+    translate_image()'s own new call, right before apply()), the box
+    grows sideways/upward first and the ORIGINAL, fixed font size
+    survives untouched.
+    """
+    image = Image.new("RGB", (600, 400), "white")
+    source = tmp_path / "source.png"
+    image.save(source)
+
+    region = OcrTextRegion(text="Kurz", x=50, y=50, width=150, height=24, confidence=95.0)
+    neighbor_below = OcrTextRegion(text="Neighbour", x=50, y=76, width=150, height=24, confidence=95.0)
+    text = "Dies ist ein deutlich laengerer deutscher Text als das Original"
+    replacement = TextReplacement(region=region, translated_text=text)
+
+    import pipeline.images.inpainting as inpainting_module
+
+    real_load_font = inpainting_module._load_font
+    used_sizes: list[int] = []
+
+    def _spy_load_font(size, **kwargs):
+        used_sizes.append(size)
+        return real_load_font(size, **kwargs)
+
+    monkeypatch.setattr(inpainting_module, "_load_font", _spy_load_font)
+
+    used_sizes.clear()
+    output_without = tmp_path / "without.png"
+    BoxOverlayBackend().apply(
+        str(source), [replacement], str(output_without), obstacle_regions=[neighbor_below]
+    )
+    assert min(used_sizes) < _initial_font_size(region), (
+        "control fixture did not actually reproduce the shrink-without-growth case"
+    )
+
+    used_sizes.clear()
+    grown = auto_grow_replacements(
+        [replacement], obstacle_regions=[neighbor_below], image_width=600, image_height=400
+    )
+    output_with = tmp_path / "with.png"
+    BoxOverlayBackend().apply(
+        str(source), grown, str(output_with), obstacle_regions=[neighbor_below]
+    )
+    assert min(used_sizes) == _initial_font_size(region), (
+        "expected auto_grow_replacements() to let the ORIGINAL font size survive"
+    )
+
+
+def test_auto_grow_replacements_clamps_bottom_growth_to_the_images_own_edge(tmp_path: Path) -> None:
+    """Real, reproduced bug (Michael, 27.08.2026, "Spirit - Soul -
+    Meatsuit.jpg"): a region near the image's own bottom edge with no
+    other text region below it falls back to _vertical_room_below()'s
+    generous no-neighbour multiple (4x region.height) - which has no
+    image-bottom clamp of its own (previously harmless, only ever used
+    as a comparison budget). Without clamping bottom_room here, the grown
+    box's bottom edge could land PAST the image's real bottom edge,
+    which crashed CvInpaintingBackend/GpuInpaintingBackend outright (both
+    sample the grown box's background via _average_region_color(), which
+    does not clamp - unlike BoxOverlayBackend's own background sampling).
+    """
+    image = Image.new("RGB", (400, 150), "white")
+    source = tmp_path / "source.png"
+    image.save(source)
+
+    # Close to the bottom edge (only 10px of real room below) and no
+    # other region anywhere near it.
+    region = OcrTextRegion(text="Kurz", x=50, y=120, width=150, height=20, confidence=95.0)
+    text = "Dies ist ein deutlich laengerer deutscher Text der mehr Zeilen braucht als das Original"
+    replacement = TextReplacement(region=region, translated_text=text)
+
+    grown = auto_grow_replacements(
+        [replacement], obstacle_regions=[], image_width=400, image_height=150
+    )
+    box = grown[0].render_box
+    assert box is not None
+    assert box.y + box.height <= 150, "grown box must never extend past the image's own bottom edge"
+
+    # The real-world crash: CvInpaintingBackend/GpuInpaintingBackend
+    # sample the grown box's background via _average_region_color(),
+    # which indexes image pixels directly with no bounds clamp - an
+    # out-of-bounds box raised IndexError before this fix.
+    output = tmp_path / "out.png"
+    from pipeline.images.inpainting import CvInpaintingBackend
+
+    try:
+        import cv2  # noqa: F401
+    except ImportError:
+        pytest.skip("opencv-python not installed")
+    CvInpaintingBackend().apply(str(source), grown, str(output))
+
+
+def test_apply_never_shrinks_a_plain_untouched_region_below_its_own_height(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Real, reproduced bug (Michael, 27.08.2026 round 2, "Spirit - Soul -
+    Meatsuit.jpg"): the title rendered TINY in the JPG's top-left corner
+    (_MIN_FONT_SIZE, 9px) while review_server.py's WebViewer showed the
+    same box large and roughly centred - "im Viewer in der Mitte
+    angezeigt und im JPG ist sie links oben in der Ecke ganz klein".
+
+    Root cause, confirmed against Michael's real regions_after.json: the
+    title region (height=76px) sits only ~18px above the next same-column
+    region (the subtitle) - so _vertical_room_below() alone returns only
+    ~1-15px. Every apply() (all three backends, identically) fed THAT tiny
+    value straight into _fit_text() as max_height for any replacement
+    whose render_box was None - i.e. every plain, never-corrected OCR
+    region - completely ignoring the region's own declared height (76px,
+    plenty for the wrapped text at a normal size) as a floor. That floor
+    already existed, but only inside `if replacement.render_box is not
+    None:` (a correction/auto-grow safeguard from earlier the same day) -
+    this test locks in that the exact same floor now applies unconditionally.
+
+    The WebViewer's own client-side refitText() (review_server.py) budgets
+    purely from the box's own style.height, never from a neighbour's
+    position - see that function's own comment - which is why it never
+    reproduced this crush and looked "right" while the JPG looked wrong.
+    """
+    image = Image.new("RGB", (600, 400), "white")
+    source = tmp_path / "source.png"
+    image.save(source)
+
+    # Mirrors the real title/subtitle shape: a wide, tall region (76px)
+    # whose only same-column neighbour sits just 4px below its bottom
+    # edge - _vertical_room_below() alone would be 1px (4 - the 3px
+    # safety margin), far less than the region's own 76px height.
+    region = OcrTextRegion(text="Title", x=50, y=10, width=400, height=76, confidence=95.0)
+    neighbor_below = OcrTextRegion(text="Subtitle", x=50, y=90, width=400, height=20, confidence=95.0)
+    text = "Ein deutlich laengerer deutscher Titeltext als das Original"
+    replacement = TextReplacement(region=region, translated_text=text)
+    assert replacement.render_box is None, "this must reproduce the PLAIN, never-touched case"
+
+    import pipeline.images.inpainting as inpainting_module
+
+    real_load_font = inpainting_module._load_font
+    used_sizes: list[int] = []
+
+    def _spy_load_font(size, **kwargs):
+        used_sizes.append(size)
+        return real_load_font(size, **kwargs)
+
+    monkeypatch.setattr(inpainting_module, "_load_font", _spy_load_font)
+
+    output = tmp_path / "out.png"
+    BoxOverlayBackend().apply(
+        str(source), [replacement], str(output), obstacle_regions=[neighbor_below]
+    )
+    # Before this fix, max_height was fed _vertical_room_below()'s ~1px
+    # alone, and the shrink loop bottomed out at _MIN_FONT_SIZE (9). With
+    # the region's own 76px height as a floor, the text still has to
+    # shrink some (two lines don't fit at the full _initial_font_size()
+    # within 76px) but lands at a normal, legible size - never anywhere
+    # near the old 9px crush.
+    assert min(used_sizes) == 22, (
+        f"expected the region's own height to floor the shrink at 22px, got {min(used_sizes)} "
+        "(9 would mean the old bug - ignoring the box's own height - is back)"
+    )
+
+
+def test_apply_seeds_a_corrected_boxs_font_size_from_the_original_region_not_the_new_box(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Real user report, Backlog.md 27.08.2026 (round 3), Michael: "in der
+    Vorschau [bekomme ich] die richtigen Schriftgrössen ... wenn ich dann
+    auf Anwenden und speichern klicke ... wird lediglich die Position der
+    Textbox angepasst ... aber nicht die Grösse."
+
+    Root cause: every preview (the Qt correction canvas since round 5,
+    review_server.py's WebViewer since 26.08.2026) seeds itself from
+    estimated_font_size(replacement.region) - the TRUE original OCR
+    region. Before this fix, apply() itself seeded from
+    _initial_font_size(draw_region) instead - draw_region being
+    `render_box` once a correction UI set one (_draw_region()). For a
+    region whose OWN `line_height` was never set (the common case - a
+    plain, un-merged single OCR line, see OcrTextRegion.line_height's
+    docstring) that meant _initial_font_size() fell back to the region's
+    `height` directly - so the instant a human resized the box in the
+    correction dialog (exactly what the dialog invites them to do), the
+    font size silently re-derived from the NEW box's height instead of
+    the original text's real size, however correct the preview had
+    looked a moment before.
+
+    This fixture: a plain title-sized region (height=40, line_height
+    unset) corrected to a much TALLER render_box (height=90, as if a
+    human dragged the bottom handle down) - before this fix that alone
+    would have pushed the seed font size up towards _MAX_FONT_SIZE
+    (int(90*0.8)=72, clamped to 48); after this fix it must still seed
+    from the ORIGINAL region's own 40px height, unaffected by the
+    correction's new height.
+    """
+    image = Image.new("RGB", (600, 500), "white")
+    source = tmp_path / "source.png"
+    image.save(source)
+
+    region = OcrTextRegion(text="HAUPTBUCH", x=100, y=100, width=200, height=40, confidence=95.0)
+    assert region.line_height is None, "this must reproduce the plain, un-merged single-line case"
+    render_box = OcrTextRegion(text="", x=90, y=95, width=250, height=90, confidence=100.0)
+    replacement = TextReplacement(region=region, translated_text="LEDGER", render_box=render_box)
+
+    expected_seed = _initial_font_size(region)
+    assert expected_seed < _MAX_FONT_SIZE, "fixture must reproduce a seed BELOW the cap to be a meaningful check"
+
+    import pipeline.images.inpainting as inpainting_module
+
+    real_load_font = inpainting_module._load_font
+    used_sizes: list[int] = []
+
+    def _spy_load_font(size, **kwargs):
+        used_sizes.append(size)
+        return real_load_font(size, **kwargs)
+
+    monkeypatch.setattr(inpainting_module, "_load_font", _spy_load_font)
+
+    output = tmp_path / "out.png"
+    BoxOverlayBackend().apply(str(source), [replacement], str(output))
+
+    assert used_sizes[0] == expected_seed, (
+        f"expected the shrink loop to start at the ORIGINAL region's own estimate ({expected_seed}), "
+        f"got {used_sizes[0]} (48 would mean it re-derived from the corrected box's own height instead)"
+    )
+
+
+def test_average_region_color_clamps_to_image_bounds_instead_of_raising() -> None:
+    """Real, reproduced bug (Michael, 27.08.2026 round 4, "Spirit - Soul -
+    Meatsuit.jpg"): dragging a region's box in ui/image_correction_dialog.py's
+    Qt canvas (no bounds clamp of its own on move/resize) far enough that its
+    render_box ended up partly outside the image, then clicking "Anwenden",
+    crashed with an IndexError ("war etwas mit index").
+
+    Same underlying gap as the auto_grow_replacements() bottom-edge crash
+    fixed earlier the same day (see that entry's own test) - but THIS time
+    the out-of-bounds box came from a human dragging a box in the Qt app,
+    not from auto-grow - confirming this needed a fix at the actual point
+    of failure (this function), not another one-off clamp at whichever
+    caller happened to produce the bad coordinates this time.
+    """
+    image = Image.new("RGB", (200, 100), (10, 20, 30))
+
+    assert _average_region_color(image, 10, 10, 20, 20) == (10, 20, 30)
+    # Past the right/bottom edge - the auto-grow class of overflow.
+    assert _average_region_color(image, 190, 90, 40, 40) == (10, 20, 30)
+    # Negative y - a box dragged above the image's top edge, Michael's
+    # actual Qt-app case.
+    assert _average_region_color(image, 10, -20, 20, 30) == (10, 20, 30)
+    # Entirely off-canvas - no pixels survive clamping, safe fallback.
+    assert _average_region_color(image, -100, -100, 20, 20) == (255, 255, 255)
+
+
+def test_apply_survives_a_manually_dragged_render_box_that_lands_off_canvas(tmp_path: Path) -> None:
+    """End-to-end version of the test above: a replacement whose render_box
+    (mirrors what ui/image_correction_dialog.py's edited_geometry produces -
+    see build_corrected_replacements()) was dragged partly above the
+    image's own top edge must still render, not crash
+    CvInpaintingBackend.apply() via _average_region_color()'s unclamped
+    pixel access.
+    """
+    image = Image.new("RGB", (300, 200), "white")
+    source = tmp_path / "source.png"
+    image.save(source)
+
+    region = OcrTextRegion(text="Titel", x=50, y=30, width=150, height=40, confidence=95.0)
+    render_box = OcrTextRegion(text="Titel", x=50, y=-10, width=150, height=40, confidence=95.0)
+    replacement = TextReplacement(region=region, translated_text="Ein Titel", render_box=render_box)
+
+    try:
+        import cv2  # noqa: F401
+    except ImportError:
+        pytest.skip("opencv-python not installed")
+    from pipeline.images.inpainting import CvInpaintingBackend
+
+    output = tmp_path / "out.png"
+    CvInpaintingBackend().apply(str(source), [replacement], str(output))
+    assert output.exists()

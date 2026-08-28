@@ -198,6 +198,120 @@ def test_start_review_server_state_reflects_an_already_corrected_replacement(tmp
         session.server.server_close()
 
 
+def test_start_review_server_state_carries_untouched_font_size_bold_centered_defaults(
+    tmp_path: Path,
+) -> None:
+    """28.08.2026 (Runde 4) regression guard - real user report, Backlog.md
+    28.08.2026: "Wenn ich etwas korrigiere, muss es auch genauso
+    korrigiert werden wie ich es im Viewer sehe." A replacement nobody has
+    EVER touched (the plain `_replacement()` helper - render_font_size/
+    render_bold both None, render_centered False, exactly TextReplacement's
+    own defaults) must come back from GET /api/state with the tri-state
+    "not touched" markers image_translate_cli/regions_io.py::
+    replacements_from_region_list() expects on the way back in - see that
+    function's own docstring and _PAGE_HTML's collectRegions() comment for
+    why sending font_size/bold unconditionally would be a regression
+    (silently hard-coding every untouched region's real estimated bold to
+    False on the next apply)."""
+    source = tmp_path / "photo.png"
+    _build_image(source)
+    session = review_server.start_review_server(str(source), [_replacement("Hello")])
+    try:
+        record = _get_json(session.url + "api/state")["regions"][0]
+        assert record["font_size_touched"] is False
+        assert record["bold_touched"] is False
+        assert record["centered"] is False
+        assert isinstance(record["bold"], bool)  # a best-effort pixel ESTIMATE, not asserted True/False here -
+        # see _initial_bold_estimates()'s own docstring: never raises, but the
+        # actual guess on a plain synthetic test image isn't part of this
+        # module's own contract to get "right", only to always produce SOME
+        # bool without crashing start_review_server().
+        assert record["font_size_px"] > 0
+    finally:
+        session.server.shutdown()
+        session.server.server_close()
+
+
+def test_start_review_server_state_marks_an_earlier_rounds_explicit_override_as_already_touched(
+    tmp_path: Path,
+) -> None:
+    """28.08.2026 (Runde 4) - a replacement whose render_font_size/
+    render_bold/render_centered an EARLIER correction round already set
+    explicitly (this is what a SECOND `review` round on an already-
+    corrected image actually looks like - see the matching
+    render_box scenario further above,
+    test_start_review_server_state_reflects_an_already_corrected_replacement)
+    must show up as ALREADY touched in this round's initial state too -
+    not just carry the override's VALUE. Without the *_touched markers
+    being True here, a human who reopens `review` and never so much as
+    looks at the bold/font-size controls (they only wanted to nudge a
+    box's position) would have collectRegions() omit font_size/bold this
+    round, and regions_io.py's tri-state contract (no "keep the old
+    override" fallback for these two fields) would silently reset a real,
+    previously-explicit choice back to auto-estimated."""
+    region = OcrTextRegion(text="Hello", x=10, y=10, width=80, height=20, confidence=90.0)
+    replacement = TextReplacement(
+        region=region,
+        translated_text="Hallo [DE]",
+        render_font_size=22,
+        render_bold=True,
+        render_centered=True,
+    )
+    source = tmp_path / "photo.png"
+    _build_image(source)
+    session = review_server.start_review_server(str(source), [replacement])
+    try:
+        record = _get_json(session.url + "api/state")["regions"][0]
+        assert record["font_size_touched"] is True
+        assert record["font_size_px"] == 22
+        assert record["bold_touched"] is True
+        assert record["bold"] is True
+        assert record["centered"] is True
+    finally:
+        session.server.shutdown()
+        session.server.server_close()
+
+
+def test_review_session_wait_applies_explicit_font_size_bold_centered_from_the_posted_region(
+    tmp_path: Path,
+) -> None:
+    """28.08.2026 (Runde 4) end-to-end guard for the new tri-state fields
+    themselves (mirrors test_review_session_wait_returns_apply_outcome_
+    from_a_real_http_post above, which predates font_size/bold/centered
+    entirely) - a POST /api/apply body that DOES include font_size/bold/
+    centered (i.e. what _PAGE_HTML's collectRegions() sends for a region
+    whose controls a human actually touched, per its own tri-state
+    comment) must come back out as the matching TextReplacement.
+    render_font_size/render_bold/render_centered - the exact three fields
+    every InpaintingBackend.apply() now reads INSTEAD OF its own estimate,
+    see pipeline.images.inpainting.TextReplacement's own docstring."""
+    source = tmp_path / "photo.png"
+    _build_image(source)
+    session = review_server.start_review_server(str(source), [_replacement("Hello")])
+
+    edited_region = {
+        "x": 10, "y": 10, "width": 80, "height": 20,
+        "translated_text": "HALLO",
+        "original_text": "Hello", "confidence": 90.0,
+        "font_size": 30, "bold": True, "centered": True,
+    }
+
+    def _act_like_the_browser() -> None:
+        time.sleep(0.1)
+        result = _post_json(session.url + "api/apply", [edited_region])
+        assert result["ok"] is True
+
+    threading.Thread(target=_act_like_the_browser).start()
+    outcome, edited = session.wait(timeout_seconds=5.0)
+
+    assert outcome == "apply"
+    assert edited is not None
+    replacement = edited[0]
+    assert replacement.render_font_size == 30
+    assert replacement.render_bold is True
+    assert replacement.render_centered is True
+
+
 def test_review_session_wait_times_out_without_any_action(tmp_path: Path) -> None:
     source = tmp_path / "photo.png"
     _build_image(source)

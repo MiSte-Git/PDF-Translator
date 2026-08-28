@@ -617,39 +617,121 @@ def _match_block_lines(
     return matched
 
 
+def _split_matched_lines_by_height(
+    matched: list[tuple[tuple[float, float, float, float], str, float]],
+) -> list[list[tuple[tuple[float, float, float, float], str, float]]]:
+    """27.08.2026 - real user report, Backlog.md 27.08.2026, Michael:
+    "Spirit - Soul - Meatsuit.jpg"'s own header block, "SPIRIT SOUL
+    MEATSUIT" (big title) directly above "HOW THE CHALICE RESTORES WHAT
+    IS ETERNALLY PURE" (small subtitle), both centered and tightly
+    spaced - PP-StructureV3's layout model grouped them into ONE
+    `paragraph_title`/`doc_title` block (confirmed via
+    tools/probe_paddleocr.py against the real image: the two ocr_lines
+    have heights 37px and 20px, ratio 0.54). `_paddle_block_to_region()`
+    then joined them with a space into one run-on sentence and picked
+    ONE font size for the whole thing (averaged from both heights, in
+    practice close to the SMALLER line's own size once the shrink-to-fit
+    loop in pipeline.images.inpainting._fit_text() ran) - visually wrong
+    on both counts Michael described: "von Mittig Oben Grosser Font im
+    Viewer zu klitzeklein links oben in der Ecke" once he compared it to
+    the (unrelated, WebViewer-only) correction preview.
+
+    The Tesseract path already guards against exactly this - see
+    _nearest_region_below_same_column()'s own
+    _PARAGRAPH_HEIGHT_RATIO_MIN check, "too different a font size to be
+    the same paragraph" - but that guard only runs for
+    merge_lines_into_paragraphs(), which PaddleOcrEngine.recognize()
+    never calls (`engine_returns_paragraphs = True`, see
+    pipeline.images.translate_image's grouping step - Paddle's OWN
+    layout blocks are trusted as paragraph boundaries directly). This
+    function brings the SAME guard to the Paddle path: split `matched`
+    (already sorted top-to-bottom by _paddle_block_to_region()) into
+    consecutive runs wherever two ADJACENT lines' heights fall outside
+    _PARAGRAPH_HEIGHT_RATIO_MIN of each other - reusing that exact
+    constant rather than a second, potentially inconsistent threshold.
+    A block whose lines are all similar heights (the overwhelming
+    majority - genuine wrapped prose, or a title that merely wraps
+    across two lines of its OWN size) returns exactly one run, i.e.
+    `_paddle_block_to_region()`'s pre-27.08.2026 behaviour is unchanged
+    for every block that doesn't have this specific problem."""
+    if not matched:
+        return []
+    runs: list[list[tuple[tuple[float, float, float, float], str, float]]] = [[matched[0]]]
+    for prev, current in zip(matched, matched[1:]):
+        prev_height = prev[0][3] - prev[0][1]
+        current_height = current[0][3] - current[0][1]
+        smaller, larger = sorted([prev_height, current_height])
+        if larger <= 0 or smaller / larger < _PARAGRAPH_HEIGHT_RATIO_MIN:
+            runs.append([])
+        runs[-1].append(current)
+    return runs
+
+
 def _paddle_block_to_region(
     block: dict, ocr_lines: list[tuple[tuple[float, float, float, float], str, float]]
-) -> OcrTextRegion | None:
-    """One OcrTextRegion for a single translatable parsing_res_list
-    `block`, built from whichever `ocr_lines` fall geometrically inside
-    it (a line's box CENTER inside the block's box - see
-    PaddleOcrEngine's docstring) - None if none do (the layout and OCR
-    passes disagreed about where text is; skipped rather than translating
-    a block with no text) or if `block` itself has no usable bbox."""
+) -> list[OcrTextRegion]:
+    """One OcrTextRegion per same-type-size run of `ocr_lines` found
+    geometrically inside a single translatable parsing_res_list `block`
+    (a line's box CENTER inside the block's box - see PaddleOcrEngine's
+    docstring) - [] if none match (the layout and OCR passes disagreed
+    about where text is; skipped rather than translating a block with no
+    text) or if `block` itself has no usable bbox.
+
+    27.08.2026: used to always return a single OcrTextRegion (or None) -
+    see _split_matched_lines_by_height()'s docstring for the real title/
+    subtitle-merging bug that changed this. The COMMON case (one run,
+    covering every matched line) is still built exactly as before,
+    using the block's own bbox - only when
+    _split_matched_lines_by_height() actually finds an internal
+    type-size jump does this return more than one region, each built
+    from just that run's own lines' union bbox (the single block bbox
+    can no longer describe more than one of them)."""
     block_box = _paddle_field(block, "block_bbox")
     # same numpy-truthiness pitfall as _paddle_ocr_lines() above:
     # block_bbox is a numpy array on the real pipeline, so `not block_box`
     # raises for it instead of testing "is it missing".
     if block_box is None or len(block_box) != 4:
-        return None
+        return []
     bx0, by0, bx1, by1 = block_box
 
     matched = [ocr_lines[i] for i in _match_block_lines(block_box, ocr_lines)]
     if not matched:
-        return None
+        return []
 
     matched.sort(key=lambda item: (item[0][1], item[0][0]))  # top-to-bottom, then left-to-right
-    text = " ".join(item[1] for item in matched if item[1])
-    if not text.strip():
-        return None
-    scores = [item[2] for item in matched]
-    confidence = (sum(scores) / len(scores)) * 100
-    line_height = round(sum(item[0][3] - item[0][1] for item in matched) / len(matched))
-    return OcrTextRegion(
-        text=text,
-        x=round(bx0), y=round(by0), width=round(bx1 - bx0), height=round(by1 - by0),
-        confidence=confidence, line_height=line_height,
-    )
+    runs = _split_matched_lines_by_height(matched)
+
+    if len(runs) == 1:
+        text = " ".join(item[1] for item in matched if item[1])
+        if not text.strip():
+            return []
+        scores = [item[2] for item in matched]
+        confidence = (sum(scores) / len(scores)) * 100
+        line_height = round(sum(item[0][3] - item[0][1] for item in matched) / len(matched))
+        return [OcrTextRegion(
+            text=text,
+            x=round(bx0), y=round(by0), width=round(bx1 - bx0), height=round(by1 - by0),
+            confidence=confidence, line_height=line_height,
+        )]
+
+    regions: list[OcrTextRegion] = []
+    for run in runs:
+        text = " ".join(item[1] for item in run if item[1])
+        if not text.strip():
+            continue
+        scores = [item[2] for item in run]
+        confidence = (sum(scores) / len(scores)) * 100
+        line_height = round(sum(item[0][3] - item[0][1] for item in run) / len(run))
+        rx0 = min(item[0][0] for item in run)
+        ry0 = min(item[0][1] for item in run)
+        rx1 = max(item[0][2] for item in run)
+        ry1 = max(item[0][3] for item in run)
+        regions.append(OcrTextRegion(
+            text=text,
+            x=round(rx0), y=round(ry0), width=round(rx1 - rx0), height=round(ry1 - ry0),
+            confidence=confidence, line_height=line_height,
+        ))
+    return regions
 
 
 def _paddle_block_to_line_regions(
@@ -843,8 +925,13 @@ class PaddleOcrEngine:
 
             regions: list[OcrTextRegion] = []
             for block in blocks:
-                region = _paddle_block_to_region(block, ocr_lines)
-                if region is None:
+                # 27.08.2026: _paddle_block_to_region() now returns a LIST
+                # (usually one region, occasionally more - see its own and
+                # _split_matched_lines_by_height()'s docstrings for the
+                # real title/subtitle-merging bug that made this
+                # necessary) rather than a single region or None.
+                block_regions = _paddle_block_to_region(block, ocr_lines)
+                if not block_regions:
                     continue
                 label = _paddle_field(block, "block_label")
                 # 24.08.2026: a label-excluded block that genuinely has
@@ -855,8 +942,7 @@ class PaddleOcrEngine:
                 # disappearing from every collision check the way it
                 # did before this field existed.
                 if label not in _PADDLE_TRANSLATABLE_LABELS:
-                    region = _dataclass_replace(region, translatable=False)
-                    regions.append(region)
+                    regions.extend(_dataclass_replace(region, translatable=False) for region in block_regions)
                     # 26.08.2026 - see _PADDLE_SCATTERED_TEXT_LABELS's
                     # docstring: additionally translate each of this
                     # block's own OCR lines individually, in place,
@@ -866,7 +952,7 @@ class PaddleOcrEngine:
                             _paddle_block_to_line_regions(block, ocr_lines, claimed_line_indices)
                         )
                     continue
-                regions.append(region)
+                regions.extend(block_regions)
         except Exception as exc:
             raise OcrError(f"PaddleOCR-Ergebnis konnte nicht verarbeitet werden: {exc}") from exc
         return regions

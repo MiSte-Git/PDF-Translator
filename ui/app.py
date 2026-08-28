@@ -5,7 +5,7 @@ import logging
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QThreadPool, QUrl, Qt
+from PySide6.QtCore import QSettings, QThreadPool, QTimer, QUrl, Qt
 from PySide6.QtGui import QColor, QDesktopServices, QPalette
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
@@ -65,6 +65,24 @@ MODE_KEYS = {
 _EXECUTABLE_MODES = {
     TranslationMode.PRESENTATION, TranslationMode.WORD, TranslationMode.PDF, TranslationMode.IMAGES,
 }
+
+# 28.08.2026 - real user report, Backlog.md 28.08.2026, Michael: "Am
+# Anfang geht es gut 30 Sekunden bevor sich etwas tut ... Erst da sieht
+# man das etwas vorwärts geht." job_progress's indeterminate phase (see
+# _start(), before _job_total() reports in) used to rely purely on
+# QProgressBar's native busy/marquee animation (the usual effect of
+# setRange(0, 0)) - which, on Michael's actual desktop/Qt style, simply
+# did not visibly animate, so the whole OCR/analysis phase before the
+# first per-region count looked completely frozen. _BUSY_SWEEP_MAX/
+# _BUSY_SWEEP_STEP drive a manual left-to-right sweep instead (see
+# _tick_busy_progress()) - independent of whatever a given platform's
+# style does with an indeterminate range, so it is visibly moving
+# everywhere, not just on styles that happen to animate it. Values
+# picked purely for a smooth-looking ~1s sweep at the 30ms timer
+# interval (100 / 3 ≈ 33 ticks ≈ 1s per left-to-right pass); no
+# significance beyond that.
+_BUSY_SWEEP_MAX = 100
+_BUSY_SWEEP_STEP = 3
 
 
 class SettingsDialog(QDialog):
@@ -185,6 +203,15 @@ class MainWindow(QMainWindow):
         # _start()'s is_images branch, which overwrites this before each
         # run).
         self._job_progress_unit_key = "job.progress_count"
+        # 28.08.2026 - see _BUSY_SWEEP_MAX/_BUSY_SWEEP_STEP's own comment
+        # above - drives job_progress's indeterminate-phase sweep
+        # manually via _tick_busy_progress(), started in _start() and
+        # stopped the moment a real count is known (_job_total()) or the
+        # run ends without ever reaching that point (_show_job_result(),
+        # _job_failed()).
+        self._busy_timer = QTimer(self)
+        self._busy_timer.setInterval(30)
+        self._busy_timer.timeout.connect(self._tick_busy_progress)
 
         self.mode = QComboBox()
         for mode in MODE_KEYS:
@@ -815,11 +842,16 @@ class MainWindow(QMainWindow):
         # Indeterminate only for the brief moment before total_paragraph_count()
         # reports in (see _job_total) - no API call has happened yet at this
         # point, so there is nothing to show real progress against.
-        self.job_progress.setRange(0, 0)
+        # 28.08.2026 - a manually-driven sweep (_tick_busy_progress()), not
+        # QProgressBar's native busy/marquee animation - see
+        # _BUSY_SWEEP_MAX's own comment for why.
+        self.job_progress.setTextVisible(False)
+        self.job_progress.setRange(0, _BUSY_SWEEP_MAX)
+        self.job_progress.setValue(0)
+        self._busy_timer.start()
         self.job_status.setText(self.language.text("job.running"))
         self.cancel_button.setVisible(True)
         self.cancel_button.setEnabled(True)
-        self._set_running(True)
 
         if is_images:
             # ImageTranslationWorker's shape differs deliberately from the
@@ -876,6 +908,20 @@ class MainWindow(QMainWindow):
         worker.signals.finished.connect(self._job_finished)
         worker.signals.failed.connect(self._job_failed)
         self._worker = worker
+        # 27.08.2026 - real user report, Backlog.md 27.08.2026: "Während der
+        # Verarbeitung ist in der App der Start Button weiterhin aktiv."
+        # Root cause: _set_running(True) used to run BEFORE self._worker was
+        # assigned above (right after the confirm dialog, long before the
+        # worker itself was even constructed). _set_running() ends with
+        # _update_start_state(), which re-enables/disables the Start button
+        # via _start_blocked_reason()'s `self._worker is not None` check -
+        # called while self._worker was still None (or a stale reference
+        # from a PREVIOUS run already cleared to None), it never saw a
+        # reason to block, so Start stayed enabled for the whole run. Moving
+        # this call to AFTER self._worker is set (and right before the
+        # worker actually starts, so nothing above can early-return without
+        # having enabled the running state) fixes that at its actual cause.
+        self._set_running(True)
         self.thread_pool.start(worker)
 
     def _cancel(self) -> None:
@@ -890,9 +936,28 @@ class MainWindow(QMainWindow):
         # a bug where the range's max was set to the CURRENT processed count
         # on every update, so the bar always showed 100% no matter how much
         # of the run actually remained.
+        # 28.08.2026 - stop the manual busy-sweep (_tick_busy_progress(),
+        # see _BUSY_SWEEP_MAX's own comment) and restore the percentage
+        # text _start() hid for that phase - a real count is now known, so
+        # there is real progress to show instead of the sweep.
+        self._busy_timer.stop()
+        self.job_progress.setTextVisible(True)
         self._job_total_paragraphs = total
         self.job_progress.setRange(0, max(total, 1))
         self.job_progress.setValue(0)
+
+    def _tick_busy_progress(self) -> None:
+        """Advances job_progress's value by _BUSY_SWEEP_STEP, wrapping back
+        to 0 at the top - see _BUSY_SWEEP_MAX's own comment (__init__) for
+        why this drives the indeterminate-phase sweep manually instead of
+        relying on QProgressBar's native busy/marquee animation. Only ever
+        ticking while _busy_timer is running, i.e. between _start() and
+        whichever of _job_total()/_show_job_result()/_job_failed() stops it
+        first."""
+        value = self.job_progress.value() + _BUSY_SWEEP_STEP
+        if value > self.job_progress.maximum():
+            value = 0
+        self.job_progress.setValue(value)
 
     def _job_progress(self, location: str) -> None:
         self._job_last_location = location
@@ -983,6 +1048,12 @@ class MainWindow(QMainWindow):
                 else t("job.pdf_overflow_count", count=stats.overflow_blocks)
             )
         self.job_status.setText(text)
+        # 28.08.2026 - safety net: a run that fails/cancels before
+        # _job_total() ever reports in (e.g. an error during the initial
+        # OCR/analysis phase) would otherwise leave _busy_timer running
+        # forever, silently ticking job_progress's value after the bar
+        # itself is already hidden below.
+        self._busy_timer.stop()
         self.job_progress.setVisible(False)
         self.cancel_button.setVisible(False)
         self.open_folder_button.setVisible(True)
@@ -1109,6 +1180,10 @@ class MainWindow(QMainWindow):
     def _job_failed(self, message: str) -> None:
         log.error("Übersetzungslauf fehlgeschlagen: %s", message)
         self._set_running(False)
+        # 28.08.2026 - same safety net as _show_job_result()'s: a failure
+        # during the initial OCR/analysis phase (before _job_total() ever
+        # reports in) would otherwise leave _busy_timer ticking forever.
+        self._busy_timer.stop()
         self.job_progress.setVisible(False)
         self.cancel_button.setVisible(False)
         self.job_status.setText(self.language.text("job.idle"))

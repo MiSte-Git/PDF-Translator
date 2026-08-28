@@ -91,7 +91,14 @@ def start_correction(job_id: str, file_index: int) -> dict[str, Any]:
     with _CORRECTIONS_LOCK:
         if key in _PENDING_BY_FILE:
             return {"ok": False, "errors": ["Für dieses Bild läuft bereits eine Korrektur."]}
-        session = start_review_server(str(source_path), replacements)
+        # 27.08.2026 - see start_review_server()'s own docstring (real
+        # user report, Backlog.md 27.08.2026, asked for this directly:
+        # "Können wir nicht Logs aus der Fenstersitzung generieren?").
+        # Named after `destination_path` (not `source_path`) so it lands
+        # next to the corrected image and its QA report - the two files
+        # Michael already knows to look at/send.
+        debug_log_path = str(destination_path.with_name(f"{destination_path.stem}_correction_debug.json"))
+        session = start_review_server(str(source_path), replacements, debug_log_path=debug_log_path)
         correction_id = uuid.uuid4().hex
         state = _CorrectionState(id=correction_id, job_id=job_id, file_index=file_index, session=session)
         _CORRECTIONS[correction_id] = state

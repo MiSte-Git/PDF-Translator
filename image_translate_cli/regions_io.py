@@ -57,6 +57,23 @@ def replacements_from_region_list(data: object) -> list[TextReplacement]:
     review_server.py's browser page is the first caller to actually set
     these (see its collectRegions()), a hand-written --regions file can
     use them too but rarely needs to.
+
+    `font_size`/`bold`/`centered` (28.08.2026, all optional - see
+    pipeline.images.inpainting.TextReplacement's matching
+    render_font_size/render_bold/render_centered docstring, real user
+    report Backlog.md 28.08.2026: "Wenn ich etwas korrigiere, muss es
+    auch genauso korrigiert werden wie ich es im Viewer sehe."). Unlike
+    orig_*/x/y/width/height above, these have NO "derive from something
+    else" fallback - `font_size`/`bold` absent means "keep estimating
+    from the original OCR pixels, exactly as before this round" (None on
+    TextReplacement), `centered` absent means "left-aligned" (False,
+    also the exact previous behaviour). A correction UI only ever sends
+    these when a human explicitly set them for THIS region - there is
+    deliberately no attempt here (or anywhere in the renderer) to guess
+    an original font size/weight/alignment from `orig_width`/
+    `orig_height`/OCR data; that guess already happens once, in
+    pipeline.images.font_style.estimate_font_style()/_initial_font_size(),
+    and stays there.
     """
     if not isinstance(data, list):
         raise RegionsError(f"Regionen müssen eine JSON-Liste sein, nicht {type(data).__name__}")
@@ -95,8 +112,17 @@ def replacements_from_region_list(data: object) -> list[TextReplacement]:
             if moved
             else None
         )
+        font_size_raw = entry.get("font_size")
+        bold_raw = entry.get("bold")
         replacements.append(
-            TextReplacement(region=region, translated_text=str(entry["translated_text"]), render_box=render_box)
+            TextReplacement(
+                region=region,
+                translated_text=str(entry["translated_text"]),
+                render_box=render_box,
+                render_font_size=int(font_size_raw) if font_size_raw is not None else None,
+                render_bold=bool(bold_raw) if bold_raw is not None else None,
+                render_centered=bool(entry.get("centered", False)),
+            )
         )
     return replacements
 

@@ -223,6 +223,15 @@ DE = {
     "image_correction.column_original": "Original",
     "image_correction.column_translation": "Übersetzung",
     "image_correction.editor_label": "Übersetzung bearbeiten:",
+    # 28.08.2026 (Runde 3) - Bedienelemente für Schriftgröße/Fett/
+    # Zentriert im Korrektur-Dialog (siehe TextReplacement.render_font_size/
+    # render_bold/render_centered, pipeline/images/inpainting.py) - real
+    # user report, Backlog.md 28.08.2026: "Wenn ich etwas korrigiere,
+    # muss es auch genauso korrigiert werden wie ich es im Viewer sehe."
+    "image_correction.font_size_label": "Schriftgröße:",
+    "image_correction.font_size_auto": "Automatisch",
+    "image_correction.bold": "Fett",
+    "image_correction.centered": "Zentriert",
     "image_correction.apply": "Anwenden und speichern",
     "image_correction.close": "Schließen",
     "image_correction.applying": "Wird angewendet …",
@@ -422,6 +431,15 @@ EN = {
     "image_correction.column_original": "Original",
     "image_correction.column_translation": "Translation",
     "image_correction.editor_label": "Edit translation:",
+    # 28.08.2026 (round 3) - font-size/bold/centered controls in the
+    # correction dialog (see TextReplacement.render_font_size/render_bold/
+    # render_centered, pipeline/images/inpainting.py) - real user report,
+    # Backlog.md 28.08.2026: "Wenn ich etwas korrigiere, muss es auch
+    # genauso korrigiert werden wie ich es im Viewer sehe."
+    "image_correction.font_size_label": "Font size:",
+    "image_correction.font_size_auto": "Auto",
+    "image_correction.bold": "Bold",
+    "image_correction.centered": "Centered",
     "image_correction.apply": "Apply and save",
     "image_correction.close": "Close",
     "image_correction.applying": "Applying …",

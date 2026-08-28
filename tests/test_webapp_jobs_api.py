@@ -233,13 +233,24 @@ def test_start_job_persists_form_state_for_the_next_session(
 
 
 def test_start_job_does_not_persist_a_rejected_request(
-    running_server: str, tmp_path: Path
+    running_server: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The other half of the fix's own docstring claim ("a request that
     gets rejected below never reaches here, so a typo'd form never
     overwrites a good remembered one") - a request missing credentials
     fails start_job()'s fail-fast checks BEFORE settings_store.save(), so
-    the on-disk file must stay exactly at DEFAULTS."""
+    the on-disk file must stay exactly at DEFAULTS.
+
+    28.08.2026 - this test used to rely on the ambient environment
+    genuinely having no DEEPL_API_KEY set, which only held true in a
+    clean CI sandbox. On a real dev machine with a real DeepL key saved
+    (env var OR the OS keyring - ui/settings.py::credential_status()
+    checks both) this silently returned 200 instead of 400 (real report:
+    Michael's own machine, `pytest tests/` after a real day-to-day
+    session, 4 tests in this file failing this exact way). Forcing
+    credential_status() here makes the test deterministic regardless of
+    what's actually configured on the machine running it."""
+    monkeypatch.setattr("webapp.job_bridge.credential_status", lambda provider: "credential.missing")
     source = tmp_path / "photo.png"
     _build_image(source, "Hello")
 
@@ -259,7 +270,7 @@ def test_start_job_does_not_persist_a_rejected_request(
 
 
 def test_start_job_enforces_checks_without_a_prior_analyze_call(
-    running_server: str, tmp_path: Path
+    running_server: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Schritt 5, the other half of the confirmation-gate proof: a client
     that skips /api/analyze entirely and posts straight to /api/jobs is
@@ -267,7 +278,13 @@ def test_start_job_enforces_checks_without_a_prior_analyze_call(
     (here: missing credential, no fake_deepl_credential fixture) - the
     RoadMap.md Leitprinzip holds even for a client that never asked for a
     cost estimate at all, not just one that asked and was ignored.
+
+    28.08.2026 - credential_status() forced deterministically, same
+    "ambient environment/keyring on a real dev machine can make this
+    pass by accident" fix as
+    test_start_job_does_not_persist_a_rejected_request above.
     """
+    monkeypatch.setattr("webapp.job_bridge.credential_status", lambda provider: "credential.missing")
     source = tmp_path / "photo.png"
     _build_image(source, "Hello")
     status, payload = _post_json(
@@ -300,12 +317,17 @@ def test_start_job_rejects_missing_output_dir(
 
 
 def test_start_job_rejects_unavailable_ocr_engine(
-    running_server: str, fake_deepl_credential: None, tmp_path: Path
+    running_server: str, fake_deepl_credential: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # google_vision has no configured API key in this environment (see
-    # tests/test_webapp_images_api.py's own config-route assertion that
-    # ocr_engine_available["google_vision"] is False here) - a real,
-    # server-side fail-fast rejection, not a mocked one.
+    # 28.08.2026 - explicitly forced False instead of relying on
+    # "google_vision has no configured API key in this environment" -
+    # that assumption breaks on a real dev machine that DOES have a
+    # working Google credential configured for actual use (same class of
+    # ambient-environment leak as credential_status() above, see
+    # test_start_job_does_not_persist_a_rejected_request's docstring).
+    monkeypatch.setattr(
+        "webapp.job_bridge.ocr_engine_available", lambda name: False if name == "google_vision" else True
+    )
     source = tmp_path / "photo.png"
     _build_image(source, "Hello")
     status, payload = _post_json(
@@ -322,10 +344,17 @@ def test_start_job_rejects_unavailable_ocr_engine(
     assert any("google_vision" in message for message in payload["errors"])
 
 
-def test_start_job_rejects_missing_credential(running_server: str, tmp_path: Path) -> None:
+def test_start_job_rejects_missing_credential(
+    running_server: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     # No fake_deepl_credential fixture here on purpose - the real fail-fast
     # check (RoadMap.md Leitprinzip) must fire even though ocr_engine/
     # inpainting_backend are both fine.
+    # 28.08.2026 - credential_status() forced deterministically, same
+    # ambient-environment/keyring fix as the other tests in this group
+    # (see test_start_job_does_not_persist_a_rejected_request's
+    # docstring for the real report that surfaced this).
+    monkeypatch.setattr("webapp.job_bridge.credential_status", lambda provider: "credential.missing")
     source = tmp_path / "photo.png"
     _build_image(source, "Hello")
     status, payload = _post_json(

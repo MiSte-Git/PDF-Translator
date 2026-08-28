@@ -22,7 +22,7 @@ Stil-Erkennung von dort, statt sie selbst zu duplizieren.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol, runtime_checkable
 
 from pipeline.images.font_style import classify_bold, estimate_font_style
@@ -118,11 +118,41 @@ class TextReplacement:
     patch of translated text appeared wherever the box had been dragged
     to. None (the default, and what every call site that predates
     26.08.2026 still produces) means "draw at `region` itself" - the
-    exact previous behavior, unchanged."""
+    exact previous behavior, unchanged.
+
+    `render_font_size`/`render_bold`/`render_centered` (28.08.2026,
+    Runde 3 - real user report, Backlog.md 28.08.2026 Runden 1/2:
+    "Wenn ich etwas korrigiere, muss es auch genauso korrigiert werden
+    wie ich es im Viewer sehe." Runde 1 the same day already fixed
+    render_box's font size silently reseeding from the corrected box's
+    OWN height instead of the original text's real size (see
+    _fit_text()'s `start_size` docstring) - but that only restored the
+    ORIGINAL size/style, it never gave a correction UI any way to
+    deliberately CHANGE size/weight/alignment and have that choice
+    actually survive into the render. These three fields are that: an
+    explicit, human-set override, read by every InpaintingBackend.apply()
+    below INSTEAD OF the auto-estimated value whenever set - never
+    inferred from OCR pixels, only ever set by a correction UI
+    (image_translate_cli/review_server.py or
+    ui/image_correction_dialog.py) via
+    image_translate_cli/regions_io.py::replacements_from_region_list().
+    None (the default for the first two, False for the third) means "no
+    override, keep using the estimated value" - the exact previous
+    behavior for every replacement a correction UI hasn't touched.
+    `render_centered` has no "estimate it" fallback at all (unlike size/
+    bold) - the renderer has never known how to detect original
+    alignment from OCR and Michael explicitly asked that it not try to
+    (Backlog.md 28.08.2026 Runde 2): centering is ONLY ever what a human
+    deliberately chose for this replacement, defaulting to left-aligned
+    like every region always rendered before this field existed.
+    """
 
     region: OcrTextRegion
     translated_text: str
     render_box: OcrTextRegion | None = None
+    render_font_size: int | None = None
+    render_bold: bool | None = None
+    render_centered: bool = False
 
 
 @runtime_checkable
@@ -266,13 +296,38 @@ def _fit_text(
     italic: bool = False,
     left_room: float = 0.0,
     right_room: float = 0.0,
+    start_size: float | None = None,
 ) -> tuple[list[str], object, int, float]:
-    """Pick the largest font size - starting from _initial_font_size()'s
-    region-height-derived size, in the requested weight/family/slant
-    (`bold`/`family`/`italic` - see pipeline.images.font_style.
-    estimate_font_style()) - that, once `text` is word-wrapped to
-    region.width, fits within `max_height` without shrinking past
-    _MIN_FONT_SIZE.
+    """Pick the largest font size - starting from `start_size` if given,
+    otherwise _initial_font_size()'s region-height-derived size, in the
+    requested weight/family/slant (`bold`/`family`/`italic` - see
+    pipeline.images.font_style.estimate_font_style()) - that, once `text`
+    is word-wrapped to region.width, fits within `max_height` without
+    shrinking past _MIN_FONT_SIZE.
+
+    `start_size` (27.08.2026, round 3) - real user report, Backlog.md
+    27.08.2026, Michael: "in der Vorschau [bekomme ich] die richtigen
+    Schriftgrössen ... wenn ich dann auf Anwenden und speichern klicke
+    ... wird lediglich die Position der Textbox angepasst ... aber nicht
+    die Grösse." Every PREVIEW (the Qt correction canvas since round 5,
+    the WebViewer's font_size_px since 26.08.2026) seeds itself from
+    estimated_font_size(replacement.region) - the TRUE original region,
+    never whatever box a correction UI is currently showing. Every
+    InpaintingBackend.apply() below now passes that exact same value
+    here as `start_size` - previously this function always called
+    _initial_font_size(region) itself, and every caller passed
+    `region=draw_region` (render_box when a correction set one - see
+    _draw_region()), so a region whose ORIGINAL OcrTextRegion.line_height
+    was never set (the common case: a plain, un-merged single OCR line -
+    see that field's own docstring) silently reseeded from the manually
+    corrected box's OWN new height instead of the original text's real
+    size the instant a human resized it even slightly, however
+    plausible-looking the preview had made that resize seem. `region`
+    (still `draw_region`) remains what word-wrapping/shrinking measures
+    against - only the STARTING size moves to this new parameter.
+    None (every existing caller before this parameter existed, and any
+    caller that only ever draws untouched regions where draw_region IS
+    region already) keeps the exact old behaviour.
 
     This is primarily a SHRINK-to-fit strategy, deliberately never a
     GROW-the-box-DOWNWARD one: growing past `max_height` to fit more
@@ -309,7 +364,7 @@ def _fit_text(
     all) and is exactly 0.0 whenever the shrink loop alone already fit,
     i.e. for every region this behaved the same for before 23.08.2026.
     """
-    size = _initial_font_size(region)
+    size = _initial_font_size(region) if start_size is None else start_size
     max_width = max(region.width, 1)
     while True:
         font = _load_font(size, bold=bold, family=family, italic=italic)
@@ -385,6 +440,8 @@ def _draw_fitted_text(
     italic: bool = False,
     left_room: float = 0.0,
     right_room: float = 0.0,
+    start_size: float | None = None,
+    centered: bool = False,
 ) -> None:
     """Shared final drawing step for all three InpaintingBackend
     implementations below - wraps and shrinks `text` to fit inside
@@ -429,16 +486,50 @@ def _draw_fitted_text(
     margin genuinely has nothing else drawn in it already, exactly the
     real case that motivated this (a real user confirmed the two
     directions used here were empty margin, not unknown content).
+
+    `start_size` (27.08.2026, round 3, see _fit_text()'s own docstring)
+    passed straight through - every InpaintingBackend.apply() below
+    supplies estimated_font_size(replacement.region) here, so a manually
+    corrected box's own height never re-derives a different starting
+    size than the correction UI's own preview already showed. None (the
+    default) keeps deriving the start size from `region` itself, i.e.
+    every caller before this parameter existed is unaffected.
+
+    `centered` (28.08.2026, Runde 3 - real user report, Backlog.md
+    28.08.2026 Runde 2: "Wenn ich etwas korrigiere, muss es auch genauso
+    korrigiert werden wie ich es im Viewer sehe.") - the renderer had NO
+    alignment concept at all before this (every line always drawn at
+    `region.x + x_offset`, see Runde 6/28.08.2026's own explanation in
+    Backlog.md for why this default stayed left-aligned rather than
+    trying to guess an original alignment from OCR data). When True, each
+    line is instead centered horizontally within `region.width` - a
+    PER-LINE offset (not one offset for the whole block), so a shorter
+    second line of a wrapped title centers independently of a longer
+    first line, matching ordinary rich-text-editor behaviour. Centering
+    intentionally ignores `x_offset` (the left/right-room-widening shift
+    _fit_text() computes for an unbreakable overlong word, see that
+    function's own docstring) - the two features solve different
+    problems (make an otherwise-overflowing single word fit vs. how to
+    place text that already fits) and combining them would center within
+    an ad-hoc widened width no correction UI's preview ever shows,
+    reintroducing exactly the "preview and result differ" complaint this
+    field exists to close. False (the default) is the exact previous
+    behaviour, unchanged for every replacement no correction UI has set
+    `render_centered` on.
     """
     lines, font, line_height, x_offset = _fit_text(
         draw, text, region, max_height, bold=bold, family=family, italic=italic,
-        left_room=left_room, right_room=right_room,
+        left_room=left_room, right_room=right_room, start_size=start_size,
     )
-    x = region.x + x_offset
     y = region.y
     for line in lines:
         if y >= image_height:
             break
+        if centered:
+            line_width = draw.textlength(line, font=font)
+            x = region.x + max(0.0, (region.width - line_width) / 2)
+        else:
+            x = region.x + x_offset
         draw.text((x, y), line, fill=color, font=font)
         y += line_height
 
@@ -549,6 +640,47 @@ def _vertical_room_below(region: OcrTextRegion, other_regions: list[OcrTextRegio
     return max(best_gap - _VERTICAL_SAFETY_MARGIN, 1)
 
 
+def _vertical_room_above(region: OcrTextRegion, other_regions: list[OcrTextRegion]) -> float:
+    """Mirror of _vertical_room_below() for the OPPOSITE direction - how
+    far `region`'s box may extend UPWARD (region.y decreasing) before
+    reaching the nearest OTHER region above it in the same horizontal
+    band, minus _VERTICAL_SAFETY_MARGIN.
+
+    Added 27.08.2026 alongside _grow_region_to_fit()/
+    auto_grow_replacements() (see their own docstrings - real user
+    request, Michael: "Versuchen die Box nach oben, unten, links und
+    rechts max. vergrössern und nicht den Font anpassen") -
+    _vertical_room_below() alone only ever let a box grow DOWNWARD; a
+    region already sitting at the BOTTOM of its own card/block, with real
+    free space only above it, had no way to use that space.
+
+    Unlike _vertical_room_below() (no hard ceiling on how far below the
+    image a "no neighbour" fallback may reach - _draw_fitted_text()'s own
+    image_height clip is the safety net there), this axis has an obvious,
+    always-known hard ceiling: `region.y` itself (the image's own top
+    edge, y=0). Both the "neighbour found" and "no neighbour" results are
+    clamped to `region_top` so this can never suggest growing to a
+    negative y - the same role _horizontal_room()'s image_width clamp
+    plays for its own axis.
+    """
+    region_top = region.y
+    best_gap: float | None = None
+    for other in other_regions:
+        if other is region:
+            continue
+        if other.x + other.width <= region.x or other.x >= region.x + region.width:
+            continue  # no horizontal overlap - a different column/box
+        other_bottom = other.y + other.height
+        if other_bottom > region_top:
+            continue  # not actually above (overlaps or sits below)
+        gap = region_top - other_bottom
+        if best_gap is None or gap < best_gap:
+            best_gap = gap
+    if best_gap is None:
+        return min(region.height * _NO_NEIGHBOR_HEIGHT_ALLOWANCE, region_top)
+    return max(min(best_gap - _VERTICAL_SAFETY_MARGIN, region_top), 0.0)
+
+
 # Same idea as _VERTICAL_SAFETY_MARGIN, for _horizontal_room() below.
 _HORIZONTAL_SAFETY_MARGIN = 3
 
@@ -615,6 +747,131 @@ def _horizontal_room(
     return (
         max(left_room - _HORIZONTAL_SAFETY_MARGIN, 0.0),
         max(right_room - _HORIZONTAL_SAFETY_MARGIN, 0.0),
+    )
+
+
+def _grow_region_to_fit(
+    draw,
+    text: str,
+    region: OcrTextRegion,
+    bold: bool,
+    family: str,
+    italic: bool,
+    left_room: float,
+    right_room: float,
+    top_room: float,
+    bottom_room: float,
+) -> OcrTextRegion | None:
+    """Try to find a box - `region` grown into `left_room`/`right_room`/
+    `top_room`/`bottom_room` (each independently, from _horizontal_room()/
+    _vertical_room_above()/_vertical_room_below()) - that fits `text` at
+    `region`'s ALREADY-ESTIMATED, FIXED font size (_initial_font_size(
+    region)) WITHOUT shrinking it - the opposite priority from
+    _fit_text()'s own shrink-first loop.
+
+    27.08.2026, real user request, Michael: "Was wäre, wenn wir den Font
+    immer so lassen würden wie er erkannt wurde und die Box so gross wie
+    möglich machen ... Dann hätten wir ein sauberes Bild und erstmal
+    weniger an den Textboxen manuell zu korrigieren." A real, reproduced
+    example (the "Herz-Zitat" card, Spirit-Soul-Meatsuit.jpg, QA-Bericht
+    "(20)") showed _fit_text()'s shrink-then-widen order visibly
+    shrinking/overflowing text even for an UNTOUCHED, first-pass region -
+    well before anything a human corrected.
+
+    Called from auto_grow_replacements() below, BEFORE
+    InpaintingBackend.apply() ever runs - not from _fit_text()/
+    _draw_fitted_text() themselves, which stay completely unchanged. A
+    replacement this succeeds for gets a real TextReplacement.render_box
+    (exactly like a correction UI would set), so the grown geometry is
+    what apply() actually draws AND what image_translate_cli.report.
+    regions_from_replacements() reports back to review_server.py's
+    WebViewer - the same box, not two independently-computed ones (the
+    core problem this whole feature addresses - see Backlog.md
+    27.08.2026).
+
+    Width is tried first, narrowest-first (same _HORIZONTAL_FIT_STEPS
+    coarse search _fit_text()'s own widen-fallback already uses) - a
+    wider wrap usually needs fewer lines, so the FIRST candidate that
+    already fits `region.height + top_room + bottom_room` wins, which for
+    the common case (enough room below/above alone) is `width_extra ==
+    0.0`, i.e. the box's WIDTH is left exactly as OCR found it and only
+    its height grows. Returns None if even the full available width AND
+    height still doesn't fit - the caller (auto_grow_replacements()) then
+    leaves this replacement's render_box unset, and _fit_text()'s
+    existing shrink-then-widen-then-accept-overflow chain runs completely
+    unchanged for it, exactly as before this feature existed.
+
+    Whichever extra width was actually used is drawn from `right_room`
+    first (mirrors _fit_text()'s own x_offset preference - a widen using
+    only right_room needs no horizontal shift), `left_room` only for the
+    remainder; extra height analogously prefers `bottom_room` first (text
+    already only ever grows downward from region.y in _draw_fitted_text()
+    - using bottom_room first keeps region.y, so the box's TOP edge,
+    unchanged whenever that alone is enough), `top_room` only for the
+    remainder.
+
+    The returned OcrTextRegion carries `line_height` forward from
+    `region` explicitly (region_line_height(region), NOT left at the
+    default None) - critical: without this, a later
+    _initial_font_size()/estimated_font_size() call on the returned,
+    now-TALLER region would wrongly re-derive a much larger font size
+    from its own grown `.height` (see region_line_height()'s own
+    docstring) instead of reproducing the SAME fixed size this function
+    was asked to preserve.
+
+    Known limitation, same class as _horizontal_room()'s own documented
+    gap: room is only ever measured against OTHER OCR TEXT REGIONS, never
+    actual image content (icons, decorative borders, card backgrounds) -
+    a region surrounded by graphic elements rather than other text can
+    appear to have generous room here even where growing into it would
+    visually intrude on that graphic. Two adjacent UNTOUCHED regions
+    growing toward each other in the same run also aren't reconciled
+    against one another (each is grown independently against the SAME
+    pre-existing snapshot - see auto_grow_replacements()) - in rare cases
+    both could grow into what looks like free space from each one's own
+    perspective and end up newly overlapping each other. Neither is a new
+    class of risk - the pre-existing single-region widen fallback already
+    had both properties, just rarely triggered until now that growing is
+    tried by default instead of only as a last resort.
+    """
+    size = _initial_font_size(region)
+    font = _load_font(size, bold=bold, family=family, italic=italic)
+    line_height = max(1, int(size * _LINE_SPACING))
+    max_available_height = region.height + top_room + bottom_room
+
+    width_extra_total = left_room + right_room
+    step = max(width_extra_total / _HORIZONTAL_FIT_STEPS, 1.0) if width_extra_total > 0 else 0.0
+
+    width_extra = 0.0
+    while True:
+        width = max(region.width + width_extra, 1)
+        lines = _wrap_text_to_width(draw, text, font, width)
+        widest = max((draw.textlength(line, font=font) for line in lines), default=0.0)
+        height = line_height * len(lines)
+        if widest <= width and height <= max_available_height:
+            break
+        if width_extra >= width_extra_total:
+            break
+        width_extra = min(width_extra + step, width_extra_total)
+
+    if not (widest <= width and height <= max_available_height):
+        return None
+
+    extra_right = min(width_extra, right_room)
+    extra_left = width_extra - extra_right
+    extra_height = max(0.0, height - region.height)
+    extra_bottom = min(extra_height, bottom_room)
+    extra_top = extra_height - extra_bottom
+
+    return OcrTextRegion(
+        text=region.text,
+        x=int(region.x - extra_left),
+        y=int(region.y - extra_top),
+        width=int(region.width + extra_left + extra_right),
+        height=int(region.height + extra_top + extra_bottom),
+        confidence=region.confidence,
+        line_height=region_line_height(region),
+        translatable=region.translatable,
     )
 
 
@@ -819,6 +1076,128 @@ def _draw_region(replacement: TextReplacement) -> OcrTextRegion:
     return replacement.render_box or replacement.region
 
 
+def auto_grow_replacements(
+    replacements: list[TextReplacement],
+    obstacle_regions: list[OcrTextRegion],
+    image_width: int,
+    image_height: int,
+) -> list[TextReplacement]:
+    """Try to give every UNTOUCHED replacement (render_box is still None -
+    no correction UI has set one) a render_box grown from its region into
+    whatever room is free on all four sides, at its region's own already-
+    estimated FIXED font size (_grow_region_to_fit(), never shrunk here).
+    Called by translate_image() BEFORE InpaintingBackend.apply(), so a
+    replacement this succeeds for is drawn AND reported (image_translate_
+    cli.report.regions_from_replacements(), review_server.py's WebViewer)
+    using the exact same grown geometry - never two independently-
+    computed boxes. Real user request, Michael, 27.08.2026 - see
+    _grow_region_to_fit()'s own docstring for the full story/quote.
+
+    `image_height` clamps `bottom_room` before it ever reaches
+    _grow_region_to_fit() - real, reproduced bug (Michael, 27.08.2026,
+    "Spirit - Soul - Meatsuit.jpg"): _vertical_room_below() has NO
+    image-bottom clamp of its own (see its own docstring - previously
+    harmless, since its result was only ever used as a comparison BUDGET
+    inside _fit_text(), never as real pixel coordinates). A region near
+    the image's own bottom edge with no other TEXT region below it falls
+    back to _vertical_room_below()'s generous `region.height *
+    _NO_NEIGHBOR_HEIGHT_ALLOWANCE` (4x) - for that region ("The Chalice
+    does not end you.", y=1250 in a 1280px-tall image, height=16 -> 64px
+    of "room"), this function would otherwise happily grow the box's
+    bottom edge to y=1290, ten pixels PAST the image's real bottom edge.
+    BoxOverlayBackend's own background sampling (_sample_background()/
+    _sample_background_color()) clamps its sample area to the image
+    bounds and stays silently safe either way - but CvInpaintingBackend/
+    GpuInpaintingBackend both sample the grown box's background via
+    _average_region_color(), which does NOT clamp
+    (`pixels[px, py]` for `px`/`py` outside the actual image raises
+    `IndexError: image index out of range` directly), crashing
+    InpaintingBackend.apply() outright - reproduced exactly with this
+    real region's data. Clamping `bottom_room` here (this function is the
+    one place that turns "room" from a comparison budget into real
+    box geometry) fixes it for all three backends at once, without
+    needing _vertical_room_below()'s own, more widely used, contract to
+    change.
+
+    A replacement whose render_box is ALREADY set (an actual correction, a
+    second `correct`/`review` round on an already-corrected image) is
+    passed through completely unchanged - matches every other existing
+    "a human-set render_box is a hard cap, never silently re-touched" rule
+    in this module (see the 27.08.2026 HAUPTBUCH note above
+    _sample_background_color()). A replacement _grow_region_to_fit() can't
+    fit (returns None) is ALSO passed through unchanged - falls back to
+    InpaintingBackend.apply()'s existing shrink-then-widen-then-accept-
+    overflow chain exactly as it worked before this function existed.
+
+    Room (all four directions) is computed against a SINGLE, fixed
+    snapshot of every OTHER replacement's/obstacle's current geometry
+    (`_draw_region(r)` for each - its own render_box if it already has
+    one, else its region), taken ONCE up front, not updated as this
+    function grows one replacement after another - mirrors how
+    InpaintingBackend.apply() itself already treats horizontal widening
+    (a single static `all_regions` list, see _horizontal_room()'s own
+    call sites) rather than attempting to reconcile several regions
+    growing at once. See _grow_region_to_fit()'s own docstring for the
+    known, accepted limitation this shares (blind to non-text graphic
+    content; two adjacent untouched regions aren't reconciled against
+    each other).
+
+    Font STYLE (bold/family/italic) for the fit measurement here is
+    always the plain default (regular weight, sans-serif, upright) - NOT
+    each region's own InpaintingBackend.apply()-estimated style
+    (estimate_font_style() needs the region's real, not-yet-overwritten
+    image pixels and a sampled background color, neither available here,
+    before any image has even been opened). This is the same "close
+    enough, not pixel-perfect" approximation estimated_font_size() itself
+    already documents for review_server.py's WebViewer - bold text needs
+    somewhat more width than this measures, so a region whose real style
+    turns out bold could, rarely, still slightly overflow a grown box's
+    width; _fit_text()'s own width check inside apply() is unaffected and
+    unchanged, so that overflow is exactly as visible/handled as any
+    other _fit_text() overflow already is, never silently hidden.
+    """
+    from PIL import Image, ImageDraw
+
+    # Measures text only (draw.textlength()) - never draws anything onto
+    # it, so a throwaway 1x1 canvas is enough, mirroring how this
+    # project's own tests already measure text without a real target
+    # image (see tests/test_image_inpainting.py::_measure_draw()).
+    measuring_draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+
+    all_regions = [_draw_region(r) for r in replacements] + list(obstacle_regions)
+    grown_replacements: list[TextReplacement] = []
+    for replacement in replacements:
+        if replacement.render_box is not None:
+            grown_replacements.append(replacement)
+            continue
+        region = replacement.region
+        top_room = _vertical_room_above(region, all_regions)
+        # Clamped to the image's own bottom edge - see this function's
+        # own docstring ("real, reproduced bug ... 27.08.2026") -
+        # _vertical_room_below() itself has no such clamp.
+        bottom_room = max(
+            0.0, min(_vertical_room_below(region, all_regions), image_height - (region.y + region.height))
+        )
+        left_room, right_room = _horizontal_room(region, all_regions, image_width)
+        grown = _grow_region_to_fit(
+            measuring_draw,
+            replacement.translated_text,
+            region,
+            bold=False,
+            family="sans_serif",
+            italic=False,
+            left_room=left_room,
+            right_room=right_room,
+            top_room=top_room,
+            bottom_room=bottom_room,
+        )
+        if grown is None:
+            grown_replacements.append(replacement)
+            continue
+        grown_replacements.append(replace(replacement, render_box=grown))
+    return grown_replacements
+
+
 def _erase_box(draw, image, x: int, y: int, width: int, height: int) -> tuple[int, int, int]:
     """Samples the background around [x, y, x+width, y+height) and paints
     over it (flat color, or a detected gradient - see
@@ -914,12 +1293,42 @@ class BoxOverlayBackend:
             text_color = _contrasting_text_color(background_color)
             max_height = _vertical_room_below(draw_region, all_regions)
             left_room, right_room = _horizontal_room(draw_region, all_regions, image.width)
+            # 27.08.2026 (round 2) - real user report, Backlog.md
+            # 27.08.2026: "Spirit - Soul - Meatsuit.jpg"'s title rendered
+            # tiny in the top-left corner while the review WebViewer
+            # (whose own client-side refitText() budgets purely from the
+            # box's own style.height - see review_server.py, never from a
+            # neighbour's position) showed it large and centred. Root
+            # cause: _vertical_room_below() only measures room BEYOND
+            # draw_region's own bottom edge - for this title, whose next
+            # same-column neighbour (the "Drei Ebenen..." subtitle) sits
+            # only ~18px below, that room is ~15px, far SMALLER than the
+            # title's own declared 76px height, so the shrink loop below
+            # was fed a ~15px budget and crushed the font to
+            # _MIN_FONT_SIZE (9px) even though the box's own height had
+            # plenty of room for the text at a normal size.
+            #
+            # This floor used to be applied ONLY when a correction UI (or
+            # auto_grow_replacements() above) had set render_box (see the
+            # comment this replaces, still true for THAT case) - but the
+            # exact same problem exists for a plain, never-touched OCR
+            # region whenever its own box happens to sit close above
+            # another region, which is exactly what happened here (this
+            # title was never touched this round - render_box is None).
+            # draw_region's own declared height must never be treated as
+            # less available than the box itself already is, regardless
+            # of whether a correction UI ever touched it.
+            max_height = max(max_height, draw_region.height)
             if replacement.render_box is not None:
                 # 27.08.2026 - see this file's module-level note next to
                 # _horizontal_room()'s own docstring ("manually corrected
                 # box width is a hard cap") for the full story - a real,
                 # reproduced user report (Michael, "Spirit - Soul -
-                # Meatsuit.jpg", "HAUPTBUCH").
+                # Meatsuit.jpg", "HAUPTBUCH"). Unlike the height floor
+                # above, this stays conditional: a plain OCR region is
+                # still allowed to widen into free neighbouring space (see
+                # _fit_text()'s own docstring), only a human-set/grown
+                # render_box treats its width as a hard cap.
                 left_room, right_room = 0.0, 0.0
             _draw_fitted_text(
                 draw,
@@ -928,11 +1337,22 @@ class BoxOverlayBackend:
                 text_color,
                 image.height,
                 max_height,
-                bold=style.bold,
+                # 28.08.2026 (Runde 3) - style.bold/_initial_font_size(region)
+                # remain the fallback for every replacement a correction UI
+                # never touched (render_bold/render_font_size stay None,
+                # see TextReplacement's own docstring) - an explicit
+                # human override always wins over the OCR-pixel estimate.
+                bold=style.bold if replacement.render_bold is None else replacement.render_bold,
                 family=style.family,
                 italic=style.italic,
                 left_room=left_room,
                 right_room=right_room,
+                start_size=(
+                    _initial_font_size(region)
+                    if replacement.render_font_size is None
+                    else replacement.render_font_size
+                ),
+                centered=replacement.render_centered,
             )
 
         try:
@@ -1034,6 +1454,13 @@ class CvInpaintingBackend:
             text_color = _contrasting_text_color(background)
             max_height = _vertical_room_below(draw_region, all_regions)
             left_room, right_room = _horizontal_room(draw_region, all_regions, result.width)
+            # 27.08.2026 (round 2) - see BoxOverlayBackend.apply()'s
+            # matching note above (real user report, title rendered tiny
+            # top-left instead of at its normal size) - this floor now
+            # applies to EVERY replacement, not just a render_box, since a
+            # plain, never-touched OCR region can hit the exact same
+            # "next neighbour sits closer than my own height" trap.
+            max_height = max(max_height, draw_region.height)
             if replacement.render_box is not None:
                 # 27.08.2026 - see the note above _sample_background_color()
                 # ("manually corrected box width is a hard cap").
@@ -1045,11 +1472,22 @@ class CvInpaintingBackend:
                 text_color,
                 result.height,
                 max_height,
-                bold=style.bold,
+                # 28.08.2026 (Runde 3) - style.bold/_initial_font_size(region)
+                # remain the fallback for every replacement a correction UI
+                # never touched (render_bold/render_font_size stay None,
+                # see TextReplacement's own docstring) - an explicit
+                # human override always wins over the OCR-pixel estimate.
+                bold=style.bold if replacement.render_bold is None else replacement.render_bold,
                 family=style.family,
                 italic=style.italic,
                 left_room=left_room,
                 right_room=right_room,
+                start_size=(
+                    _initial_font_size(region)
+                    if replacement.render_font_size is None
+                    else replacement.render_font_size
+                ),
+                centered=replacement.render_centered,
             )
 
         try:
@@ -1063,9 +1501,34 @@ def _average_region_color(image, x: int, y: int, width: int, height: int) -> tup
     once that interior has already been reconstructed (CvInpaintingBackend
     after cv2.inpaint()), unlike _sample_background_color() above which
     deliberately avoids the interior because it still holds the original,
-    not-yet-replaced text."""
+    not-yet-replaced text.
+
+    Clamped to the image's own bounds (27.08.2026, round 4) - real user
+    report, Backlog.md 27.08.2026: Michael dragged a region's box in
+    ui/image_correction_dialog.py's Qt canvas (no bounds clamp of its own
+    on move/resize - see that module's _ResizableRegionItem) far enough
+    that its render_box ended up partly outside the image; "Anwenden"
+    then crashed with an IndexError. Same underlying gap as the
+    auto_grow_replacements() bottom-edge crash fixed earlier today (see
+    that entry) - `pixels[px, py]` below indexes the image directly with
+    no bounds check - but THIS time the out-of-bounds box came from a
+    human dragging a box in the Qt app, not from that function. Rather
+    than chase every possible source of an out-of-bounds render_box
+    (auto-grow, a WebViewer drag, a Qt-app drag, a hand-written
+    --regions file, ...) one at a time, this clamps at the actual point
+    of failure instead: any [x, y, x+width, y+height) box is intersected
+    with the image's own bounds before sampling, so an out-of-bounds
+    request degrades to "average whatever part of the box is still on
+    the image" (or the same (255, 255, 255) fallback as an empty box,
+    for a box entirely off-canvas) instead of raising.
+    """
+    img_w, img_h = image.size
+    x0 = max(0, x)
+    y0 = max(0, y)
+    x1 = min(img_w, x + width)
+    y1 = min(img_h, y + height)
     pixels = image.load()
-    samples = [pixels[px, py] for px in range(x, x + width) for py in range(y, y + height)]
+    samples = [pixels[px, py] for px in range(x0, x1) for py in range(y0, y1)]
     if not samples:
         return (255, 255, 255)
     r = sum(s[0] for s in samples) // len(samples)
@@ -1251,6 +1714,13 @@ class GpuInpaintingBackend:
             text_color = _contrasting_text_color(background)
             max_height = _vertical_room_below(draw_region, all_regions)
             left_room, right_room = _horizontal_room(draw_region, all_regions, image.width)
+            # 27.08.2026 (round 2) - see BoxOverlayBackend.apply()'s
+            # matching note above (real user report, title rendered tiny
+            # top-left instead of at its normal size) - this floor now
+            # applies to EVERY replacement, not just a render_box, since a
+            # plain, never-touched OCR region can hit the exact same
+            # "next neighbour sits closer than my own height" trap.
+            max_height = max(max_height, draw_region.height)
             if replacement.render_box is not None:
                 # 27.08.2026 - see the note above _sample_background_color()
                 # ("manually corrected box width is a hard cap").
@@ -1262,11 +1732,22 @@ class GpuInpaintingBackend:
                 text_color,
                 image.height,
                 max_height,
-                bold=style.bold,
+                # 28.08.2026 (Runde 3) - style.bold/_initial_font_size(region)
+                # remain the fallback for every replacement a correction UI
+                # never touched (render_bold/render_font_size stay None,
+                # see TextReplacement's own docstring) - an explicit
+                # human override always wins over the OCR-pixel estimate.
+                bold=style.bold if replacement.render_bold is None else replacement.render_bold,
                 family=style.family,
                 italic=style.italic,
                 left_room=left_room,
                 right_room=right_room,
+                start_size=(
+                    _initial_font_size(region)
+                    if replacement.render_font_size is None
+                    else replacement.render_font_size
+                ),
+                centered=replacement.render_centered,
             )
 
         try:
