@@ -7104,3 +7104,36 @@ durch diese Runde.
 die Ansicht danach wirklich den echten Render zeigt (kein Flackern, keine
 spürbare Verzögerung, die Box-Textnäherung verschwindet für nicht aktive
 Boxen) - und `pytest tests/` komplett laufen lassen.
+
+## 29.08.2026 (Cowork-Sitzung) - OCR-Engine/Rückschreibe-Methode: Erklärung für Laien im Browser-UI
+
+Michael: "Was mir im UI noch fehlt ist eine Beschreibung wozu die
+OCR-Engine und Rückschreibe-Methode ist. Dort wäre vielleicht ein
+Mouseover oder ähnliches nicht verkehrt, so das ein Laie es auch besser
+versteht."
+
+Beide Felder in `webapp/static/index.html` bekommen jetzt zweierlei:
+einen immer sichtbaren Kurz-Hinweis unter dem jeweiligen `<select>`
+(neuer `.hint`-Span, ohne "warning" - die bestehenden `.hint
+warning`-Spans `#ocr-engine-hint`/`#inpainting-backend-hint` bleiben
+unverändert ausschliesslich für "Option gerade nicht verfügbar" via
+`updateAvailabilityHint()` reserviert), sowie ein natives `title`-Attribut
+auf Label und `<select>` mit einer ausführlicheren Erklärung
+(Browser-Mouseover-Tooltip). Übersetzt via zwei neuen i18n-Keys pro Feld
+(`ocr_engine.hint`/`ocr_engine.tooltip`,
+`inpainting_backend.hint`/`inpainting_backend.tooltip`) in
+`webapp/static/i18n/de.json` und `en.json` - die "<key>.tooltip"-
+Namenskonvention existierte im Qt-Pendant (`ui/i18n_data.py`,
+`ui/app.py`'s `setToolTip()`) bereits, im Browser-UI aber bisher
+ungenutzt: `app.js`'s `applyCatalogue()` bekam dafür einen neuen,
+generischen `data-i18n-title`-Handler (mirrors den bestehenden
+`data-i18n-placeholder`-Handler).
+
+Nur im Browser-UI umgesetzt - Michael bezog sich auf "im UI" ohne
+Einschränkung, und die Qt-App hat für den Bild-Übersetzungsmodus ohnehin
+keine eigenen OCR-Engine-/Rückschreibe-Methode-Felder (dort wird der
+Auftrag ausschliesslich über die Webapp konfiguriert).
+
+Getestet: `json.load()` auf beiden i18n-Dateien (gültiges JSON, identische
+Schlüsselmengen DE/EN, keine Lücke), `node --check app.js` (keine
+Syntaxfehler). Kein Python-Code betroffen, daher kein `pytest`-Lauf nötig.

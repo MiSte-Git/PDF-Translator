@@ -73,6 +73,15 @@ function applyCatalogue() {
   document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
     el.setAttribute("placeholder", t(el.getAttribute("data-i18n-placeholder"), el.getAttribute("placeholder") || ""));
   });
+  // 29.08.2026 - Michaels Feedback: "Was mir im UI noch fehlt ist eine
+  // Beschreibung wozu die OCR-Engine und Rückschreibe-Methode ist."
+  // Analog zu data-i18n-placeholder, aber für das title-Attribut (native
+  // Mouseover-Tooltips im Browser) - mirrors die bereits im Qt-Pendant
+  // genutzte "<key>.tooltip"-Namenskonvention (siehe ui/app.py's
+  // setToolTip()-Aufrufe, ui/i18n_data.py).
+  document.querySelectorAll("[data-i18n-title]").forEach((el) => {
+    el.setAttribute("title", t(el.getAttribute("data-i18n-title"), el.getAttribute("title") || ""));
+  });
 }
 
 /* Formatiert Python-artige Platzhalter wie "{characters:,}" oder

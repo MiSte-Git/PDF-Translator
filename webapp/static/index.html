@@ -58,6 +58,27 @@
        mehr eine separate Browser-Nachbildung ohne Kenntnis der übrigen
        Boxen - siehe review_server.py's Moduldocstring Punkt 2a und
        _PAGE_HTML's scheduleRender()-Kommentar für die volle Begründung. -->
+  <!-- 29.08.2026 - Michaels Feedback: "Was mir im UI noch fehlt ist eine
+       Beschreibung wozu die OCR-Engine und Rückschreibe-Methode ist. Dort
+       wäre vielleicht ein Mouseover oder ähnliches nicht verkehrt, so das
+       ein Laie es auch besser versteht." OCR-Engine und
+       Rückschreibe-Methode bekommen deshalb je einen immer sichtbaren
+       Kurz-Hinweis (".hint" ohne "warning", analog zu #source-paths-hint
+       - nicht zu verwechseln mit den bestehenden ".hint warning"-Spans,
+       die weiterhin ausschließlich für "diese Option ist gerade nicht
+       verfügbar"-Warnungen von updateAvailabilityHint() in app.js
+       genutzt werden) sowie ein natives title-Tooltip mit ausführlicherer
+       Erklärung auf Label und <select>. Neuer, generischer
+       data-i18n-title-Handler in app.js's applyCatalogue() (mirrors den
+       bestehenden data-i18n-placeholder-Handler) - Übersetzungstexte in
+       den neuen Keys "ocr_engine.hint"/"ocr_engine.tooltip" bzw.
+       "inpainting_backend.hint"/"inpainting_backend.tooltip" in
+       i18n/de.json und i18n/en.json, Namenskonvention mirrors die im
+       Qt-Pendant bereits bestehenden "<key>.tooltip"-Keys (siehe
+       ui/app.py's setToolTip()-Aufrufe). Nur im Browser-UI umgesetzt, da
+       Michael sich ausschließlich auf "im UI" bezog und aktuell mit
+       diesem UI testet - die Qt-App hat für Bild-Übersetzungen ohnehin
+       keine eigenen OCR-Engine-/Rückschreibe-Methode-Felder. -->
 
   <section class="card" id="config-card">
     <h2 data-i18n="config.group">Auftrag konfigurieren</h2>
@@ -96,14 +117,26 @@
     </div>
 
     <div class="field">
-      <label for="ocr-engine" data-i18n="field.ocr_engine">OCR-Engine</label>
-      <select id="ocr-engine"></select>
+      <label for="ocr-engine" data-i18n="field.ocr_engine"
+             data-i18n-title="ocr_engine.tooltip"
+             title="Die OCR-Engine liest den Text aus dem Bild heraus, bevor er übersetzt wird.">OCR-Engine</label>
+      <select id="ocr-engine" data-i18n-title="ocr_engine.tooltip"
+              title="Die OCR-Engine liest den Text aus dem Bild heraus, bevor er übersetzt wird."></select>
+      <span class="hint" id="ocr-engine-static-hint" data-i18n="ocr_engine.hint">
+        Erkennt den Text im Bild, damit er übersetzt werden kann.
+      </span>
       <span class="hint warning" id="ocr-engine-hint"></span>
     </div>
 
     <div class="field">
-      <label for="inpainting-backend" data-i18n="field.inpainting_backend">Rückschreibe-Methode</label>
-      <select id="inpainting-backend"></select>
+      <label for="inpainting-backend" data-i18n="field.inpainting_backend"
+             data-i18n-title="inpainting_backend.tooltip"
+             title="Bestimmt, wie die übersetzte Fläche die Stelle des Originaltextes im Bild ersetzt.">Rückschreibe-Methode</label>
+      <select id="inpainting-backend" data-i18n-title="inpainting_backend.tooltip"
+              title="Bestimmt, wie die übersetzte Fläche die Stelle des Originaltextes im Bild ersetzt."></select>
+      <span class="hint" id="inpainting-backend-static-hint" data-i18n="inpainting_backend.hint">
+        Bestimmt, wie die übersetzte Fläche die Stelle des Originaltextes im Bild ersetzt.
+      </span>
       <span class="hint warning" id="inpainting-backend-hint"></span>
     </div>
   </section>
