@@ -370,17 +370,21 @@ button.primary:disabled {
     }
 }
 
-/* Wer per Betriebssystem-/Browser-Einstellung reduzierte Bewegung
-   verlangt, bekommt hier immerhin einen sichtbaren (aber stillstehenden)
-   halb gefüllten Balken statt der Sweep-Animation - besser als ein
-   Konflikt mit einer Nutzer-Zugänglichkeitseinstellung. */
-@media (prefers-reduced-motion: reduce) {
-    #job-progress-bar-fill {
-        animation: none;
-        left: 0;
-        width: 50%;
-    }
-}
+/* 28.08.2026 (Runde 7) - die "prefers-reduced-motion: reduce"-Rücksicht,
+   die hier stand, HAT GENAU DAS PROBLEM WIEDER EINGEFÜHRT, das dieser
+   ganze Umbau beheben sollte: Michaels Testlauf (Backlog.md 28.08.2026)
+   zeigte wieder einen völlig stillstehenden Balken über die vollen ~30
+   Sekunden, obwohl @keyframes job-progress-sweep oben unverändert
+   korrekt ist. Ursache: viele Linux-Desktops (u. a. GTK mit
+   deaktivierten Animationen, manche minimalen Fenstermanager-Setups)
+   melden "prefers-reduced-motion: reduce" an Chromium/QtWebEngine, ohne
+   dass eine Person das bewusst als Accessibility-Einstellung gewählt
+   hat - genau das griff hier und ersetzte die Sweep-Animation durch
+   einen fest stehenden 50%-Balken. Da Michael ausdrücklich eine
+   sichtbare Bewegung will (nicht nur "irgendein Balken") und dies ein
+   persönliches Werkzeug ohne Public-Accessibility-Anforderung ist,
+   bewusst entfernt statt weiter zu differenzieren - die Sweep-Animation
+   läuft jetzt IMMER, unabhängig von dieser Systemeinstellung. */
 
 /* "Ordner öffnen"-Button (nur unter pywebview sichtbar, siehe
    enableNativeDialogs() in app.js) - eigene Regel nötig, da er direkt

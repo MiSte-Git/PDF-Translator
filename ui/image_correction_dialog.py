@@ -41,6 +41,32 @@ edited_centered docstring for the tri-state ("untouched this round" vs.
 _apply() below now feeds from self._edited_font_size/_edited_bold/
 _edited_centered.
 
+Live preview (28.08.2026, Runde 8) - the paragraph above already fixed
+ONE concrete lie (unconditional centering); it was not the last one. Over
+several following rounds this dialog's own preview (paint(), a Qt-drawn
+APPROXIMATION using Qt's own font engine and this class's own shrink-to-
+fit loop) kept drifting from the REAL renderer (pipeline.images.
+inpainting._draw_fitted_text(), PIL/DejaVu-based) in a new detail each
+time - review_server.py's browser sibling hit the exact same pattern (see
+that module's own matching entry). Michael, after Runde 7's fix STILL
+wasn't enough: "Ich will nur die Textfelder bearbeiten und positionieren
+[...] was ich im Viewer sehe, muss genau so gespeichert werden." Rather
+than chasing yet another metric mismatch, ImageCorrectionDialog now
+periodically re-renders the CURRENT correction state with the real
+renderer (BoxOverlayBackend - fast, no OpenCV/GPU cost, and every
+InpaintingBackend implementation calls _draw_fitted_text() with identical
+parameters, so it is exactly as accurate for text placement as whichever
+backend the actual job is configured with - see
+_refresh_live_preview()'s own comment) and swaps the canvas's background
+QPixmap to that real image - see _schedule_live_preview()/
+_refresh_live_preview() and _ResizableRegionItem.set_live_preview_available().
+Once a first real render lands, every INACTIVE box stops drawing its own
+approximation entirely (the real pixels are already there); the ACTIVE
+row keeps its own live-typing preview (behind a near-opaque fill so the
+stale real pixels underneath don't show through and double-image with
+it), exactly mirroring review_server.py's "has-preview"/".editing" CSS
+states in the browser UI.
+
 A user testing the OCR-driven box placement (see Backlog.md 18.08.2026's
 three-layer fix in pipeline/images/ocr.py and pipeline/images/
 inpainting.py) then asked, explicitly, whether the boxes themselves could
@@ -59,9 +85,10 @@ neither, per row.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QFontMetricsF, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QGraphicsItem, QGraphicsRectItem, QGraphicsScene,
@@ -69,7 +96,7 @@ from PySide6.QtWidgets import (
     QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from pipeline.images.inpainting import TextReplacement, estimated_font_size
+from pipeline.images.inpainting import BoxOverlayBackend, TextReplacement, estimated_font_size
 from pipeline.images.ocr import OcrTextRegion
 from pipeline.images.translate_image import build_corrected_replacements
 from ui.i18n import LanguageManager
@@ -140,6 +167,18 @@ OcrTextRegion now passes its real estimate in instead."""
 _INACTIVE_PEN_COLOR = QColor(220, 30, 30)
 _ACTIVE_PEN_COLOR = QColor(30, 140, 230)
 _FILL_COLOR = QColor(220, 30, 30, 40)
+# 28.08.2026 (Runde 8) - siehe ImageCorrectionDialog._refresh_live_preview()s
+# langen Kommentar: sobald ein echter Server-... nein, hier: ein echter
+# BoxOverlayBackend-Render als Canvas-Hintergrund liegt, zeigt die aktive
+# Zeile trotzdem weiterhin ihre eigene (weiterhin nur genäherte) Vorschau,
+# damit man beim Tippen etwas sieht - mit der normalen, fast durchsichtigen
+# _FILL_COLOR (Alpha 40) würden die darunterliegenden ECHTEN Pixel
+# durchscheinen und zusammen mit der genäherten Vorschau wie doppelt
+# gezeichneter Text aussehen. Für GENAU diesen Fall (aktive Zeile UND
+# bereits ein Live-Render vorhanden) blendet paint() stattdessen mit dieser
+# fast blickdichten Farbe ab - mirrors review_server.py's `.region.editing
+# { background: rgba(20, 20, 20, 0.82); }` in der Browser-Oberfläche.
+_ACTIVE_EDITING_FILL_COLOR = QColor(20, 20, 20, 210)
 
 _MIN_FONT_SIZE_SPIN = 1
 _MAX_FONT_SIZE_SPIN = 9999
@@ -215,6 +254,15 @@ class _ResizableRegionItem(QGraphicsRectItem):
         self._font_size_override = font_size_override
         self._bold = bold
         self._centered = centered
+        # 28.08.2026 (Runde 8) - siehe _ACTIVE_EDITING_FILL_COLOR's eigenen
+        # Kommentar und ImageCorrectionDialog._refresh_live_preview()'s -
+        # True, sobald mindestens ein echter BoxOverlayBackend-Render als
+        # Canvas-Hintergrund liegt. Ab dann zeichnet paint() die eigene
+        # (genäherte) Vorschau nur noch für die AKTIVE Box - jede andere
+        # zeigt die echten Pixel aus dem Hintergrund, kein zweiter,
+        # separat gepflegter Renderer mehr, der wieder auseinanderlaufen
+        # könnte (dieselbe Idee wie review_server.py's "has-preview").
+        self._live_preview_available = False
         self._resizing = False
         self._resize_start_scene_pos: QRectF | None = None
         self._resize_start_rect: QRectF | None = None
@@ -315,9 +363,28 @@ class _ResizableRegionItem(QGraphicsRectItem):
         color = _ACTIVE_PEN_COLOR if active else _INACTIVE_PEN_COLOR
         pen = QPen(color, 3 if active else 2)
         self.setPen(pen)
-        self.setBrush(QBrush(_FILL_COLOR))
+        self.setBrush(self._current_fill_brush())
         self.setZValue(1 if active else 0)
         self.update()
+
+    def set_live_preview_available(self, available: bool) -> None:
+        """See `_live_preview_available`'s own constructor comment and
+        _ACTIVE_EDITING_FILL_COLOR's module-level comment - called by
+        ImageCorrectionDialog._refresh_live_preview() on every item, every
+        time a fresh BoxOverlayBackend render lands (never goes back to
+        False again once True - a single failed refresh just keeps
+        whatever the last successful one showed, mirrors review_server.py's
+        "has-preview" body class never being removed either)."""
+        if available == self._live_preview_available:
+            return
+        self._live_preview_available = available
+        self.setBrush(self._current_fill_brush())
+        self.update()
+
+    def _current_fill_brush(self) -> QBrush:
+        if self._live_preview_available and self._active:
+            return QBrush(_ACTIVE_EDITING_FILL_COLOR)
+        return QBrush(_FILL_COLOR)
 
     def geometry(self) -> tuple[int, int, int, int]:
         """Current (x, y, width, height) in source-image pixel space -
@@ -378,7 +445,14 @@ class _ResizableRegionItem(QGraphicsRectItem):
             finally:
                 painter.restore()
 
-        if not self._show_preview or not self._text or rect.width() < 6 or rect.height() < 6:
+        # 28.08.2026 (Runde 8) - siehe _live_preview_available's eigenen
+        # Kommentar: sobald ein echter Render als Canvas-Hintergrund liegt,
+        # zeigen alle NICHT aktiven Boxen ihre eigene Textnäherung gar
+        # nicht mehr - die echten Pixel darunter sind bereits das, was
+        # diese Zeile korrekt korrigiert zeigt, kein Grund mehr, sie mit
+        # einer zweiten, nur genäherten Kopie zu überdecken.
+        hide_for_live_preview = self._live_preview_available and not self._active
+        if not self._show_preview or not self._text or rect.width() < 6 or rect.height() < 6 or hide_for_live_preview:
             return
         painter.save()
         try:
@@ -827,13 +901,21 @@ class ImageCorrectionDialog(QDialog):
         self.view.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.view.on_box_drawn = self._on_new_box_drawn
         pixmap = QPixmap(str(self.source))
+        # 28.08.2026 (Runde 8) - kept as an instance attribute (previously
+        # this was a throwaway local, the return value of addPixmap()
+        # discarded) so _refresh_live_preview() below can later swap its
+        # pixmap for a real BoxOverlayBackend render - see that method's
+        # own comment and the module docstring's "Live preview" entry.
+        self._background_pixmap_item = None
         if not pixmap.isNull():
-            self.scene.addPixmap(pixmap)
+            self._background_pixmap_item = self.scene.addPixmap(pixmap)
             self.scene.setSceneRect(QRectF(0, 0, pixmap.width(), pixmap.height()))
         # A missing/unreadable source (e.g. a dialog built in a test with
         # no real file on disk yet) leaves the scene without a background
         # image, but the boxes below are still created against it - only
         # the visual preview is degraded, not the actual correction data.
+        # _refresh_live_preview() below guards on self._background_pixmap_item
+        # being None for exactly this case - no crash, just no live preview.
         for row, replacement in enumerate(replacements):
             # render_box (26.08.2026, see TextReplacement.render_box's
             # docstring) - if this row was already corrected in an
@@ -966,6 +1048,20 @@ class ImageCorrectionDialog(QDialog):
             self._load_row(0)
             self.table.setCurrentCell(0, _TRANSLATION_COLUMN)
 
+        # 28.08.2026 (Runde 8) - see the module docstring's "Live preview"
+        # entry and _refresh_live_preview()'s own comment. Debounced
+        # (singleShot, restarted on every edit rather than one timer per
+        # edit - see _schedule_live_preview()) so a burst of edits (typing,
+        # a drag in progress) only ever triggers ONE render, after things
+        # settle, not one per keystroke/mouse-move.
+        self._live_preview_timer = QTimer(self)
+        self._live_preview_timer.setSingleShot(True)
+        self._live_preview_timer.timeout.connect(self._refresh_live_preview)
+        # Initial render - shows the real, already-translated result from
+        # the moment the dialog opens, before any correction at all, same
+        # as review_server.py's matching init()-time request.
+        self._schedule_live_preview(0)
+
     def _on_row_changed(self, current_row: int, current_column: int, previous_row: int, previous_column: int) -> None:
         if current_row < 0 or current_row == self._active_row:
             return
@@ -1024,6 +1120,13 @@ class ImageCorrectionDialog(QDialog):
         purely through _edited_geometry, and _apply() consults both
         independently."""
         self._edited_geometry[row] = self._region_items[row].geometry()
+        # 28.08.2026 (Runde 8) - this fires on every mouse-move DURING a
+        # drag/resize, not just at the end - _schedule_live_preview()'s
+        # debounce (a restarted timer, see its own docstring) is exactly
+        # what turns that stream of calls into a single render shortly
+        # after the gesture actually stops, instead of one per pixel
+        # moved.
+        self._schedule_live_preview(400)
 
     def _reset_active_geometry(self) -> None:
         """Restore the active row's box to its original OcrTextRegion
@@ -1039,6 +1142,7 @@ class ImageCorrectionDialog(QDialog):
         self._edited_geometry.pop(row, None)
         region = self.replacements[row].region
         self._region_items[row].set_geometry(region.x, region.y, region.width, region.height)
+        self._schedule_live_preview(0)
 
     def _on_font_size_changed(self, value: int) -> None:
         """self.font_size_spin's valueChanged - guarded by self._loading
@@ -1059,6 +1163,7 @@ class ImageCorrectionDialog(QDialog):
         self._row_font_size[row] = value
         self._edited_font_size[row] = value
         self._region_items[row].set_font_size_override(value)
+        self._schedule_live_preview(150)
 
     def _reset_active_font_size(self) -> None:
         """"Automatisch" button - clears the active row's font-size
@@ -1083,6 +1188,7 @@ class ImageCorrectionDialog(QDialog):
             self.font_size_spin.setValue(estimated_font_size(self.replacements[row].region))
         finally:
             self._loading = False
+        self._schedule_live_preview(0)
 
     def _on_bold_toggled(self, checked: bool) -> None:
         """self.bold_button's toggled - see _on_font_size_changed()'s
@@ -1096,6 +1202,7 @@ class ImageCorrectionDialog(QDialog):
         self._row_bold[row] = checked
         self._edited_bold[row] = checked
         self._region_items[row].set_bold(checked)
+        self._schedule_live_preview(150)
 
     def _on_centered_toggled(self, checked: bool) -> None:
         """self.centered_button's toggled - see _on_font_size_changed()'s
@@ -1110,6 +1217,7 @@ class ImageCorrectionDialog(QDialog):
         self._row_centered[row] = checked
         self._edited_centered[row] = checked
         self._region_items[row].set_centered(checked)
+        self._schedule_live_preview(150)
 
     def _on_zoom_in(self) -> None:
         self.view.zoom_in()
@@ -1205,6 +1313,7 @@ class ImageCorrectionDialog(QDialog):
         # AFTER that, not before (or it would be immediately wiped again).
         self.add_region_button.setChecked(False)
         self.status_label.setText(t("image_correction.manual_region_added"))
+        self._schedule_live_preview(0)
 
     def _flush_active_row(self) -> None:
         """Write the editor's CURRENT content back into _row_text for the
@@ -1229,6 +1338,14 @@ class ImageCorrectionDialog(QDialog):
         # later, by _flush_active_row() (on row switch or _apply()), but
         # the box on the canvas should reflect what's on screen right now.
         self._region_items[self._active_row].set_text(self.editor.toPlainText())
+        # 28.08.2026 (Runde 8) - long debounce (matches review_server.py's
+        # own 'input' handler): the active row already shows its own live
+        # typing preview via set_text() above, this just keeps OTHER rows'
+        # real-rendered background from getting too stale during a long
+        # edit (their collision-neighbourhood room can depend on this
+        # row's current text length too - see pipeline/images/inpainting.
+        # py's _vertical_room_below()/_horizontal_room()).
+        self._schedule_live_preview(700)
 
     def _current_edits(self) -> dict[int, str]:
         self._flush_active_row()
@@ -1236,6 +1353,78 @@ class ImageCorrectionDialog(QDialog):
         for row in self._dirty:
             edits[row] = self._row_text[row]
         return edits
+
+    def _schedule_live_preview(self, delay_ms: int) -> None:
+        """Restart the debounce timer - see the module docstring's "Live
+        preview" entry and __init__'s own comment on why this is a single
+        restarted timer rather than one per edit. Every call from an edit
+        handler below wins over whatever delay a PRIOR call requested
+        (Qt's QTimer.start() always restarts from the new interval), so a
+        burst of edits keeps pushing the actual render further out until
+        the burst stops - exactly the coalescing behaviour a debounce is
+        for."""
+        self._live_preview_timer.start(delay_ms)
+
+    def _refresh_live_preview(self) -> None:
+        """Re-renders the CURRENT correction state (same inputs _apply()
+        itself would use - see build_corrected_replacements() call below,
+        identical parameters) with BoxOverlayBackend and swaps the
+        canvas's background QPixmap for the result - see the module
+        docstring's "Live preview" entry for the full reasoning.
+
+        BoxOverlayBackend specifically (not self.inpainting_backend_name,
+        whatever the actual job is configured with): every
+        InpaintingBackend.apply() implementation calls
+        _draw_fitted_text() with IDENTICAL parameters (see each class's
+        own apply() method in pipeline/images/inpainting.py) - they only
+        differ in how the erased pixels UNDER a box get reconstructed
+        (flat fill vs. OpenCV inpaint vs. a GPU model), never in where/
+        how big/how aligned the text itself lands. BoxOverlayBackend is
+        the cheapest of the three, which matters here since this can run
+        after nearly every edit - the corresponding cost is that a moved
+        box's background looks flatter in this preview than the real job's
+        chosen backend will actually produce; text placement itself is
+        unaffected, which is the only thing this preview exists to verify.
+
+        Runs synchronously on the UI thread, deliberately - _apply() right
+        below already does this (a full job run, not just this cheaper
+        preview backend) directly on the UI thread with the same "no OCR/
+        provider/network call involved" reasoning (see that method's own
+        comment); a debounced preview render is cheaper still. Any
+        failure here (a transient/corrupt read, an unexpected exception
+        from the renderer) is swallowed on purpose - a stale-but-correct
+        preview beats a dialog that crashes or pops an error box on every
+        keystroke; _apply() itself still surfaces a real error properly
+        when the user actually clicks "Anwenden"."""
+        if self._background_pixmap_item is None or not self.replacements:
+            return
+        import tempfile
+
+        try:
+            corrected_replacements = build_corrected_replacements(
+                self.replacements, self._current_edits(), edited_geometry=self._edited_geometry or None,
+                edited_font_size=self._edited_font_size or None,
+                edited_bold=self._edited_bold or None,
+                edited_centered=self._edited_centered or None,
+            )
+            fd, tmp_path = tempfile.mkstemp(suffix=".jpg")
+            os.close(fd)
+            try:
+                BoxOverlayBackend().apply(str(self.source), corrected_replacements, tmp_path)
+                new_pixmap = QPixmap(tmp_path)
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+            if new_pixmap.isNull():
+                return
+        except Exception:  # noqa: BLE001 - see this method's own docstring
+            return
+
+        self._background_pixmap_item.setPixmap(new_pixmap)
+        for item in self._region_items:
+            item.set_live_preview_available(True)
 
     def _apply(self) -> None:
         t = self.language.text

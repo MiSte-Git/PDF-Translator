@@ -537,6 +537,74 @@ def test_switching_rows_restores_each_rows_own_format_controls(qapp: QApplicatio
         dialog.deleteLater()
 
 
+def test_live_preview_renders_current_state_with_the_real_renderer(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    """28.08.2026 (Runde 8) - the architecture change Michael asked for
+    after Runde 7's font-metrics fix (review_server.py's browser sibling)
+    still wasn't enough: "Ich will nur die Textfelder bearbeiten und
+    positionieren [...] was ich im Viewer sehe, muss genau so gespeichert
+    werden." _ResizableRegionItem.paint()'s own Qt-drawn approximation
+    kept drifting from the real PIL/DejaVu renderer in a new detail every
+    round (Backlog.md 27.08. through this entry) - _refresh_live_preview()
+    now re-renders the current correction state with the SAME renderer
+    (BoxOverlayBackend, see that method's own comment for why that backend
+    specifically) and swaps the canvas's background QPixmap for the real
+    result, instead of refining the approximation yet again.
+
+    This guards the actual contract: setting an explicit font_size/bold/
+    centered override and calling _refresh_live_preview() must produce a
+    real image whose ink is horizontally CENTERED within the box - not
+    just that the method runs without raising."""
+    from pipeline.images.inpainting import TextReplacement
+    from pipeline.images.ocr import OcrTextRegion
+    from ui.i18n import LanguageManager
+
+    source = tmp_path / "photo.png"
+    _build_two_line_image(source)
+    region = OcrTextRegion(text="Hello World", x=20, y=20, width=200, height=44, confidence=90.0)
+    replacement = TextReplacement(region=region, translated_text="Hallo Welt")
+    dialog = ImageCorrectionDialog(
+        LanguageManager("de"), source, tmp_path / "photo_DE.png", [replacement],
+    )
+    try:
+        assert dialog._background_pixmap_item is not None
+
+        dialog._active_row = 0
+        dialog._row_bold[0] = True
+        dialog._edited_bold[0] = True
+        dialog._row_centered[0] = True
+        dialog._edited_centered[0] = True
+        dialog._row_font_size[0] = 20
+        dialog._edited_font_size[0] = 20
+        dialog._refresh_live_preview()
+
+        assert dialog._region_items[0]._live_preview_available is True
+        pixmap = dialog._background_pixmap_item.pixmap()
+        assert not pixmap.isNull()
+
+        preview_path = tmp_path / "live_preview.png"
+        assert pixmap.save(str(preview_path))
+        from PIL import Image
+
+        rendered = Image.open(preview_path).convert("L")
+        pixels = rendered.load()
+        # Box spans x in [20, 220] - a centered short line should leave
+        # roughly equal margins on both sides.
+        ink_columns = [
+            x for x in range(20, 220)
+            if any(pixels[x, y] < 180 for y in range(20, 64))
+        ]
+        assert ink_columns, "expected some rendered ink inside the box"
+        left_margin = min(ink_columns) - 20
+        right_margin = 220 - max(ink_columns)
+        assert abs(left_margin - right_margin) <= 8, (
+            f"text does not look centered: left={left_margin} right={right_margin}"
+        )
+    finally:
+        dialog.deleteLater()
+
+
 def test_apply_uses_edited_font_size_bold_centered_alongside_untouched_rows(
     qapp: QApplication, tmp_path: Path
 ) -> None:

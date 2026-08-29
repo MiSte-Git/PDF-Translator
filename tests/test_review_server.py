@@ -79,6 +79,111 @@ def test_start_review_server_returns_immediately_and_serves_state_and_image(tmp_
         session.server.server_close()
 
 
+def test_font_routes_serve_real_dejavu_ttf_bytes_for_preview_metrics(tmp_path: Path) -> None:
+    """28.08.2026 (Runde 7) regression guard - real user report, Backlog.md
+    28.08.2026: a footer box widened until its text fit on one line in the
+    correction preview still wrapped to two lines in the real rendered
+    JPG. Root cause: the preview measured/rendered with the browser's
+    generic `system-ui` font while pipeline/images/font_style.py::
+    load_font() always draws with the real DejaVu Sans TTF - different
+    character widths at the same pixel size. /api/font/regular and
+    /api/font/bold now serve that exact TTF (see _dejavu_font_path()) so
+    the browser's @font-face preview uses the SAME metrics as the real
+    renderer. This only asserts the HTTP contract (status, content-type,
+    non-trivial TTF-shaped bytes) - the pipeline/images/font_style.py
+    tests already cover that load_font() finds the same files."""
+    source = tmp_path / "photo.png"
+    _build_image(source)
+    session = review_server.start_review_server(str(source), [_replacement("Hello")])
+    try:
+        for variant in ("regular", "bold"):
+            with urllib.request.urlopen(session.url + f"api/font/{variant}", timeout=5) as response:
+                assert response.status == 200
+                assert "font" in response.headers.get("Content-Type", "")
+                data = response.read()
+            # TTF files start with a 4-byte sfnt version tag (0x00010000
+            # for TrueType-flavored OpenType, which DejaVu's .ttf files
+            # use) - a cheap sanity check that this is really a font file
+            # and not e.g. an accidentally-served error page.
+            assert len(data) > 1000
+            assert data[:4] == b"\x00\x01\x00\x00"
+    finally:
+        session.server.shutdown()
+        session.server.server_close()
+
+
+def test_render_preview_reflects_font_size_bold_and_centered_like_the_real_renderer(
+    tmp_path: Path,
+) -> None:
+    """28.08.2026 (Runde 8) - the actual architecture change Michael asked
+    for after Runde 7's font-metrics fix still wasn't enough: "Ich will
+    nur die Textfelder bearbeiten und positionieren [...] was ich im
+    Viewer sehe, muss genau so gespeichert werden." Rather than refining
+    the browser's own DOM/CSS approximation of _draw_fitted_text() any
+    further (that arms race is what produced Runde 2 through 7 in the
+    first place), POST /api/render-preview now runs the SAME renderer
+    (BoxOverlayBackend, see _render_preview_bytes()'s own long comment for
+    why that backend specifically) on the current in-browser correction
+    state and returns the real image - _PAGE_HTML's JS displays that
+    directly instead of a second, independent implementation.
+
+    This guards the actual contract: a payload with an explicit
+    font_size/bold/centered produces a real JPEG whose ink is (a) roughly
+    where the requested font size implies for a short two-word string,
+    and (b) horizontally CENTERED within the given box - not just that
+    the endpoint returns 200 with plausible-looking bytes."""
+    source = tmp_path / "photo.png"
+    _build_image(source)
+    session = review_server.start_review_server(str(source), [_replacement("Hello")])
+    try:
+        payload = [{
+            "x": 10, "y": 10, "width": 180, "height": 44,
+            "orig_x": 10, "orig_y": 10, "orig_width": 80, "orig_height": 20,
+            "translated_text": "Hallo Welt",
+            "original_text": "Hello",
+            "confidence": 90.0,
+            "centered": True,
+            "font_size": 20,
+            "bold": True,
+        }]
+        data = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            session.url + "api/render-preview",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.status == 200
+            assert response.headers.get("Content-Type") == "image/jpeg"
+            image_bytes = response.read()
+        assert len(image_bytes) > 200  # not an empty/error placeholder
+
+        out_path = tmp_path / "preview.jpg"
+        out_path.write_bytes(image_bytes)
+        rendered = Image.open(out_path).convert("L")
+        assert rendered.size == (200, 100)  # unchanged from _build_image()
+
+        # Box spans x in [10, 190] - a centered short line should leave
+        # roughly equal margins on both sides, not sit flush against
+        # either edge (which is what render_centered=False/left-aligned
+        # would look like instead).
+        pixels = rendered.load()
+        ink_columns = [
+            x for x in range(10, 190)
+            if any(pixels[x, y] < 180 for y in range(10, 54))
+        ]
+        assert ink_columns, "expected some rendered ink inside the box"
+        left_margin = min(ink_columns) - 10
+        right_margin = 190 - max(ink_columns)
+        assert abs(left_margin - right_margin) <= 8, (
+            f"text does not look centered: left={left_margin} right={right_margin}"
+        )
+    finally:
+        session.server.shutdown()
+        session.server.server_close()
+
+
 def test_review_session_wait_returns_apply_outcome_from_a_real_http_post(tmp_path: Path) -> None:
     source = tmp_path / "photo.png"
     _build_image(source)

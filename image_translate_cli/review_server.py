@@ -13,30 +13,52 @@ it to every caller:
        see CLI.md's "review" section for why that's fine for now, and
        what would need to change if a caller ever ran this cross-machine).
     2. It serves one self-contained HTML/CSS/JS page (_PAGE_HTML below,
-       no external assets, no CDN, no build step) that shows the PRISTINE
-       source image with each region's translated text overlaid in an
-       editable, draggable, resizable box - a live approximation of the
-       final re-rendered result.
+       no external assets, no CDN, no build step) that shows each
+       region's translated text overlaid in an editable, draggable,
+       resizable box on top of the ACTUAL rendered result - see point 2a
+       below, this stopped being a DOM/CSS approximation on 28.08.2026.
+    2a. (28.08.2026, Runde 8 - superseded the "Deliberately NOT: a live
+       re-rendered preview" note this docstring carried since 22.08.2026,
+       see git history if that reasoning is ever needed again) After
+       several rounds (Backlog.md 26.08. through 28.08.) where this page's
+       OWN CSS/Canvas re-implementation of _draw_fitted_text() kept
+       drifting from the real one in a new small way each time (line
+       breaks, font size, bold, centering, font metrics) despite each
+       drift being fixed as found, Michael: "Ich will nur die Textfelder
+       bearbeiten und positionieren [...] was ich im Viewer sehe, muss
+       genau so gespeichert werden." POST /api/render-preview (see
+       _render_preview_bytes()) now re-renders the CURRENT in-browser
+       correction state with the real renderer (BoxOverlayBackend - see
+       that function's own comment for why that backend specifically is
+       fine here) after every discrete edit (debounced while typing), and
+       the page swaps its background to that real image - see
+       scheduleRender()'s own long comment in _PAGE_HTML. The per-region
+       DOM text overlay now only shows its own (still approximate)
+       rendering WHILE that one region is actively focused; every idle
+       region shows literal, real rendered pixels.
     3. A human edits text/geometry in the browser and clicks "Anwenden"
        (POSTs the edited region list to /api/apply) or "Abbrechen"
        (POSTs to /api/cancel). Whichever happens first ends the session -
-       this module returns control to cli.py, which does the actual
+       this module returns control to cli.py, which does the actual FINAL
        re-render via the SAME InpaintingBackend.apply() path `correct`
-       uses (this module never touches inpainting itself).
+       uses (this module never touches inpainting itself for producing
+       the delivered result), just with whatever backend the calling job
+       was configured with - /api/render-preview's own BoxOverlayBackend
+       render is only ever shown inside this review page, never written
+       anywhere as a final result.
 
 Deliberately NOT: adding/removing regions (mirrors `correct`'s existing
 "Bekannte Grenzen" - the region SET is fixed, only text/geometry per
-region is editable - see CLI.md), a live re-rendered preview (would mean
-re-running InpaintingBackend.apply() on every keystroke; the overlay is a
-close-enough approximation without that cost), or anything reachable
-without an explicit browser open on the same machine (no bundled auth -
-see this module's own module docstring above and CLI.md).
+region is editable - see CLI.md), or anything reachable without an
+explicit browser open on the same machine (no bundled auth - see this
+module's own module docstring above and CLI.md).
 """
 from __future__ import annotations
 
 import http.server
 import json
 import mimetypes
+import os
 import sys
 import threading
 import webbrowser
@@ -52,8 +74,10 @@ from pathlib import Path
 # own call site further down for why a second, slightly-different
 # implementation here would risk silently drifting from what apply()
 # itself actually does.
-from pipeline.images.font_style import estimate_font_style
+from pipeline.images.font_style import _FONT_DIRS, _FONT_FILENAMES, estimate_font_style
 from pipeline.images.inpainting import (
+    BoxOverlayBackend,
+    InpaintingError,
     TextReplacement,
     _representative_color,
     _sample_background,
@@ -62,6 +86,113 @@ from pipeline.images.inpainting import (
 
 from image_translate_cli.regions_io import RegionsError, replacements_from_region_list
 from image_translate_cli.report import regions_from_replacements
+
+# 28.08.2026 (Runde 7) - real user report (2. Praxistest desselben Tages,
+# siehe Backlog.md): eine Fußzeilen-Box, in der Vorschau breit genug
+# gezogen, dass der Text sichtbar in EINER Zeile Platz fand (bei Schrift-
+# grösse 18, wie bei der Nachbar-Box), landete im gespeicherten JPG trotzdem
+# wieder auf ZWEI Zeilen - identisch beim Titel: die Vorschau zeigte den
+# eingefügten Zeilenumbruch korrekt, aber Größe/Zentrierung "gingen
+# verloren", obwohl inpainting.py/regions_io.py (siehe deren eigene
+# 28.08.2026-Kommentare) render_font_size/render_bold/render_centered
+# längst 1:1 übernehmen. Ursache hier gefunden, nicht dort: _measureCtx()/
+# refitText() unten (siehe deren Kommentare) und body/.region-text oben
+# maßen und zeichneten die Vorschau bisher in `system-ui, sans-serif` -
+# irgendein generischer, vom jeweiligen Linux-Desktop abhängiger Systemfont
+# (auf Michaels Debian vermutlich Cantarell oder DejaVu Sans selbst, je
+# nach Desktop-Umgebung - nicht zuverlässig vorhersagbar). Der ECHTE
+# Renderer (pipeline/images/inpainting.py -> pipeline/images/font_style.py
+# ::load_font()) zeichnet dagegen IMMER mit der DejaVu-Sans-TTF-Datei aus
+# fonts-dejavu-core, unabhängig vom Desktop. Unterscheiden sich beide
+# Fonts auch nur geringfügig in ihrer Zeichenbreite bei gleicher
+# Pixelgröße, kippt eine Zeile, die im Browser gerade so passt, beim
+# echten PIL-Rendering über die Boxbreite und wird umgebrochen - exakt
+# Michaels "ganz und gar nicht so wie ich es in der Korrektur eingestellt
+# habe". Fix: die echte DejaVu-Sans-TTF (Regular + Bold - siehe
+# _dejavu_font_path() und die /api/font/*-Route in do_GET() unten) wird
+# jetzt per @font-face auch im Browser geladen und sowohl für die sichtbare
+# Vorschau als auch für _measureCtx()s Breitenmessung verwendet, sodass
+# beide Seiten dieselbe Schriftdatei benutzen statt zwei verschiedene mit
+# nur ähnlichen Metriken. Zweiter, kleinerer Fund am selben Ort: _measureCtx()
+# nahm bisher NIE Rücksicht auf Fett (kein "bold " im ctx.font-String,
+# unabhängig von box.dataset.bold) - fette Zeichen sind breiter, also wurde
+# die Breite einer fett gesetzten Zeile systematisch UNTERSCHÄTZT und der
+# Zeilenumbruch entsprechend zu spät ausgelöst. Jetzt bekommt _measureCtx()
+# den Fett-Zustand explizit übergeben (siehe refitText() unten).
+def _dejavu_font_path(bold: bool) -> str | None:
+    """First existing DejaVu Sans (Regular oder Bold) TTF-Datei, dieselbe
+    Kandidatenliste wie pipeline.images.font_style.load_font() (siehe
+    dessen Docstring zu den unverifizierten Nicht-Debian-Pfaden) - hier
+    absichtlich nur Sans/Regular-Kursiv-frei, da die Browser-Vorschau nur
+    Fett unterscheidet (kein eigener Kursiv-Knopf in dieser UI). Gibt None
+    zurück, wenn keiner der Kandidatenpfade existiert (z. B. ein System
+    ganz ohne fonts-dejavu-core) - die /api/font/*-Route unten antwortet
+    dann mit 404 und die Seite fällt automatisch auf ihre CSS-Fallback-
+    Fontliste zurück (kein Absturzrisiko, siehe do_GET())."""
+    filename = _FONT_FILENAMES.get(("sans_serif", bold, False))
+    if filename is None:
+        return None
+    for directory in _FONT_DIRS:
+        candidate = Path(directory) / filename
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+# 28.08.2026 (Runde 8) - der eigentliche Architekturwechsel dieser Runde,
+# siehe scheduleRender()s langen JS-Kommentar für die volle Begründung:
+# Michael, nach mehreren Runden, in denen diese Seite eine ZWEITE,
+# unabhängige Nachbildung von "wie sieht der Text aus" pflegte (CSS/Canvas
+# hier vs. PIL/DejaVu in pipeline/images/inpainting.py) und dabei immer
+# wieder in Details abwich: "Ich will nur die Textfelder bearbeiten und
+# positionieren [...] was ich im Viewer sehe, muss genau so gespeichert
+# werden." Diese Funktion rendert die AKTUELL im Browser gehaltenen
+# Korrekturen mit dem ECHTEN Renderer (_draw_fitted_text(), über
+# BoxOverlayBackend) und liefert das Ergebnis als Bild zurück, statt die
+# Vorschau ein weiteres Mal in einer zweiten Implementierung nachzubilden.
+#
+# BoxOverlayBackend statt des für den eigentlichen Auftrag evtl. gewählten
+# Cv-/GpuInpaintingBackend, bewusst: alle drei Backends rufen
+# _draw_fitted_text() mit IDENTISCHEN Parametern auf (siehe deren jeweils
+# eigene apply()-Methode, jede endet mit demselben `centered=
+# replacement.render_centered`-Aufruf) - sie unterscheiden sich nur darin,
+# WIE die unter einer Box gelöschten Pixel rekonstruiert werden (flache
+# Füllfarbe vs. OpenCV-Inpainting vs. ein GPU-Modell), nicht darin, wo/wie
+# groß/wie ausgerichtet der Text landet. Für die Frage, die diese Vorschau
+# beantworten soll (stimmt Position/Grösse/Umbruch/Fett/Zentrierung mit dem
+# späteren JPG überein), ist BoxOverlayBackend also exakt gleichwertig -
+# nur ohne die OpenCV-/GPU-Kosten, die bei einem Render pro Tastendruck-
+# Pause spürbar wären. Der Hintergrund unter einer neu positionierten Box
+# kann in dieser Vorschau dadurch etwas anders aussehen (einfarbig statt
+# rekonstruiert) als im späteren, mit dem echten Backend erzeugten JPG -
+# ein bewusster, klar begrenzter Kompromiss (nur Optik der Löschstelle,
+# nie Text-Platzierung), den es wert ist, um diese Vorschau schnell genug
+# für einen Live-Refresh zu halten.
+def _render_preview_bytes(source_path: str, replacements: list[TextReplacement]) -> bytes:
+    """Rendert `replacements` mit BoxOverlayBackend auf `source_path` und
+    gibt das Ergebnis als JPEG-Bytes zurück - siehe den langen Kommentar
+    oberhalb dieser Funktion für die Backend-Wahl. Nutzt eine temporäre
+    Datei statt eines In-Memory-Puffers, weil InpaintingBackend.apply()s
+    Schnittstelle (alle drei Implementierungen) einen Datei-`output_path`
+    erwartet, keinen Stream - dieselbe Einschränkung, mit der auch cli.py/
+    webapp/review_bridge.py schon leben. Wirft InpaintingError unverändert
+    weiter (siehe do_POST()'s /api/render-preview-Handler für die
+    HTTP-Antwort darauf) - kein stiller Fallback, ein echter Renderfehler
+    (z. B. ein beschädigtes Quellbild) soll sichtbar bleiben, nicht als
+    leere/falsche Vorschau erscheinen."""
+    import tempfile
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".jpg")
+    os.close(fd)
+    try:
+        BoxOverlayBackend().apply(source_path, replacements, tmp_path)
+        return Path(tmp_path).read_bytes()
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
 
 # Kept extremely small and dependency-free on purpose: no React/build step,
 # just enough vanilla JS for drag/resize/edit - see this module's docstring
@@ -76,7 +207,30 @@ _PAGE_HTML = """<!doctype html>
 <title>Bildkorrektur</title>
 <style>
   :root { color-scheme: light dark; }
-  body { margin: 0; font-family: system-ui, sans-serif; background: #1e1e1e; color: #eee; }
+  /* 28.08.2026 (Runde 7) - siehe die lange Begründung oberhalb von
+     _dejavu_font_path() weiter oben in dieser Datei: dieselbe DejaVu-Sans-
+     TTF, mit der pipeline/images/font_style.py::load_font() das ECHTE JPG
+     zeichnet, wird hier per @font-face nachgeladen (siehe /api/font/*-
+     Route in do_GET()), damit Vorschau und Endergebnis dieselbe
+     Zeichenbreite zugrunde legen. `system-ui, sans-serif` bleibt als reiner
+     Fallback stehen, falls die Font-Datei auf einem System mal fehlt (404,
+     siehe _dejavu_font_path()) - dann sieht die Vorschau nur wieder leicht
+     anders aus als früher, stürzt aber nicht ab. */
+  @font-face {
+    font-family: "DejaVuSansPreview";
+    src: url("/api/font/regular") format("truetype");
+    font-weight: 400;
+    font-style: normal;
+    font-display: block;
+  }
+  @font-face {
+    font-family: "DejaVuSansPreview";
+    src: url("/api/font/bold") format("truetype");
+    font-weight: 700;
+    font-style: normal;
+    font-display: block;
+  }
+  body { margin: 0; font-family: "DejaVuSansPreview", system-ui, sans-serif; background: #1e1e1e; color: #eee; }
   header {
     position: sticky; top: 0; z-index: 10;
     display: flex; align-items: center; gap: 12px;
@@ -94,11 +248,29 @@ _PAGE_HTML = """<!doctype html>
   main { padding: 24px; overflow: auto; }
   #stage { position: relative; background: #000; }
   #stage img { display: block; max-width: none; }
+  /* 28.08.2026 (Runde 8) - siehe der lange Kommentar oberhalb von
+     scheduleRender() weiter unten in diesem Modul für die vollständige
+     Begründung: sobald der erste echte Server-Render erfolgreich war,
+     setzt requestRenderNow() die Klasse "has-preview" auf <body> - erst
+     ab dann werden Box-Hintergrund UND die eigene Text-Nachbildung
+     (.region-text) im RUHEZUSTAND durchsichtig, sodass die darunter-
+     liegende #bg (die ab demselben Zeitpunkt nicht mehr das rohe
+     Quellbild zeigt, sondern das ECHTE, vom Server per
+     POST /api/render-preview gerenderte Ergebnis - derselbe
+     _draw_fitted_text()-Pfad wie das spätere JPG) tatsächlich zu sehen
+     ist. WÄHREND eine Box aktiv bearbeitet wird (.editing, per JS auf
+     Fokus/Blur gesetzt), bleiben beide immer sichtbar, damit man beim
+     Tippen etwas sieht. OHNE "has-preview" (kein Server-Render bisher
+     gelungen - z. B. ein Netzwerk-/Rendering-Fehler beim allerersten
+     Versuch) bleibt die alte, immer sichtbare Nachbildung als Fallback
+     bestehen - lieber eine ungenaue Vorschau als eine leere Seite. */
   .region {
     position: absolute; box-sizing: border-box;
     border: 1.5px dashed #3b82f6; background: rgba(20, 20, 20, 0.72);
     cursor: move; touch-action: none;
   }
+  .region.editing { background: rgba(20, 20, 20, 0.82); }
+  body.has-preview .region:not(.editing) { background: transparent; }
   .region-text {
     width: 100%; height: 100%; box-sizing: border-box; padding: 2px 4px;
     /* 13px is only the FALLBACK now (26.08.2026) - renderRegions() below
@@ -118,7 +290,15 @@ _PAGE_HTML = """<!doctype html>
        other whitespace, silently hiding the very break the user just
        typed. */
     white-space: pre-wrap;
+    opacity: 1;
   }
+  /* 28.08.2026 (Runde 8) - siehe .region-Kommentar oben für die
+     "has-preview"-Bedingung; die kurze Überblendung verhindert, dass der
+     Wechsel wie ein Flackern wirkt. */
+  body.has-preview .region:not(.editing) .region-text {
+    opacity: 0; transition: opacity 0.12s ease-out;
+  }
+  .region.editing .region-text { opacity: 1; }
   .resize-handle {
     position: absolute; right: -5px; bottom: -5px; width: 12px; height: 12px;
     background: #3b82f6; border: 1px solid #1e1e1e; border-radius: 2px;
@@ -214,13 +394,51 @@ async function init() {
     setStatus('Fehler beim Laden: ' + e);
     return;
   }
+  // 28.08.2026 (Runde 7) - @font-face lädt DejaVuSansPreview asynchron
+  // nach; ohne dieses Warten würde renderRegions()/refitText() beim
+  // allerersten Aufruf noch mit dem Fallback-Font (system-ui) messen und
+  // erst nach einem NEUEN Edit (das refitText() erneut auslöst) auf den
+  // echten Font umspringen - sichtbar als "die Box, die ich noch gar nicht
+  // angefasst habe, springt beim Laden minimal in der Größe". document.
+  // fonts.ready wartet auf ALLE gerade angeforderten @font-face-Downloads;
+  // beide Schnitte werden hier explizit angefordert (load()), da ein Font,
+  // der noch nirgends im sichtbaren Text verwendet wurde, sonst evtl. gar
+  // nicht erst geladen wird.
+  try {
+    await Promise.all([
+      document.fonts.load('400 16px "DejaVuSansPreview"'),
+      document.fonts.load('700 16px "DejaVuSansPreview"'),
+    ]);
+    await document.fonts.ready;
+  } catch (e) {
+    // Font-Ladefehler (z. B. 404 aus _dejavu_font_path(), siehe dessen
+    // Kommentar) sind kein Grund, die ganze Seite zu blockieren - CSS
+    // fällt automatisch auf system-ui zurück, siehe @font-face-Kommentar.
+  }
   const img = document.getElementById('bg');
+  // 28.08.2026 (Runde 8) - `img` (#bg) wird ab jetzt MEHRFACH neu geladen:
+  // einmal hier mit dem rohen Quellbild, danach bei jedem erfolgreichen
+  // requestRenderNow() (siehe dessen eigenen Kommentar) mit dem frisch
+  // gerenderten Ergebnis - jede Zuweisung an img.src löst erneut 'load'
+  // aus. `stageInitialized` sorgt dafür, dass das Stage-Größe-Setzen UND
+  // vor allem renderRegions() (das die interaktiven Boxen komplett NEU
+  // aufbaut, inklusive laufender Bearbeitung) nur beim ALLERERSTEN Laden
+  // laufen - ein erneuter Aufruf würde sonst mitten in einer Bearbeitung
+  // sämtliche Box-DOM-Elemente verwerfen und neu erzeugen.
+  let stageInitialized = false;
   img.onload = () => {
+    if (stageInitialized) return;
+    stageInitialized = true;
     document.getElementById('stage').style.width = img.naturalWidth + 'px';
     document.getElementById('stage').style.height = img.naturalHeight + 'px';
     renderRegions();
     setStatus(regionsData.length + ' Region(en) geladen.');
     logEvent('init', {naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight, regionCount: regionsData.length});
+    // Erster echter Server-Render (siehe requestRenderNow()'s eigenen
+    // Kommentar) - zeigt von Anfang an das tatsächliche Rendering statt
+    // erst nach der ersten Bearbeitung, und schaltet bei Erfolg auf
+    // "has-preview" um (siehe CSS oben).
+    requestRenderNow();
   };
   img.onerror = () => setStatus('Bild konnte nicht geladen werden.');
   img.src = '/api/image';
@@ -232,10 +450,17 @@ const _FIT_MIN_SIZE = 9;
 const _FIT_LINE_SPACING = 1.15;
 let _measureCanvas = null;
 
-function _measureCtx(fontPx) {
+// 28.08.2026 (Runde 7) - `bold` jetzt ein echter Parameter statt implizit
+// immer false (siehe der lange Kommentar oberhalb von _dejavu_font_path()
+// in diesem Modul für den vollständigen Befund) - UND dieselbe
+// DejaVuSansPreview-Fontfamilie wie body/.region-text oben (@font-face),
+// damit diese Messung wirklich das misst, was auch sichtbar gerendert
+// wird UND was pipeline/images/font_style.py::load_font() später mit der
+// echten TTF-Datei zeichnet.
+function _measureCtx(fontPx, bold) {
   if (!_measureCanvas) _measureCanvas = document.createElement('canvas');
   const ctx = _measureCanvas.getContext('2d');
-  ctx.font = fontPx + 'px system-ui, sans-serif';
+  ctx.font = (bold ? 'bold ' : '') + fontPx + 'px "DejaVuSansPreview", system-ui, sans-serif';
   return ctx;
 }
 
@@ -291,9 +516,14 @@ function refitText(box, text) {
   // account for it exactly the same way or it drifts from what
   // Anwenden actually sends.
   const content = textWithLineBreaks(text) || '';
+  // 28.08.2026 (Runde 7) - box.dataset.bold ist die aktuelle, live vom
+  // Fett-Knopf gepflegte Wahrheit (siehe renderRegions()/buildRegionToolbar()
+  // weiter unten) - ohne dies maß diese Schleife IMMER mit Regular-Breiten,
+  // selbst für eine Box, die der Nutzer gerade auf Fett gestellt hat.
+  const bold = box.dataset.bold === '1';
   let size = base;
   while (true) {
-    const ctx = _measureCtx(size);
+    const ctx = _measureCtx(size, bold);
     const lines = _wrapForWidth(ctx, content, maxWidth);
     const lineHeight = Math.max(1, Math.floor(size * _FIT_LINE_SPACING));
     const totalHeight = lineHeight * lines.length;
@@ -414,7 +644,25 @@ function renderRegions() {
     // plain .textContent. Confirmed via the same Playwright repro: the
     // typed text and the break both land exactly where expected, every
     // time, because nothing here ever fights the browser's own caret.
-    text.addEventListener('input', () => refitText(box, text));
+    text.addEventListener('input', () => {
+      refitText(box, text);
+      // 28.08.2026 (Runde 8) - langer Debounce (siehe scheduleRender()s
+      // eigenen Kommentar): der 'blur'-Handler unten löst nach dem
+      // Verlassen der Box ohnehin einen sofortigen Render aus, dieser
+      // hier fängt nur den Fall "bleibt lange in einer Box, während eine
+      // ANDERE Box (Kollisions-Nachbarschaft) inzwischen veraltet aussieht".
+      scheduleRender(700);
+    });
+    // 28.08.2026 (Runde 8) - siehe .region/.region-text CSS ("has-preview")
+    // und scheduleRender()s eigenen Kommentar: nur WÄHREND diese Box
+    // fokussiert ist, zeigt sie ihre eigene (weiterhin nur genäherte)
+    // Nachbildung - sobald sie das Feld verlässt, sofort echt
+    // nachrendern und wieder auf die echten Pixel aus #bg zurückfallen.
+    text.addEventListener('focus', () => box.classList.add('editing'));
+    text.addEventListener('blur', () => {
+      box.classList.remove('editing');
+      scheduleRender(0);
+    });
     box.appendChild(text);
 
     const handle = document.createElement('div');
@@ -489,6 +737,11 @@ function buildRegionToolbar(box, text) {
     text.dataset.baseFontSize = String(newSize);
     sizeLabel.textContent = newSize + 'px';
     refitText(box, text);
+    // 28.08.2026 (Runde 8) - siehe scheduleRender()s eigenen Kommentar: ein
+    // Toolbar-Klick ist bereits eine abgeschlossene, diskrete Aktion (kein
+    // Tippen), also sofort neu rendern statt den langen Eingabe-Debounce
+    // aus 'input' oben abzuwarten.
+    scheduleRender(0);
   }
   sizeDown.addEventListener('click', (e) => {
     e.preventDefault();
@@ -505,6 +758,14 @@ function buildRegionToolbar(box, text) {
     box.dataset.boldTouched = '1';
     text.style.fontWeight = newBold ? '700' : '400';
     boldBtn.classList.toggle('ctrl-active', newBold);
+    // 28.08.2026 (Runde 7) - fehlte bisher: sizeDown/sizeUp oben lösen
+    // refitText() nach jeder Änderung aus, dieser Knopf tat es nicht,
+    // obwohl Fett genauso die verfügbare Breite verändert (siehe
+    // _measureCtx()s eigener Kommentar) - ohne dies zeigte die Vorschau
+    // bis zum nächsten Tastendruck im Text noch die Zeilenaufteilung des
+    // vorherigen Fett-Zustands.
+    refitText(box, text);
+    scheduleRender(0);  // 28.08.2026 (Runde 8) - siehe setFontSize() oben.
   });
   alignBtn.addEventListener('click', (e) => {
     e.preventDefault();
@@ -513,6 +774,7 @@ function buildRegionToolbar(box, text) {
     text.style.textAlign = newCentered ? 'center' : 'left';
     alignBtn.classList.toggle('ctrl-active', newCentered);
     alignBtn.textContent = newCentered ? 'C' : 'L';
+    scheduleRender(0);  // 28.08.2026 (Runde 8) - siehe setFontSize() oben.
   });
 
   toolbar.appendChild(sizeDown);
@@ -600,7 +862,13 @@ function makeDraggable(box, textEl, handle) {
     box.style.top = (startTop + dy) + 'px';
   });
   box.addEventListener('pointerup', () => {
-    if (moved) logEvent('drag-end', {origX: box.dataset.origX, origY: box.dataset.origY, styleLeftAfter: box.style.left, styleTopAfter: box.style.top, scale: dragScale});
+    if (moved) {
+      logEvent('drag-end', {origX: box.dataset.origX, origY: box.dataset.origY, styleLeftAfter: box.style.left, styleTopAfter: box.style.top, scale: dragScale});
+      // 28.08.2026 (Runde 8) - siehe scheduleRender()s eigenen Kommentar -
+      // eine verschobene Box verändert die Kollisions-Nachbarschaft für
+      // ALLE Boxen, nicht nur diese, also sofort neu rendern.
+      scheduleRender(0);
+    }
     dragging = false;
   });
 }
@@ -655,7 +923,13 @@ function makeResizable(box, handle) {
     // via this feature's own diagnostic log looking wrong in exactly
     // the way it exists to prevent, so worth not shipping as-is.
     e.stopPropagation();
-    if (resizing) logEvent('resize-end', {origX: box.dataset.origX, origY: box.dataset.origY, styleLeft: box.style.left, styleTop: box.style.top, styleWidthAfter: box.style.width, styleHeightAfter: box.style.height, scale: resizeScale});
+    if (resizing) {
+      logEvent('resize-end', {origX: box.dataset.origX, origY: box.dataset.origY, styleLeft: box.style.left, styleTop: box.style.top, styleWidthAfter: box.style.width, styleHeightAfter: box.style.height, scale: resizeScale});
+      // 28.08.2026 (Runde 8) - siehe makeDraggable()s gleichlautenden
+      // Kommentar - eine Größenänderung kann diese UND Nachbar-Boxen
+      // betreffen (Kollisions-Nachbarschaft), also sofort neu rendern.
+      scheduleRender(0);
+    }
     resizing = false;
   });
 }
@@ -745,6 +1019,78 @@ function collectRegions() {
     out.push(record);
   });
   return out;
+}
+
+// 28.08.2026 (Runde 8) - echte Live-Vorschau statt weiterer Verfeinerung
+// der Browser-Nachbildung. Michael, nachdem trotz mehrerer Runden (siehe
+// refitText()/_measureCtx() oben, jede für sich schon eine Reaktion auf
+// einen realen Abweichungsfund) die Vorschau IMMER NOCH nicht exakt dem
+// späteren JPG entsprach: "Ich will nur die Textfelder bearbeiten und
+// positionieren und diese dann an die Stelle setzen wo der Original Text
+// ist/war [...] was ich im Viewer sehe, muss genau so gespeichert
+// werden." Grundproblem, das keine einzelne Detail-Korrektur beheben
+// konnte: diese Seite pflegte eine ZWEITE, komplett unabhängige
+// Implementierung von "wie sieht der Text aus" (CSS/Canvas hier vs.
+// PIL/DejaVu in pipeline/images/inpainting.py) - zwei Renderer, die
+// zwangsläufig irgendwann wieder auseinanderlaufen, egal wie oft man sie
+// nachträglich synchronisiert (Zeilenumbruch, Schriftgrösse, Fett,
+// Zentrierung, zuletzt Font-Metrik - jedes Mal ein neuer, echter Fund).
+//
+// Diese Runde beendet das strukturell: /api/render-preview (siehe
+// do_POST unten) rendert die AKTUELL im Browser gehaltenen Korrekturen
+// mit genau der Funktion, die auch das echte JPG erzeugt
+// (_draw_fitted_text() über BoxOverlayBackend - siehe dessen eigenen
+// Kommentar dort für die Begründung, warum dieses statt des für den
+// eigentlichen Auftrag gewählten Backends genügt), und das Ergebnisbild
+// ersetzt #bg direkt. Der Ruhezustand jeder Box (siehe .region/.region-text
+// CSS oben, "has-preview") zeigt damit ab dem ersten erfolgreichen Render
+// buchstäblich echte Pixel, keine zweite Implementierung mehr - es gibt
+// nichts mehr, das auseinanderlaufen könnte.
+//
+// scheduleRender(ms) debounct (Standard 0 = nächster Tick, für bereits
+// diskrete Aktionen wie Drag-/Resize-Ende oder einen Toolbar-Klick);
+// requestRenderNow() läuft bei Texteingabe zusätzlich über einen eigenen,
+// längeren Timer (siehe renderRegions()' 'input'-Handler unten), damit
+// nicht jeder einzelne Tastendruck einen Request auslöst. `_renderSeq`
+// verwirft eine spät eintreffende Antwort auf eine ÄLTERE Anfrage, falls
+// der Nutzer inzwischen weiter editiert hat - sonst könnte eine
+// langsame, veraltete Antwort eine neuere kurz überschreiben.
+let _renderDebounceTimer = null;
+let _renderSeq = 0;
+let _lastPreviewUrl = null;
+let _everRenderedOnce = false;
+
+function scheduleRender(debounceMs) {
+  if (_renderDebounceTimer) clearTimeout(_renderDebounceTimer);
+  _renderDebounceTimer = setTimeout(requestRenderNow, debounceMs || 0);
+}
+
+async function requestRenderNow() {
+  const seq = ++_renderSeq;
+  let resp;
+  try {
+    resp = await fetch('/api/render-preview', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(collectRegions()),
+    });
+  } catch (e) {
+    // Netzwerkfehler - bleibt beim zuletzt erfolgreich gerenderten Stand
+    // (oder, falls das der allererste Versuch war, beim CSS-Fallback ohne
+    // "has-preview", siehe dessen eigenen Kommentar). Blockiert nichts.
+    return;
+  }
+  if (seq !== _renderSeq || !resp.ok) return; // überholt oder Serverfehler
+  const blob = await resp.blob();
+  if (seq !== _renderSeq) return; // während des .blob()-Awaits überholt worden
+  const url = URL.createObjectURL(blob);
+  document.getElementById('bg').src = url;
+  if (_lastPreviewUrl) URL.revokeObjectURL(_lastPreviewUrl);
+  _lastPreviewUrl = url;
+  if (!_everRenderedOnce) {
+    _everRenderedOnce = true;
+    document.body.classList.add('has-preview');
+  }
 }
 
 // 27.08.2026 - fire-and-forget: the debug log is a diagnostic aid, never
@@ -1052,6 +1398,39 @@ def start_review_server(
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
+            elif self.path in ("/api/font/regular", "/api/font/bold"):
+                # 28.08.2026 (Runde 7) - siehe die @font-face-Regeln in
+                # _PAGE_HTML und _dejavu_font_path()s eigener Kommentar
+                # oben im Modul für den vollständigen Befund: liefert
+                # dieselbe DejaVu-Sans-TTF, mit der pipeline/images/
+                # font_style.py::load_font() das echte JPG zeichnet, damit
+                # die Browser-Vorschau mit exakt denselben Zeichenbreiten
+                # misst statt mit einem raten-basierten Systemfont. 404 nur
+                # im (auf Debian/Ubuntu mit fonts-dejavu-core praktisch nie
+                # auftretenden) Fall, dass keine der Kandidaten-Pfade
+                # existiert - die Seite fällt dann automatisch auf ihre
+                # CSS-Fallback-Fontliste zurück, siehe @font-face-Kommentar.
+                font_path = _dejavu_font_path(bold=self.path.endswith("/bold"))
+                if font_path is None:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                try:
+                    data = Path(font_path).read_bytes()
+                except OSError:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "font/ttf")
+                self.send_header("Content-Length", str(len(data)))
+                # Statisch pro Prozesslaufzeit (dieser Server startet je
+                # Korrekturrunde neu, siehe Moduldocstring) - unbedenklich,
+                # lange Browser-Cache-Zeit spart wiederholte Downloads bei
+                # mehreren Korrekturrunden im selben Browserfenster.
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
+                self.wfile.write(data)
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -1086,6 +1465,36 @@ def start_review_server(
                 state["outcome"] = "cancel"
                 self._send_json({"ok": True})
                 done.set()
+            elif self.path == "/api/render-preview":
+                # 28.08.2026 (Runde 8) - siehe _render_preview_bytes()s
+                # eigenen, langen Kommentar weiter oben in diesem Modul für
+                # die volle Begründung. Derselbe Payload/derselbe Parse-Weg
+                # wie /api/apply oben (replacements_from_region_list()),
+                # nur dass hier NICHTS an den wartenden ReviewSession-
+                # Aufrufer weitergereicht wird (state/done bleiben
+                # unberührt) - dieser Request beendet die Korrekturrunde
+                # nicht, er liefert nur ein aktuelles Vorschaubild.
+                try:
+                    payload = json.loads(raw.decode("utf-8")) if raw else []
+                    replacements = replacements_from_region_list(payload)
+                except (json.JSONDecodeError, UnicodeDecodeError, RegionsError) as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, status=400)
+                    return
+                try:
+                    image_bytes = _render_preview_bytes(source_path, replacements)
+                except InpaintingError as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, status=500)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(image_bytes)))
+                # 28.08.2026 (Runde 8) - jede Antwort hier ist ein anderer
+                # Rendering-Stand desselben Bildes, niemals wiederverwendbar
+                # - ein zwischengespeichertes altes Vorschaubild wäre
+                # schlimmer als gar keins.
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(image_bytes)
             elif self.path == "/api/debug-log":
                 # 27.08.2026 - see start_review_server()'s own docstring.
                 # Fire-and-forget from the browser's side (app.js/

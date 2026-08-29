@@ -47,16 +47,17 @@
        (#job-progress-bar) und ein "Ordner öffnen"-Button
        (#open-output-folder-button, nur unter pywebview sichtbar, siehe
        webapp/__main__.py::Api.open_folder()). -->
-  <!-- Bekannte, ungelöste Einschränkung (Michaels Feedback, siehe
-       Backlog.md): die Korrektur-Vorschau in review_server.py zeigt die
-       ROHE OCR-Boxgröße, nicht die tatsächlich gerenderte Position/
-       Schriftgröße - der echte Renderer (pipeline/images/inpainting.py)
-       vergrößert/verschiebt Boxen dynamisch anhand von Kollisions-
-       vermeidung mit Nachbarregionen (siehe _vertical_room_below()/
-       _horizontal_room()), was die Browser-Vorschau bewusst nicht
-       nachbildet (siehe review_server.py's eigener Docstring, Punkt
-       "kein Live-Rerender"). Absichtlich noch nicht behoben - siehe
-       Backlog.md für die zur Diskussion stehenden Optionen. -->
+  <!-- 28.08.2026 (Runde 8) - die hier bis dahin dokumentierte, bewusst
+       offen gelassene Einschränkung ("Korrektur-Vorschau zeigt die ROHE
+       OCR-Boxgröße, nicht die tatsächlich gerenderte Position/
+       Schriftgröße, weil der echte Renderer Boxen dynamisch anhand von
+       Kollisionsvermeidung mit Nachbarregionen vergrößert/verschiebt")
+       ist mit review_server.py's neuer POST /api/render-preview-Route
+       behoben, nicht mehr nur workaround: die Vorschau ist jetzt der
+       echte, mit ALLEN aktuellen Regionen gerenderte Server-Output, nicht
+       mehr eine separate Browser-Nachbildung ohne Kenntnis der übrigen
+       Boxen - siehe review_server.py's Moduldocstring Punkt 2a und
+       _PAGE_HTML's scheduleRender()-Kommentar für die volle Begründung. -->
 
   <section class="card" id="config-card">
     <h2 data-i18n="config.group">Auftrag konfigurieren</h2>

@@ -6879,3 +6879,228 @@ Textbox explizit setzen und werden 1:1 so gerendert - keine
 Auto-Erkennung der ursprünglichen Ausrichtung, wie ausdrücklich
 gewünscht. Bitte auf dem echten Rechner testen und
 `pytest tests/` laufen lassen, bevor das als bestätigt gilt.
+
+## 28.08.2026 (Runde 7, Cowork-Sitzung) - Beide Runde-2/4-Fixe wirkten auf dem echten Rechner immer noch nicht: Fortschrittsbalken stand weiter still, Korrektur (Zentrierung + Fusszeilen-Zeilenumbruch) blieb wirkungslos - zwei unabhängige, jetzt behobene Ursachen gefunden
+
+Echter Praxistest desselben Tages, vier Screenshots, Michael wörtlich:
+
+> "Nachdem ich auf 'Übersetzen starten' geklickt habe, kommt für ca. 30
+> nur das und keine Fortschrittsanzeige in der UI. [...] Ich habe im
+> Titel einen Zeilenumbruch eingefügt. Unten in der Fusszeile links die
+> Textbox so vergrössert das der Text in eine Zeile passt. Unten in der
+> Fusszeile rechts die Textbox so vergrössert das der Text in eine Zeile
+> passt und den Font gleich gesetzt wie bei der Textbox links (18). [...]
+> dort fehlt wieder die Zentrierung im Titel, und unten ist der Text von
+> beiden Textboxen auf 2 Zeilen aufgeteilt. Also ganz und gar nicht so
+> wie ich es in der Korrektur eingestellt habe."
+
+Beide von Runde 2 und Runde 4 (dieses Log, weiter oben) implementierten
+Fixe waren im Code selbst korrekt (mehrfach nachverfolgt: HTML/CSS/JS in
+review_server.py, `/api/state`-Aufbau, `/api/apply`-Handler,
+`replacements_from_region_list()`, `TextReplacement`,
+`_draw_fitted_text()`) - beide Symptome hatten stattdessen jeweils eine
+eigene, bisher übersehene Ursache:
+
+### Fortschrittsbalken: `prefers-reduced-motion` fror die neue CSS-Animation ein
+
+Runde 2s Fix (natives `<progress>` durch ein div-Paar mit
+`@keyframes`-Sweep ersetzt) hatte selbst noch einen
+`@media (prefers-reduced-motion: reduce)`-Fallback stehen (`animation:
+none`, Balken bleibt bei fixen 50% Breite stehen) - ursprünglich als
+Barrierefreiheits-Höflichkeit gedacht, nicht als bewusste Entscheidung
+gegen dieses Projekt geprüft. Naheliegendste Erklärung für "steht die
+ganzen ~30 Sekunden komplett still": irgendeine GTK-/Desktop-Umgebungs-
+Einstellung auf Michaels Debian-System (oder eine Chromium/QtWebEngine-
+Voreinstellung) meldet dem Browser `prefers-reduced-motion: reduce`,
+ohne dass das eine bewusste Wahl war. Da dies ein persönliches
+Werkzeug ohne öffentliche Barrierefreiheits-Anforderung ist und Michael
+ausdrücklich sichtbare Bewegung erwartet, wurde der gesamte
+Fallback-Block ersatzlos entfernt (`webapp/static/app.css`) - der
+Balken animiert jetzt unabhängig von dieser Einstellung.
+
+### Korrektur-Vorschau vs. echtes JPG: unterschiedliche Fonts, nicht unterschiedliche Logik
+
+Der eigentliche Fund: `image_translate_cli/review_server.py`s
+Korrektur-Vorschau maß und zeichnete Text bisher in `system-ui,
+sans-serif` - einem generischen, vom jeweiligen Linux-Desktop
+abhängigen Systemfont. Der ECHTE Renderer
+(`pipeline/images/inpainting.py` über `pipeline/images/font_style.py
+::load_font()`) zeichnet dagegen IMMER mit der DejaVu-Sans-TTF-Datei
+aus `fonts-dejavu-core` (`/usr/share/fonts/truetype/dejavu/
+DejaVuSans*.ttf`). Unterscheiden sich beide Fonts auch nur geringfügig
+in ihrer Zeichenbreite bei gleicher Pixelgröße, kippt eine Zeile, die
+im Browser gerade so in eine Zeile passt, beim echten PIL-Rendering
+über die Boxbreite und wird umgebrochen - exakt Michaels Fusszeilen-
+Beobachtung bei identisch gesetzter Schriftgrösse 18. Zweiter, kleinerer
+Fund am selben Ort: `_measureCtx()` (die JS-Funktion hinter der
+Zeilenumbruch-Vorschau) nahm nie Rücksicht auf Fett - kein `bold ` im
+`ctx.font`-String, unabhängig von `box.dataset.bold` - fette Zeichen
+sind breiter, ihre Breite wurde also systematisch unterschätzt.
+
+**Fix:** `review_server.py` bekommt eine neue `/api/font/regular` und
+`/api/font/bold` Route (`_dejavu_font_path()`, dieselbe Kandidatenliste
+wie `font_style.py::load_font()`), die genau die auf diesem System
+tatsächlich verwendete DejaVu-Sans-TTF ausliefert. `_PAGE_HTML`s
+`<style>`-Block lädt sie per `@font-face` als `DejaVuSansPreview` und
+nutzt sie sowohl für `body`/`.region-text` (sichtbare Vorschau) als
+auch - das ist der eigentlich entscheidende Teil - für `_measureCtx()`s
+Breitenmessung, die `refitText()`s Zeilenumbruch-Entscheidung trägt.
+`_measureCtx()` bekommt zusätzlich einen echten `bold`-Parameter
+(`(bold ? 'bold ' : '') + fontPx + 'px "DejaVuSansPreview", ...'`),
+`refitText()` liest dafür `box.dataset.bold`. Kleiner Begleitfund beim
+Durcharbeiten: der Fett-Knopf selbst löste bisher KEIN `refitText()`
+aus (im Gegensatz zu den Schriftgrössen-Buttons) - eine Box zeigte die
+Zeilenaufteilung des vorherigen Fett-Zustands bis zum nächsten
+Tastendruck im Text. Ebenfalls ergänzt: `init()` wartet jetzt via
+`document.fonts.load()`/`document.fonts.ready` auf beide Schnitte,
+bevor `renderRegions()` läuft - sonst hätte die allererste Anzeige noch
+mit dem Fallback-Font gemessen und wäre erst nach dem ersten Edit auf
+den echten Font umgesprungen.
+
+**system-ui bleibt als CSS-Fallback stehen** (falls `/api/font/*`
+einmal 404 liefert, z. B. ein System ganz ohne `fonts-dejavu-core`) -
+dann sieht die Vorschau nur wieder wie vor diesem Fix aus, stürzt aber
+nicht ab.
+
+**Getestet:** `python3 -m py_compile image_translate_cli/
+review_server.py` sowie `ast.parse()` erfolgreich; das eingebettete JS
+zusätzlich per `node --check` gegen den extrahierten `<script>`-Inhalt
+geprüft (beides ohne Syntaxfehler). Ein neuer Test in
+`tests/test_review_server.py`
+(`test_font_routes_serve_real_dejavu_ttf_bytes_for_preview_metrics`)
+prüft den HTTP-Vertrag von `/api/font/regular` und `/api/font/bold`
+(Status 200, `font/...`-Content-Type, echte TTF-Bytes anhand der
+sfnt-Kennung `\x00\x01\x00\x00`) gegen den echten Server, ohne
+Browser. **Nicht ausführbar in dieser Cloud-Sandbox** (die hier
+gestagte Teilkopie des Projekts hat kein `image_translate_cli/cli.py`,
+das `tests/test_review_server.py` importiert - vollständiger
+`pytest tests/`-Lauf bitte wie gehabt auf dem echten Rechner).
+
+**Noch offen, absichtlich nicht in dieser Runde beantwortet:** ob die
+fehlende Titel-Zentrierung aus Michaels Bericht überhaupt ein Bug war -
+er beschreibt explizit nur den eingefügten Zeilenumbruch im Titel,
+nicht das Anklicken des "C"-Knopfs in dessen Toolbar (Default ist
+`render_centered = False`, also linksbündig, wie schon immer). Screenshot-
+Auflösung reicht nicht, um den Toolbar-Zustand sicher zu erkennen -
+bitte beim nächsten Test bewusst prüfen/bestätigen, ob der Knopf
+tatsächlich aktiv war, bevor das als weiterer Bug gilt.
+
+**Weiterhin unbeantwortet aus einer früheren Runde dieser Sitzung:**
+das zweite Testbild mit 0 automatisch erkannten Regionen (51 manuell
+nachgetragen) - der ursprüngliche QA-Bericht dieses Laufs wurde vom
+Korrektur-Berichts desselben Bildes überschrieben, keine Diagnosedaten
+mehr vorhanden. Bitte bei erneutem Auftreten den QA-Bericht VOR einer
+Korrektur-Runde sichern und die verwendete OCR-Engine mitteilen.
+
+## 28.08.2026 (Runde 8, Cowork-Sitzung) - Architekturwechsel statt weiterer Detail-Korrektur: beide Korrektur-Dialoge zeigen jetzt den ECHT gerenderten Stand als Vorschau, keine separate Nachbildung mehr
+
+Nach Runde 7s Fix (echte DejaVu-Sans-Metrik in der Browser-Vorschau) war
+das Grundproblem für Michael immer noch nicht gelöst - Runde 2 bis 7
+dieses Logs sind allesamt Reaktionen auf immer neue, einzelne Abweichungen
+zwischen der Vorschau und dem echten JPG (Zeilenumbruch, Schriftgrösse,
+Fett, Zentrierung, Font-Metrik), nie eine Behebung der eigentlichen
+Ursache. Michael, direkt und explizit:
+
+> "Was ich möchte ist im Grunde genommen ein WYSIWYG-Editor. Wobei wir nur
+> die Textboxen und deren Inhalt editieren. Warum ist das so schwer? Ich
+> habe das Gefühl wir drehen uns im Kreis und reden aneinander vorbei. Ich
+> will nur die Textfelder bearbeiten und positionieren und diese dann an
+> die Stelle setzen wo der Original Text ist/war. [...] Müssen wir einen
+> komplett neuen Ansatz wählen um das zu erreichen was ich möchte?"
+
+Antwort: ja. Vorgeschlagen und von Michael bestätigt (beide Fragen der
+Rückfrage: "Ja, echte Live-Vorschau" und "Beide Oberflächen gleichzeitig").
+
+### Die eigentliche Ursache
+
+Beide Korrektur-Oberflächen (review_server.py's Browser-Seite,
+ui/image_correction_dialog.py's Qt-Dialog) pflegten je eine EIGENE,
+komplett unabhängige zweite Implementierung von "wie sieht der Text aus"
+- CSS/Canvas im Browser, Qt-eigenes QPainter/QFontMetricsF im Dialog -
+parallel zum echten Renderer (pipeline/images/inpainting.py's
+_draw_fitted_text(), PIL/DejaVu-basiert). Zwei unabhängig gepflegte
+Implementierungen derselben Sache laufen zwangsläufig irgendwann wieder
+auseinander, egal wie oft man sie nachträglich synchronisiert - das ist
+genau das Muster, das sich über sechs Runden gezogen hat. Keine einzelne
+Detail-Korrektur konnte das grundsätzlich beheben, nur jeweils den
+zuletzt gefundenen Abstand schließen.
+
+### Der neue Ansatz: der echte Renderer IST jetzt die Vorschau
+
+**Browser (review_server.py):** Neue Route `POST /api/render-preview`
+(siehe `_render_preview_bytes()`) rendert die AKTUELL im Browser
+gehaltenen Korrekturen mit `BoxOverlayBackend` (bewusst dieses statt des
+für den eigentlichen Auftrag evtl. gewählten Cv-/GpuInpaintingBackend -
+alle drei rufen `_draw_fitted_text()` mit identischen Parametern auf,
+unterscheiden sich nur in der Hintergrund-Rekonstruktion unter einer
+gelöschten Box, nie in Text-Position/-Grösse/-Umbruch/-Ausrichtung;
+BoxOverlayBackend ist dafür die günstigste der drei, wichtig für einen
+Render pro Bearbeitungspause) und liefert das Ergebnisbild zurück.
+`_PAGE_HTML`'s JS (`scheduleRender()`/`requestRenderNow()`) ersetzt damit
+direkt `#bg`. Jede Box zeigt ihre eigene (weiterhin nur genäherte)
+Textnachbildung nur noch, WÄHREND sie aktiv fokussiert ist
+(`.region.editing`, CSS "has-preview"-Zustand) - jede andere, nicht
+fokussierte Box zeigt die echten, bereits gerenderten Pixel. Debounce:
+0ms nach Drag-/Resize-Ende oder einem Toolbar-Klick, 700ms nach jedem
+Tastendruck im Text, Fallback auf die alte, immer sichtbare Nachbildung
+bleibt bestehen, bis der allererste Render erfolgreich war (kein leeres
+Bild, falls `/api/render-preview` einmal fehlschlägt).
+
+**Qt (ui/image_correction_dialog.py):** Dieselbe Idee, dieselbe
+Backend-Wahl, jetzt mit `QTimer` (`_schedule_live_preview()`/
+`_refresh_live_preview()`, ein einzelner, bei jeder Änderung neu
+gestarteter Single-Shot-Timer statt einem pro Ereignis) statt
+JavaScript-Debounce, und einem direkten `QPixmap`-Tausch am
+Hintergrund-Item der Szene statt eines `<img>`-Quellenwechsels.
+`_ResizableRegionItem` bekommt ein neues `set_live_preview_available()` -
+sobald `True`, zeichnet `paint()` die eigene Textnäherung nur noch für
+die AKTIVE Box, mit einer fast blickdichten Füllung
+(`_ACTIVE_EDITING_FILL_COLOR`, mirrors die Browser-Seite `.region.editing`-
+Hintergrundfarbe), damit die darunterliegenden echten (aber für diese eine
+Zeile noch nicht ganz aktuellen) Pixel nicht durchscheinen und wie
+doppelt gezeichneter Text wirken. Läuft bewusst SYNCHRON auf dem
+UI-Thread - `_apply()` selbst tut das für den kompletten (teureren) Lauf
+bereits mit derselben Begründung ("kein OCR-/Provider-/Netzwerk-Aufruf
+beteiligt"), ein debounced BoxOverlayBackend-Render ist günstiger als
+das.
+
+### Getestet
+
+`python3 -m py_compile` + `ast.parse()` für beide Python-Dateien; das in
+review_server.py eingebettete JS zusätzlich per `node --check` gegen den
+extrahierten `<script>`-Inhalt geprüft - alle ohne Fehler.
+
+Anders als in den vorherigen Runden dieser Sitzung war diesmal eine
+ECHTE Ausführung möglich: `PySide6`, `PyMuPDF`, `python-docx`,
+`python-pptx` und die restlichen fehlenden Projektdateien wurden in die
+Cloud-Sandbox nachgeladen, damit `pytest` tatsächlich lief statt nur
+`py_compile`. Ergebnis: `tests/test_review_server.py` 13/13 bestanden
+(inkl. eines neuen Tests, der `/api/render-preview` gegen einen echten,
+laufenden Server aufruft und per Pixel-Analyse prüft, dass zentrierter,
+fett gesetzter Text mit expliziter Schriftgrösse tatsächlich zentriert im
+resultierenden JPEG landet), `tests/test_ui_image_correction.py` 32/32
+bestanden (inkl. eines neuen Tests, der `_refresh_live_preview()` gegen
+ein echtes Bild aufruft und dieselbe Zentrierung im geswappten
+`QPixmap` per Pixel-Analyse verifiziert). Zusätzlich manuell (ausserhalb
+der Testsuite) beide Render-Pfade end-to-end gegen ein echtes Bild
+laufen lassen und das Ergebnis-JPEG/PNG visuell geprüft - in beiden
+Fällen korrekt zentrierter, fetter Text an der erwarteten Position.
+
+### Bewusst nicht behoben in dieser Runde
+
+Der Hintergrund unter einer neu positionierten Box sieht in der Live-
+Vorschau (BoxOverlayBackend, einfarbige Füllung) etwas anders aus als im
+später mit dem echten, für den Auftrag konfigurierten Backend
+erzeugten JPG (OpenCV-Inpainting oder GPU-Modell) - ausschliesslich die
+Optik der Löschstelle, nie die Text-Platzierung selbst, siehe
+`_render_preview_bytes()`s/`_refresh_live_preview()`s eigene Kommentare.
+
+Die Titel-Zentrierung- und die "zweites Bild, 0 erkannte Regionen"-Fragen
+aus früheren Runden dieser Sitzung bleiben weiterhin offen, unverändert
+durch diese Runde.
+
+**Bitte auf dem echten Rechner bestätigen:** beide Korrektur-Dialoge
+öffnen, eine Box bearbeiten/verschieben/vergrössern und beobachten, ob
+die Ansicht danach wirklich den echten Render zeigt (kein Flackern, keine
+spürbare Verzögerung, die Box-Textnäherung verschwindet für nicht aktive
+Boxen) - und `pytest tests/` komplett laufen lassen.
