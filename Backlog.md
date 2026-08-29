@@ -7137,3 +7137,190 @@ Auftrag ausschliesslich über die Webapp konfiguriert).
 Getestet: `json.load()` auf beiden i18n-Dateien (gültiges JSON, identische
 Schlüsselmengen DE/EN, keine Lücke), `node --check app.js` (keine
 Syntaxfehler). Kein Python-Code betroffen, daher kein `pytest`-Lauf nötig.
+
+## 29.08.2026 (Cowork-Sitzung) - PaddleOCR: "fast kein Text erkannt, obwohl fast nur Text" - Layout-Modell segmentiert dichte Screenshot-Collagen nicht
+
+Michael: "Ich habe mal ein anderes Bild genommen und dort wird fast kein
+Text erkannt obwohl es fast nur aus Text besteht." Testbild: "AM Declas
+Chat Message 2.jpg" - eine dichte, vierspaltige Telegram-Screenshot-
+Collage (1280x1280), inhaltlich nichts wie die ein-/zweispaltigen
+Dokumente, auf die PP-StructureV3s Layout-Modell trainiert ist.
+
+### Bestätigt mit Zahlen, nicht geraten
+
+Michael schickte `tools/probe_paddleocr.py`s echte Ausgabe-JSON für dieses
+Bild. Ausgewertet:
+
+- `overall_ocr_res` (die reine Zeilenerkennung, VOR jeder Layout-
+  Zuordnung) fand **214 echte Textzeilen** auf dem Bild.
+- `parsing_res_list` (das Layout-Modell) teilte die ganze Seite dagegen
+  nur in **3 Blöcke** auf - alle mit niedriger Konfidenz (0.32-0.45).
+- Von den 214 Zeilen lagen nur **21** geometrisch innerhalb eines dieser
+  3 Blöcke. Die übrigen **193 (90%!)** gehörten zu KEINEM Layout-Block -
+  wurden vor diesem Fix also nie zu einer `OcrTextRegion`, nicht einmal
+  als `translatable=False`-Kollisions-Hindernis.
+
+Das ist ein ANDERER, schlimmerer Fehlerfall als der bereits bekannte
+(24./26.08.2026, `_PADDLE_TRANSLATABLE_LABELS`/`_PADDLE_SCATTERED_
+TEXT_LABELS`): dort existierte immer ein Block, nur mit dem falschen
+Label. Hier existierte für die meisten Zeilen gar kein Block - ein
+breiteres Label-Whitelisting hätte also nichts gebracht.
+
+### Der Fix
+
+`PaddleOcrEngine.recognize()` (`pipeline/images/ocr.py`) verfolgt jetzt
+zusätzlich zu `claimed_line_indices` (Zeilen, die ein ÜBERSETZBARER Block
+beansprucht - unverändert) eine zweite Menge, `matched_by_any_block_
+indices` (Zeilen, die IRGENDEIN Block beansprucht, egal welches Label).
+Nach der bestehenden Block-Schleife fällt jede `ocr_lines`-Zeile, die in
+KEINEM Block gelandet ist, jetzt auf eine eigene, kleine, unabhängig
+übersetzbare Region zurück - genau wie es `_paddle_block_to_line_
+regions()` bereits für die Zeilen eines "image"-gelabelten Blocks tut
+(neuer gemeinsamer Helper `_ocr_line_to_region()`, von beiden Stellen
+genutzt statt zweimal denselben Code zu pflegen). Anders als bei einem
+"image"-Block gibt es hier keine umschließende Bbox, die zusätzlich als
+Hindernis erhalten bleiben könnte - es gab ja nie einen Block.
+
+### Getestet
+
+`tests/test_image_ocr.py`: ein bestehender Test
+(`..._skips_a_block_with_no_matching_ocr_line`) prüfte bisher inzident
+auch das ALTE Verhalten für eine unzugeordnete Zeile (wurde stillschweigend
+verworfen) - umbenannt und angepasst, prüft jetzt nur noch, dass der Block
+selbst (ohne eigene Zeile) nichts beiträgt. Neuer Test (`..._falls_back_
+to_individual_lines_when_no_block_matches_them`) mit einem kleinen
+Fixture, das dieselbe Form wie das echte Bild nachstellt (ein Block
+deckt eine von drei Zeilen ab, zwei liegen komplett außerhalb jedes
+Blocks) - beide müssen jetzt als eigene Regionen auftauchen. Alle 45
+Tests in `tests/test_image_ocr.py` grün, `tests/test_translate_image.py`
+(31 Tests, downstream von `OcrTextRegion`) ebenfalls unverändert grün.
+
+### Bewusst nicht behoben/offen
+
+Ob 214 erkannte Zeilen für dieses Bild überhaupt vollständig sind (falls
+selbst die reine Zeilenerkennung schon Text übersieht) ist unbekannt -
+nur die Layout-Zuordnung wurde hier repariert. Die neuen, jetzt einzeln
+übersetzten Orphan-Zeilen sind rein geometrisch aus `overall_ocr_res`
+übernommen, ohne Absatz-Kontext - bei dicht gepackten UI-Screenshots wie
+diesem ist das inhärent unordentlicher als eine echte, vom Layout-Modell
+erkannte Absatzgruppierung (die dieses Bild aber gerade nicht liefert).
+Kurze, bereits als Streuglyphen gefilterte Fehl-Erkennungen
+(`_PADDLE_STRAY_GLYPH_MAX_CHARS`/`_PADDLE_STRAY_GLYPH_MIN_SCORE`) greifen
+weiterhin VOR diesem Fallback, da beide auf derselben, bereits gefilterten
+`ocr_lines`-Liste aufbauen.
+
+**Bitte auf dem echten Rechner bestätigen:** denselben Testlauf gegen
+"AM Declas Chat Message 2.jpg" wiederholen und prüfen, ob jetzt deutlich
+mehr (idealerweise fast alle) der 214 Zeilen tatsächlich übersetzt und
+zurückgeschrieben werden, und ob das Ergebnis noch lesbar bleibt (nicht
+nur technisch mehr Regionen).
+
+### Fund 2, selbe Sitzung: Orphan-Zeilen brauchen Absatz-Merge, nicht nur Fallback
+
+Michaels nächster echter Testlauf, direkt nach obigem Fix: "Jetzt werden
+die Text erkannt, aber spannend das immer noch verschiedene Fonts und
+grössen angewannt werde, wo sich die Textgrössen im Dokument nur minimal
+ändern. [...] die 5 Textzeilen waren teilweise in verschiedenen Stilen
+und grössen. Das war der grosse Text in der Mitte des Bildes unterhalb
+eines anderen Bildes."
+
+Ursache: der Fund-1-Fix oben liess jede Orphan-Zeile für sich allein -
+genau das Problem, das `merge_lines_into_paragraphs()`/
+`merge_region_group()` bereits am 22.08.2026 für Tesseracts eigene
+zeilenweise Ausgabe lösen (siehe deren Doku weiter oben in dieser Datei).
+Jede rohe OCR-Bounding-Box streut um ein paar Pixel, selbst innerhalb
+eines optisch einheitlichen Absatzes - `estimated_font_size()` liest
+diese Höhe aber pro Region einzeln, also bekamen mehrere Zeilen
+DESSELBEN Absatzes leicht unterschiedliche Schriftgrössen.
+
+Fix: `PaddleOcrEngine.recognize()` führt die Orphan-Zeilen jetzt selbst
+noch VOR der Rückgabe durch `merge_lines_into_paragraphs()`/
+`merge_region_group()` - dieselbe geometrische Absatz-Erkennung wie beim
+Tesseract-Pfad (gleiche Spalte, kleiner Zeilenabstand, ähnliche
+Zeilenhöhe). Bewusst INNERHALB von `recognize()`, nicht in
+`translate_image.py`: `returns_paragraph_regions = True` verspricht,
+dass jede von dieser Engine gelieferte Region bereits Absatz-Ebene ist -
+für einen korrekt klassifizierten Block stimmte das schon, jetzt stimmt
+es auch für Orphan-Zeilen, und `translate_image.py` selbst bleibt
+unverändert (vertraut dem Flag weiterhin zu Recht, siehe dessen eigene
+Doku zu `engine_returns_paragraphs`).
+
+Neuer Test `test_paddleocr_recognize_merges_orphan_lines_of_one_
+paragraph_into_one_consistent_region` (drei Orphan-Zeilen, gleiche
+Spalte, geringer Abstand, Höhen 18/19/17px) prüft genau das: EINE
+zusammengeführte Region mit EINER konsistenten `line_height` (18, der
+Durchschnitt) statt drei einzelnen. Alle 46 Tests in
+`tests/test_image_ocr.py` und alle 31 in `tests/test_translate_image.py`
+weiterhin grün.
+
+Das vergessene "="-Zeichen aus derselben Rückmeldung ist NICHT durch
+diesen Fix erklärt/behoben - plausibelste Erklärung: `_PADDLE_STRAY_
+GLYPH_MAX_CHARS`/`_PADDLE_STRAY_GLYPH_MIN_SCORE` (Filter gegen von
+PaddleOCR fehlgelesene Icons, kalibriert auf Zeichenlänge + Konfidenz,
+nicht auf den tatsächlichen Zeicheninhalt) könnte ein echtes, aber mit
+niedriger Konfidenz erkanntes einzelnes "="-Zeichen genauso stillschweigend
+verwerfen wie ein fehlgelesenes Icon-Fragment - unbestätigt, da die genaue
+Zeile/Konfidenz für diesen Fall nicht vorliegt. Nicht blind am
+Schwellenwert gedreht, ohne echte Daten dafür zu haben (mirrors die
+Kalibrierungs-Disziplin dieses Moduls bei jeder anderen Konstante).
+
+## 29.08.2026 (Runde 9, Cowork-Sitzung) - Browser-Vorschau: Rückstau bei schnellem Klicken behoben, laufendes Rendern während Drag/Resize
+
+Michael, direkt nach Runde 8: "Das rendern ist etwas besser, aber man
+darf immer noch nicht zu schnell klicken." Nachgefragt, konkret: "Vorschau
+bleibt hängen/friert ein."
+
+### Ursache
+
+`requestRenderNow()` war zwar gegen eine VERALTETE Antwort abgesichert
+(`_renderSeq` verwirft eine spät eintreffende Antwort auf eine ältere
+Anfrage), aber nicht dagegen, dass mehrere ECHTE Requests gleichzeitig
+unterwegs sind. Jeder Render ist reale CPU-Arbeit
+(`BoxOverlayBackend().apply()` über das ganze Bild plus JPEG-Encoding) -
+`ThreadingHTTPServer`s Threads teilen sich dabei den GIL, laufen für
+diese Arbeit also faktisch seriell. Mehrere schnell hintereinander
+gefeuerte Requests (typisch beim zügigen Ziehen/Vergrößern, wo vorher
+NICHTS während der Bewegung selbst neu rendert wurde) stauten sich also
+auf - und da wegen `_renderSeq` ohnehin nur die ALLERLETZTE Antwort
+übernommen wird, war die ganze Wartezeit für jeden Request davor reine
+verschwendete Latenz, während der die UI wie eingefroren wirkte.
+
+### Der Fix (`image_translate_cli/review_server.py`, `_PAGE_HTML`s JS)
+
+- `requestRenderNow()` bekommt einen In-Flight-Schutz
+  (`_renderInFlight`/`_renderAgainRequested`): läuft schon ein echter
+  Request, wird kein zweiter gestartet, sondern nur vorgemerkt, dass
+  direkt danach (mit dann aktuellstem Stand) noch einmal gerendert
+  werden soll. Zu jedem Zeitpunkt höchstens ein Request unterwegs, ohne
+  dass eine zwischenzeitliche Änderung verloren geht.
+- Neue Funktion `scheduleRenderThrottled(intervalMs)` - anders als
+  `scheduleRender()` (echter Debounce, jeder Aufruf verwirft den
+  vorherigen Timer) eine DROSSEL: läuft schon ein Timer, wird kein
+  zweiter geplant. Während einer durchgehenden Geste (viele
+  `pointermove`-Events pro Sekunde) feuert dadurch trotzdem etwa alle
+  400ms tatsächlich ein Render, statt (wie ein reiner Debounce es hier
+  täte) erst beim Loslassen.
+- `makeDraggable()`/`makeResizable()` rufen das jetzt in ihrem
+  `pointermove`-Handler auf (400ms, dieselbe Grössenordnung wie zuvor
+  in der Qt-Seite für kontinuierliche Deltas) UND setzen die Klasse
+  `editing` auf die Box, solange die Geste läuft (mirrors das
+  bestehende Verhalten bei Text-Fokus) - vorher war während der
+  Bewegung selbst (dank "has-preview") gar nichts Sinnvolles zu sehen,
+  erst nach dem Loslassen. Beim Loslassen selbst bleibt es beim
+  bisherigen sofortigen `scheduleRender(0)` mit dem endgültigen Stand,
+  eine evtl. noch laufende Drossel wird dafür verworfen.
+
+### Getestet
+
+`node --check` gegen das aus `_PAGE_HTML` extrahierte `<script>` (keine
+Syntaxfehler), `python3 -m py_compile`, `tests/test_review_server.py`
+(13/13) und `tests/test_browser_regressions.py` (2/2) weiterhin grün -
+keiner dieser Tests deckt die neue In-Flight-/Drossel-Logik selbst ab
+(reine Client-JS-Zustandsmaschine, dieselbe Grenze wie bei jedem
+vorherigen zeitgesteuerten Verhalten in `_PAGE_HTML` - siehe
+scheduleRender()s eigene Debounce-Werte, nie automatisiert getestet).
+
+**Bitte auf dem echten Rechner bestätigen:** zügig eine Box ziehen bzw.
+vergrössern/verkleinern und beobachten, ob die Vorschau jetzt während
+der Bewegung mehrfach sichtbar aktualisiert statt nur am Ende, und ob
+das "Hängen/Einfrieren" bei schnellem Klicken jetzt weg ist.

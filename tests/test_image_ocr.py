@@ -879,9 +879,19 @@ def test_paddleocr_recognize_handles_attribute_based_layout_blocks(
     assert regions[0].text == "SPIRIT · SOUL"
 
 
-def test_paddleocr_recognize_skips_a_block_with_no_matching_ocr_line(
+def test_paddleocr_recognize_block_with_no_matching_ocr_line_contributes_nothing_itself(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Was `... == []` until 29.08.2026 - the ONE ocr_line here
+    ("Somewhere else entirely") sat outside the ONE block's bbox, and
+    back then an ocr_line matched by no block simply vanished (see
+    test_paddleocr_recognize_falls_back_to_individual_lines_when_no_
+    block_matches_them below for the real bug report that changed
+    this). The block itself genuinely contributing nothing (no OCR line
+    of its own) is still exactly what this test checks - only the
+    orphaned line's OWN fate changed, from "dropped" to "its own
+    fallback region", which is now covered by the newer test instead of
+    this one asserting an empty result."""
     source = tmp_path / "irrelevant.png"
     _build_blank_image(source)
     monkeypatch.setattr("pipeline.images.ocr.paddleocr_available", lambda: True)
@@ -898,7 +908,125 @@ def test_paddleocr_recognize_skips_a_block_with_no_matching_ocr_line(
     engine = PaddleOcrEngine()
     monkeypatch.setattr(engine, "_get_pipeline", lambda: _FakePaddlePipeline(result))
 
-    assert engine.recognize(str(source)) == []
+    regions = engine.recognize(str(source))
+
+    # The block itself: no OCR line inside its bbox, contributes nothing.
+    assert not any((r.x, r.y, r.width, r.height) == (500, 500, 100, 20) for r in regions)
+    # The orphaned line: no longer silently dropped (see the new
+    # fallback test below) - it becomes its own small region instead.
+    assert [r.text for r in regions] == ["Somewhere else entirely"]
+
+
+def test_paddleocr_recognize_falls_back_to_individual_lines_when_no_block_matches_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """29.08.2026 - real user report, Backlog.md 29.08.2026, Michael:
+    "Ich habe mal ein anderes Bild genommen und dort wird fast kein
+    Text erkannt obwohl es fast nur aus Text besteht." Confirmed via
+    tools/probe_paddleocr.py's real result JSON for his test image (a
+    dense, four-column Telegram-screenshot collage, 1280x1280, nothing
+    like the single-/two-column documents PP-StructureV3's layout model
+    is trained on): `overall_ocr_res` alone found 214 real text lines,
+    but `parsing_res_list` carved the whole page into just 3 low-
+    confidence blocks (score 0.32-0.45) covering only 21 of them - the
+    other 193 (90%!) belonged to NO block at all and, before this fix,
+    simply vanished rather than becoming an OcrTextRegion at all (a
+    DIFFERENT, worse gap than _PADDLE_TRANSLATABLE_LABELS' "block
+    exists but has the wrong label" case - here there was no block to
+    label in the first place, so widening that whitelist would not
+    have helped).
+
+    Fixture below is a small, hand-built stand-in for the same shape:
+    one real "text" block that only covers ONE of three real OCR
+    lines - the other two, positioned well outside every block's bbox,
+    must now surface as their own small translatable regions instead of
+    disappearing."""
+    source = tmp_path / "irrelevant.png"
+    _build_blank_image(source)
+    monkeypatch.setattr("pipeline.images.ocr.paddleocr_available", lambda: True)
+
+    parsing_res_list = [
+        {"block_label": "text", "block_content": "Caught by a block", "block_bbox": [10, 10, 300, 30], "block_id": 0},
+    ]
+    overall_ocr_res = {
+        "rec_texts": ["Caught by a block", "Nobody's layout block covers me", "Neither does mine"],
+        "rec_scores": [0.97, 0.93, 0.9],
+        "rec_boxes": [
+            [12.0, 12.0, 290.0, 28.0],  # inside the one real block - unaffected
+            [400.0, 900.0, 700.0, 918.0],  # far away, no block covers it
+            [800.0, 50.0, 1000.0, 68.0],  # also far away, different corner
+        ],
+    }
+    result = _paddle_result(parsing_res_list, overall_ocr_res)
+    engine = PaddleOcrEngine()
+    monkeypatch.setattr(engine, "_get_pipeline", lambda: _FakePaddlePipeline(result))
+
+    regions = engine.recognize(str(source))
+
+    assert {r.text for r in regions} == {
+        "Caught by a block",
+        "Nobody's layout block covers me",
+        "Neither does mine",
+    }
+    orphan = next(r for r in regions if r.text == "Nobody's layout block covers me")
+    assert (orphan.x, orphan.y, orphan.width, orphan.height) == (400, 900, 300, 18)
+    assert orphan.confidence == pytest.approx(93.0)
+    assert orphan.line_height == 18
+    assert orphan.translatable is True
+
+
+def test_paddleocr_recognize_merges_orphan_lines_of_one_paragraph_into_one_consistent_region(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """29.08.2026 - Michael's very next real report after the fallback
+    above started working: "spannend das immer noch verschiedene Fonts
+    und grössen angewannt werde, wo sich die Textgrössen im Dokument nur
+    minimal ändern. [...] die 5 Textzeilen waren teilweise in
+    verschiedenen Stilen und grössen. Das war der grosse Text in der
+    Mitte des Bildes." Root cause: leaving every orphan line fully
+    independent (the fallback above) reproduced exactly the problem
+    merge_lines_into_paragraphs()/merge_region_group() were built
+    (22.08.2026) to fix for Tesseract's own line-level output - each
+    orphan line's OWN raw OCR bounding-box height varies by a pixel or
+    two even within one visually uniform paragraph, and
+    estimated_font_size() reads that height per region, so three lines
+    of the SAME paragraph got three slightly different font sizes.
+
+    Fixture: three orphan lines, same column (overlapping x-range),
+    small vertical gaps and near-identical heights (18/19/17px, well
+    within _PARAGRAPH_HEIGHT_RATIO_MIN) - exactly what
+    merge_lines_into_paragraphs() is calibrated to treat as one wrapped
+    paragraph. None is covered by any parsing_res_list block."""
+    source = tmp_path / "irrelevant.png"
+    _build_blank_image(source)
+    monkeypatch.setattr("pipeline.images.ocr.paddleocr_available", lambda: True)
+
+    overall_ocr_res = {
+        "rec_texts": ["Line one", "line two", "line three"],
+        "rec_scores": [0.90, 0.91, 0.92],
+        "rec_boxes": [
+            [100.0, 100.0, 300.0, 118.0],  # height 18
+            [100.0, 122.0, 300.0, 141.0],  # height 19, gap 4px below line one
+            [100.0, 144.0, 300.0, 161.0],  # height 17, gap 3px below line two
+        ],
+    }
+    result = _paddle_result([], overall_ocr_res)
+    engine = PaddleOcrEngine()
+    monkeypatch.setattr(engine, "_get_pipeline", lambda: _FakePaddlePipeline(result))
+
+    regions = engine.recognize(str(source))
+
+    assert len(regions) == 1
+    region = regions[0]
+    assert region.text == "Line one line two line three"
+    assert (region.x, region.y, region.width, region.height) == (100, 100, 200, 61)
+    # ONE consistent line_height for the whole paragraph (the members'
+    # average, 18/19/17 -> 18) - NOT each line's own, different height,
+    # which is exactly what produced Michael's "verschiedenen ...
+    # grössen" before this fix.
+    assert region.line_height == 18
+    assert region.confidence == pytest.approx(91.0)
+    assert region.translatable is True
 
 
 def test_paddleocr_recognize_translates_an_image_labeled_blocks_lines_individually(

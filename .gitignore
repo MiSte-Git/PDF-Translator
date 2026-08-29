@@ -24,6 +24,7 @@ tests/fixtures/*.pdf
 tests/output/
 tools/output/
 /output/
+paddle_probe_out/
 *.log
 *.mbtree
 

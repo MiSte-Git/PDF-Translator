@@ -734,6 +734,26 @@ def _paddle_block_to_region(
     return regions
 
 
+def _ocr_line_to_region(
+    box: tuple[float, float, float, float], text: str, score: float
+) -> OcrTextRegion:
+    """One small OcrTextRegion for a single raw OCR line (one `ocr_lines`
+    entry: `box`/`text`/`score`), at its own original position - the
+    shared building block behind both `_paddle_block_to_line_regions()`
+    (a scattered-label block's own matched lines, 26.08.2026) and
+    PaddleOcrEngine.recognize()'s 29.08.2026 orphan-line fallback (a
+    line no layout block matched at all - see that fallback's own
+    docstring) - factored out so both build an identical region for
+    "one raw OCR line, standing on its own" rather than risking the two
+    drifting apart."""
+    lx0, ly0, lx1, ly1 = box
+    height = round(ly1 - ly0)
+    return OcrTextRegion(
+        text=text, x=round(lx0), y=round(ly0), width=round(lx1 - lx0), height=height,
+        confidence=score * 100, line_height=height,
+    )
+
+
 def _paddle_block_to_line_regions(
     block: dict,
     ocr_lines: list[tuple[tuple[float, float, float, float], str, float]],
@@ -795,15 +815,7 @@ def _paddle_block_to_line_regions(
         box, text, score = ocr_lines[index]
         if not text.strip():
             continue
-        lx0, ly0, lx1, ly1 = box
-        height = round(ly1 - ly0)
-        regions.append(
-            OcrTextRegion(
-                text=text,
-                x=round(lx0), y=round(ly0), width=round(lx1 - lx0), height=height,
-                confidence=score * 100, line_height=height,
-            )
-        )
+        regions.append(_ocr_line_to_region(box, text, score))
     return regions
 
 
@@ -839,6 +851,28 @@ class PaddleOcrEngine:
     Only blocks whose `block_label` is in _PADDLE_TRANSLATABLE_LABELS are
     considered - see that constant's docstring for why the rest (images,
     tables, ...) are excluded.
+
+    29.08.2026: `recognize()` also falls back to a region for any
+    `overall_ocr_res` line that no `parsing_res_list` block matched AT
+    ALL - see recognize()'s own orphan-line-fallback comment for the
+    real, quantified example (a dense screenshot collage where the
+    layout model under-segmented the page so badly that 90% of the
+    real, detected text lines belonged to no block). This is a
+    DIFFERENT gap than the wrong-label case
+    _PADDLE_TRANSLATABLE_LABELS/_PADDLE_SCATTERED_TEXT_LABELS address -
+    those assume a block exists but has the wrong label; this handles
+    a line for which no block exists to label in the first place. Same
+    day, second finding: these orphan lines are additionally run
+    through `merge_lines_into_paragraphs()`/`merge_region_group()` (the
+    same paragraph-merge Tesseract's own line-level output gets in
+    pipeline.images.translate_image) BEFORE leaving recognize() - left
+    fully independent, a real multi-line paragraph's lines got
+    inconsistent, independently-estimated font sizes/styles (Michael's
+    exact next real report). Doing this INSIDE recognize(), not in
+    translate_image.py, keeps `returns_paragraph_regions = True`
+    accurate for every region this engine returns, orphan or not - and
+    keeps translate_image.py itself untouched, correctly trusting that
+    flag exactly as it already does for a normal Paddle paragraph.
 
     `line_height` is the average height of the matched OCR lines' own
     boxes (each already a single-line measurement, same reasoning as
@@ -916,12 +950,20 @@ class PaddleOcrEngine:
             # that claims a line can appear AFTER the scattered-label
             # block in `blocks`' own order - PaddleX doesn't guarantee
             # any particular block ordering here.
+            #
+            # 29.08.2026: also track EVERY block's matched lines here
+            # (`matched_by_any_block_indices`, regardless of label) in
+            # the same pass - see the orphan-line fallback below for why.
             claimed_line_indices: set[int] = set()
+            matched_by_any_block_indices: set[int] = set()
             for block in blocks:
+                block_box = _paddle_field(block, "block_bbox")
+                if block_box is None or len(block_box) != 4:
+                    continue
+                matched = set(_match_block_lines(block_box, ocr_lines))
+                matched_by_any_block_indices.update(matched)
                 if _paddle_field(block, "block_label") in _PADDLE_TRANSLATABLE_LABELS:
-                    block_box = _paddle_field(block, "block_bbox")
-                    if block_box is not None and len(block_box) == 4:
-                        claimed_line_indices.update(_match_block_lines(block_box, ocr_lines))
+                    claimed_line_indices.update(matched)
 
             regions: list[OcrTextRegion] = []
             for block in blocks:
@@ -953,6 +995,69 @@ class PaddleOcrEngine:
                         )
                     continue
                 regions.extend(block_regions)
+
+            # 29.08.2026 - real user report, Backlog.md 29.08.2026,
+            # Michael: "Ich habe mal ein anderes Bild genommen und dort
+            # wird fast kein Text erkannt obwohl es fast nur aus Text
+            # besteht." Confirmed via tools/probe_paddleocr.py's real
+            # result JSON for his test image (a dense, four-column
+            # Telegram-Screenshot-Collage, 1280x1280 - nichts wie die
+            # ein-/zweispaltigen Dokumente, auf die dieses Layout-Modell
+            # trainiert ist): overall_ocr_res's eigene Zeilenerkennung
+            # allein fand 214 echte Textzeilen, aber PP-StructureV3s
+            # Layout-Modell teilte die ganze Seite in nur 3 Blöcke mit
+            # niedriger Konfidenz (0.32-0.45) auf, die zusammen nur 21
+            # dieser 214 Zeilen abdeckten - die übrigen 193 (90%!)
+            # gehörten zu KEINEM Layout-Block, wurden also nie zu einer
+            # OcrTextRegion, nicht einmal als translatable=False-
+            # Kollisions-Hindernis (anders als eine Zeile in einem
+            # Block mit dem FALSCHEN Label - siehe
+            # _PADDLE_TRANSLATABLE_LABELS' eigene Doku für diesen
+            # älteren, ANDEREN Fehlerfall). Ein breiteres Label-
+            # Whitelisting hätte hier nichts gebracht - für diese
+            # Zeilen gab es gar keinen Block, dem ein Label hätte
+            # zugewiesen werden können.
+            #
+            # Jede ocr_lines-Zeile, die von KEINEM Block erfasst wurde
+            # (übersetzbar oder nicht - matched_by_any_block_indices
+            # oben), fällt jetzt auf eine eigene, kleine, unabhängig
+            # übersetzbare Region zurück - genau wie
+            # _paddle_block_to_line_regions() es bereits für die
+            # eigenen Zeilen eines "image"-gelabelten Blocks tut
+            # (_ocr_line_to_region() ist derselbe Helper). Anders als
+            # dort gibt es hier keine umschließende Block-Bbox, die
+            # zusätzlich als translatable=False-Hindernis erhalten
+            # bleiben könnte - es gab hier nie einen Block.
+            orphan_line_regions: list[OcrTextRegion] = []
+            for index, (box, text, score) in enumerate(ocr_lines):
+                if index in matched_by_any_block_indices or not text.strip():
+                    continue
+                orphan_line_regions.append(_ocr_line_to_region(box, text, score))
+
+            # 29.08.2026, zweiter Fund derselben Sitzung (Backlog.md,
+            # Michaels nächster echter Testlauf): jede Orphan-Zeile für
+            # sich allein zu lassen reproduzierte genau das Problem, das
+            # merge_lines_into_paragraphs()/merge_region_group() bereits
+            # 22.08.2026 für Tesseracts eigene Zeilen-Ausgabe lösen -
+            # ein echter Mehrzeilen-Absatz wurde mit UNTERSCHIEDLICHER,
+            # pro Zeile einzeln geschätzter Schriftgröße gerendert
+            # (Michael: "5 Textzeilen waren teilweise in verschiedenen
+            # Stilen und grössen", "wo sich die Textgrössen im Dokument
+            # nur minimal ändern") - jede rohe OCR-Bounding-Box streut
+            # um ein paar Pixel, selbst innerhalb eines optisch
+            # einheitlichen Absatzes, und estimated_font_size() liest
+            # genau diese Höhe pro Region einzeln. `returns_paragraph_
+            # regions = True` verspricht translate_image.py, dass JEDE
+            # von dieser Engine gelieferte Region bereits Absatz-Ebene
+            # ist - für einen ordentlich klassifizierten Block stimmt
+            # das, für eine einzelne Orphan-Zeile bisher nicht. Also wird
+            # hier, noch innerhalb recognize(), genau dieselbe
+            # geometrische Absatz-Zusammenführung wie beim Tesseract-Pfad
+            # angewendet, BEVOR die Zeilen `regions` verlassen -
+            # translate_image.py selbst bleibt unverändert und vertraut
+            # dem Flag weiterhin zu Recht.
+            for chain in merge_lines_into_paragraphs(orphan_line_regions):
+                regions.append(merge_region_group(chain))
         except Exception as exc:
             raise OcrError(f"PaddleOCR-Ergebnis konnte nicht verarbeitet werden: {exc}") from exc
         return regions

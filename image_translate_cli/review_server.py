@@ -36,6 +36,24 @@ it to every caller:
        DOM text overlay now only shows its own (still approximate)
        rendering WHILE that one region is actively focused; every idle
        region shows literal, real rendered pixels.
+    2b. (29.08.2026, Runde 9) Point 2a's per-edit render made rapid
+       interaction (dragging/resizing quickly, in particular) feel like
+       it "friert ein" (Michael): each render is real CPU work
+       (BoxOverlayBackend().apply() over the whole image), and several
+       requests fired in quick succession piled up rather than being
+       coalesced - only the LAST one's result was ever kept
+       (_renderSeq already discarded stale responses), so the extra
+       work was pure wasted latency. requestRenderNow() now guards
+       against overlapping itself (_renderInFlight/_renderAgainRequested
+       - at most one real request in flight, a change made in the
+       meantime is re-rendered once that one finishes, never lost).
+       Dragging/resizing also now re-renders CONTINUOUSLY while the
+       gesture is in progress, throttled rather than only once at
+       release (scheduleRenderThrottled()), with the region's own
+       (still approximate) text visible for the duration of the
+       gesture (mirrors point 2a's "actively focused" treatment for
+       text editing) - before this, nothing meaningful was visible
+       between pressing down and releasing.
     3. A human edits text/geometry in the browser and clicks "Anwenden"
        (POSTs the edited region list to /api/apply) or "Abbrechen"
        (POSTs to /api/cancel). Whichever happens first ends the session -
@@ -857,16 +875,34 @@ function makeDraggable(box, textEl, handle) {
       const selection = window.getSelection();
       if (selection) selection.removeAllRanges();
       logEvent('drag-start', {origX: box.dataset.origX, origY: box.dataset.origY, styleLeftBefore: startLeft + 'px', styleTopBefore: startTop + 'px', scale: dragScale});
+      // 29.08.2026 - wie beim Text-Fokus (siehe renderRegions() weiter
+      // oben): während der Bewegung selbst die eigene Näherung zeigen,
+      // statt (dank "has-preview") transparent zu bleiben - sonst wäre
+      // während des ganzen Drags nichts Sinnvolles zu sehen, bis der
+      // nächste echte Render fertig ist.
+      box.classList.add('editing');
     }
     box.style.left = (startLeft + dx) + 'px';
     box.style.top = (startTop + dy) + 'px';
+    // 29.08.2026 - Michael: "man darf immer noch nicht zu schnell
+    // klicken" / Vorschau friert bei zügigem Ziehen ein. Vorher wurde
+    // erst NACH dem Loslassen überhaupt neu gerendert - jetzt schon
+    // während der Bewegung, gedrosselt statt bei jedem pointermove
+    // (siehe scheduleRenderThrottled()s eigenen Kommentar).
+    if (moved) scheduleRenderThrottled(400);
   });
   box.addEventListener('pointerup', () => {
     if (moved) {
       logEvent('drag-end', {origX: box.dataset.origX, origY: box.dataset.origY, styleLeftAfter: box.style.left, styleTopAfter: box.style.top, scale: dragScale});
+      box.classList.remove('editing');
+      // Eine evtl. noch laufende Drossel (siehe pointermove oben) würde
+      // sonst wenig später redundant NOCHMAL rendern - unschädlich dank
+      // _renderSeq, aber unnötig, da der finale Stand gleich sowieso kommt.
+      if (_renderThrottleTimer) { clearTimeout(_renderThrottleTimer); _renderThrottleTimer = null; }
       // 28.08.2026 (Runde 8) - siehe scheduleRender()s eigenen Kommentar -
       // eine verschobene Box verändert die Kollisions-Nachbarschaft für
-      // ALLE Boxen, nicht nur diese, also sofort neu rendern.
+      // ALLE Boxen, nicht nur diese, also sofort neu rendern (der finale,
+      // massgebliche Stand nach Loslassen).
       scheduleRender(0);
     }
     dragging = false;
@@ -901,6 +937,11 @@ function makeResizable(box, handle) {
     // multi-round-old custom size broke on a further small resize.
     logEvent('resize-start', {origX: box.dataset.origX, origY: box.dataset.origY, styleLeft: box.style.left, styleTop: box.style.top, styleWidthBefore: box.style.width, styleHeightBefore: box.style.height, scale: resizeScale});
     try { handle.setPointerCapture(e.pointerId); } catch (err) { /* see comment above */ }
+    // 29.08.2026 - siehe makeDraggable()s gleichlautenden Kommentar: die
+    // eigene Näherung während der Geste sichtbar lassen, statt (dank
+    // "has-preview") transparent zu bleiben. Anders als beim Drag gibt es
+    // hier keine Bewegungsschwelle - jede Größenänderung beginnt sofort.
+    box.classList.add('editing');
   });
   handle.addEventListener('pointermove', (e) => {
     if (!resizing) return;
@@ -912,6 +953,10 @@ function makeResizable(box, handle) {
     // has to re-run live, not just once at initial load.
     const textEl = box.querySelector('.region-text');
     if (textEl) refitText(box, textEl);
+    // 29.08.2026 - siehe makeDraggable()s gleichlautenden Kommentar und
+    // scheduleRenderThrottled()s eigenen Kommentar: während der Geste
+    // gedrosselt neu rendern statt nur beim Loslassen.
+    scheduleRenderThrottled(400);
   });
   handle.addEventListener('pointerup', (e) => {
     // 27.08.2026 - stopPropagation() here mirrors the pointerdown
@@ -925,6 +970,8 @@ function makeResizable(box, handle) {
     e.stopPropagation();
     if (resizing) {
       logEvent('resize-end', {origX: box.dataset.origX, origY: box.dataset.origY, styleLeft: box.style.left, styleTop: box.style.top, styleWidthAfter: box.style.width, styleHeightAfter: box.style.height, scale: resizeScale});
+      box.classList.remove('editing');
+      if (_renderThrottleTimer) { clearTimeout(_renderThrottleTimer); _renderThrottleTimer = null; }
       // 28.08.2026 (Runde 8) - siehe makeDraggable()s gleichlautenden
       // Kommentar - eine Größenänderung kann diese UND Nachbar-Boxen
       // betreffen (Kollisions-Nachbarschaft), also sofort neu rendern.
@@ -1056,40 +1103,90 @@ function collectRegions() {
 // der Nutzer inzwischen weiter editiert hat - sonst könnte eine
 // langsame, veraltete Antwort eine neuere kurz überschreiben.
 let _renderDebounceTimer = null;
+let _renderThrottleTimer = null;
 let _renderSeq = 0;
 let _lastPreviewUrl = null;
 let _everRenderedOnce = false;
+// 29.08.2026 - Michael, direkt nach den beiden Fixes oben: "Das rendern
+// ist etwas besser, aber man darf immer noch nicht zu schnell klicken"
+// - konkret: "Vorschau bleibt hängen/friert ein". requestRenderNow()
+// war zwar gegen eine VERALTETE Antwort abgesichert (_renderSeq), aber
+// nicht dagegen, dass mehrere echte Requests gleichzeitig unterwegs
+// sind - jeder eigene Render (BoxOverlayBackend().apply() über das
+// GANZE Bild plus JPEG-Encoding) kostet spürbar Zeit, und Python-Threads
+// (ThreadingHTTPServer) teilen sich dabei den GIL, laufen für CPU-Arbeit
+// also faktisch seriell. Mehrere schnell hintereinander gefeuerte
+// Requests stauten sich dadurch auf - die UI wirkte "eingefroren", bis
+// der ganze Rückstau (nutzlos, da ohnehin nur die letzte Antwort dank
+// _renderSeq übernommen wird) durchgelaufen war. `_renderInFlight`/
+// `_renderAgainRequested` unten bündeln das: läuft schon ein echter
+// Request, wird kein zweiter gestartet, sondern nur vorgemerkt, dass
+// direkt danach NOCH EINMAL (mit dem dann aktuellsten Stand) gerendert
+// werden soll - so ist zu jedem Zeitpunkt höchstens ein Request
+// unterwegs, ohne dass eine Änderung verloren geht.
+let _renderInFlight = false;
+let _renderAgainRequested = false;
 
 function scheduleRender(debounceMs) {
   if (_renderDebounceTimer) clearTimeout(_renderDebounceTimer);
   _renderDebounceTimer = setTimeout(requestRenderNow, debounceMs || 0);
 }
 
+// 29.08.2026 - anders als scheduleRender() (echter Debounce: jeder
+// Aufruf verwirft den vorherigen Timer und startet neu, feuert also
+// erst nach einer kurzen PAUSE) ist das hier eine DROSSEL/THROTTLE für
+// eine durchgehende Geste (Drag/Resize, viele pointermove-Events pro
+// Sekunde): solange schon ein Timer läuft, wird kein zweiter geplant -
+// dadurch feuert währenddessen trotzdem etwa alle `intervalMs`
+// tatsächlich ein Render, statt (wie ein reiner Debounce es hier täte)
+// erst beim Loslassen - siehe makeDraggable()/makeResizable() unten.
+function scheduleRenderThrottled(intervalMs) {
+  if (_renderThrottleTimer) return;
+  _renderThrottleTimer = setTimeout(() => {
+    _renderThrottleTimer = null;
+    requestRenderNow();
+  }, intervalMs);
+}
+
 async function requestRenderNow() {
-  const seq = ++_renderSeq;
-  let resp;
-  try {
-    resp = await fetch('/api/render-preview', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(collectRegions()),
-    });
-  } catch (e) {
-    // Netzwerkfehler - bleibt beim zuletzt erfolgreich gerenderten Stand
-    // (oder, falls das der allererste Versuch war, beim CSS-Fallback ohne
-    // "has-preview", siehe dessen eigenen Kommentar). Blockiert nichts.
+  if (_renderInFlight) {
+    _renderAgainRequested = true;
     return;
   }
-  if (seq !== _renderSeq || !resp.ok) return; // überholt oder Serverfehler
-  const blob = await resp.blob();
-  if (seq !== _renderSeq) return; // während des .blob()-Awaits überholt worden
-  const url = URL.createObjectURL(blob);
-  document.getElementById('bg').src = url;
-  if (_lastPreviewUrl) URL.revokeObjectURL(_lastPreviewUrl);
-  _lastPreviewUrl = url;
-  if (!_everRenderedOnce) {
-    _everRenderedOnce = true;
-    document.body.classList.add('has-preview');
+  _renderInFlight = true;
+  try {
+    const seq = ++_renderSeq;
+    let resp;
+    try {
+      resp = await fetch('/api/render-preview', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(collectRegions()),
+      });
+    } catch (e) {
+      // Netzwerkfehler - bleibt beim zuletzt erfolgreich gerenderten
+      // Stand (oder, falls das der allererste Versuch war, beim
+      // CSS-Fallback ohne "has-preview", siehe dessen eigenen
+      // Kommentar). Blockiert nichts.
+      return;
+    }
+    if (seq !== _renderSeq || !resp.ok) return; // überholt oder Serverfehler
+    const blob = await resp.blob();
+    if (seq !== _renderSeq) return; // während des .blob()-Awaits überholt worden
+    const url = URL.createObjectURL(blob);
+    document.getElementById('bg').src = url;
+    if (_lastPreviewUrl) URL.revokeObjectURL(_lastPreviewUrl);
+    _lastPreviewUrl = url;
+    if (!_everRenderedOnce) {
+      _everRenderedOnce = true;
+      document.body.classList.add('has-preview');
+    }
+  } finally {
+    _renderInFlight = false;
+    if (_renderAgainRequested) {
+      _renderAgainRequested = false;
+      requestRenderNow();
+    }
   }
 }
 
