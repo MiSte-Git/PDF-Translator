@@ -1,0 +1,144 @@
+# Builds the guided-installer ("Bootstrapper") executable for Linux,
+# Windows, and macOS, and - on a version tag - publishes them together
+# with a plain source-code ZIP as a GitHub Release.
+#
+# Why there is no separate "build the real app" job: the bootstrapper
+# (bootstrap/) does not freeze the real app into an executable at all - it
+# creates a per-user venv and `pip install`s requirements*.txt into it (see
+# bootstrap/installer.py), then points a desktop launcher entry straight at
+# that venv's own python -m ui.app (bootstrap/desktop_integration.py). The
+# only thing Stage 2 needs from GitHub is the plain source code, which the
+# build-source-archive job below produces with a plain `git archive` - no
+# PyInstaller build for it, on any platform. See the "Architektur"/
+# "App-Code-Quelle" sections of the 01.09.2026 project doc
+# ("deployment-strategie-bootstrapper-01-09-2026.md") for the full
+# rationale, and bootstrap/release_source.py for the download/extract side
+# of this.
+#
+# Builds are unsigned for now (project doc "deployment-strategie-
+# 27-08-2026.md": signing is a deliberately deferred follow-up, not part of
+# this round) - Windows SmartScreen and macOS Gatekeeper will warn on first
+# run until that follow-up happens.
+name: Build bootstrapper
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-bootstrap:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset_name: pdf-translator-setup-linux
+            dist_name: pdf-translator-setup
+          - os: windows-latest
+            asset_name: pdf-translator-setup-windows.exe
+            dist_name: pdf-translator-setup.exe
+          - os: macos-latest
+            asset_name: pdf-translator-setup-macos
+            dist_name: pdf-translator-setup
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # actions/setup-python's Linux builds do not reliably include Tk
+      # bindings; python.org's own Windows/macOS installers (what
+      # setup-python uses on those runners) already bundle Tcl/Tk, so this
+      # step is Linux-only.
+      - name: Install Tk (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk xvfb
+
+      - name: Install PyInstaller
+        run: python -m pip install --upgrade pip pyinstaller
+
+      # Cheap, cross-platform sanity check before spending time on a full
+      # PyInstaller build: catches ordinary Python-level import errors in
+      # bootstrap/ (missing symbol, typo, syntax) on every OS. Needs no
+      # display since it only imports the module, it does not instantiate
+      # a Tk() root.
+      - name: Import smoke check
+        run: python -c "import bootstrap.app"
+
+      - name: Build bootstrapper executable
+        run: >
+          pyinstaller --onefile --windowed --name pdf-translator-setup
+          bootstrap/__main__.py
+
+      # Frozen-binary launch smoke test: starts the actual built
+      # executable, gives it a couple of seconds to open its first window
+      # without crashing, then kills it - proves the PyInstaller bundle
+      # itself (not just the source) is intact. Linux-only because a
+      # virtual framebuffer (Xvfb) is trivial to set up there; the Windows
+      # and macOS runners have no equivalent reliably available, so those
+      # two platforms rely on the import smoke check above plus manual
+      # verification of the downloaded artifact.
+      - name: Frozen-binary launch smoke test (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          xvfb-run -a dist/pdf-translator-setup &
+          pid=$!
+          sleep 3
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "Bootstrapper exited within 3s of starting - treating as a build failure."
+            exit 1
+          fi
+          kill "$pid"
+
+      - name: Stage renamed artifact
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "dist/${{ matrix.dist_name }}" "out/${{ matrix.asset_name }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: out/${{ matrix.asset_name }}
+
+  build-source-archive:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app source archive
+        run: git archive --format=zip --output=pdf-translator-app-source.zip HEAD
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdf-translator-app-source
+          path: pdf-translator-app-source.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-bootstrap, build-source-archive]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          # Both bootstrap/release_source.py::resolve_zip_asset_url()
+          # (which grabs the first .zip asset) and a human downloading the
+          # right file by name depend on there being exactly one .zip
+          # asset per release - keep it that way if this job is ever
+          # changed.
+          fail_on_unmatched_files: true

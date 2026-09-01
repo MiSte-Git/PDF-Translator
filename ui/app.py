@@ -1,6 +1,7 @@
 """First desktop UI slice for explicit document modes and cost analysis."""
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from pathlib import Path
@@ -180,12 +181,49 @@ class SettingsDialog(QDialog):
         self.accept()
 
 
+def _bootstrap_language_marker() -> str | None:
+    """Language chosen during a guided bootstrapper install, if any - see
+    bootstrap/paths.py::language_marker_file() and
+    bootstrap/controller.py::write_language_marker() (project doc
+    "deployment-strategie-bootstrapper-01-09-2026.md", decision "Ja,
+    übernehmen": the bootstrapper's language choice should carry over into
+    the real app's first launch). Only ever consulted once, before
+    QSettings has its own "language" value yet - see MainWindow.__init__()
+    below.
+
+    Any failure (marker file missing - the normal case for a developer-path
+    install that never went through the bootstrapper - or corrupt JSON) is
+    treated the same as "no marker": this is a convenience pre-selection
+    only, never a hard requirement, and LanguageManager already falls back
+    to German for anything it does not recognise.
+    """
+    try:
+        from bootstrap.paths import language_marker_file
+
+        marker = language_marker_file()
+        if not marker.is_file():
+            return None
+        data = json.loads(marker.read_text(encoding="utf-8"))
+        language = data.get("language")
+        return language if isinstance(language, str) else None
+    except Exception:
+        return None
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.resize(880, 760)
         self.settings = QSettings("PDF-Translator", "Document Translator")
-        self.language = LanguageManager(str(self.settings.value("language", "de")))
+        if self.settings.contains("language"):
+            start_language = str(self.settings.value("language", "de"))
+        else:
+            # First run (no explicit choice saved yet, neither via the app's
+            # own SettingsDialog nor a previous run of it): prefer the
+            # bootstrapper's language marker over the hardcoded "de"
+            # default, if one was left behind.
+            start_language = _bootstrap_language_marker() or "de"
+        self.language = LanguageManager(start_language)
         self.thread_pool = QThreadPool.globalInstance()
         self.paths: tuple[Path, ...] = ()
         self.last_result: AnalysisResult | None = None

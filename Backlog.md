@@ -7818,3 +7818,194 @@ passed (vorher 186).
   Mime-Filter ist neu und dafür gezielt getestet (siehe oben).
 - `batch_size` ist keine UI-Einstellung (bewusst - Michael bestätigte
   automatisches Batchen, keine manuell zu tunende Option).
+
+## 01.09.2026 (Cowork-Sitzung, Fortsetzung 4) - Geführter Installations-Assistent (Bootstrapper) implementiert
+
+Umsetzung der reinen Konzeptdiskussion vom selben Tag (siehe Projekt-Doc
+"deployment-strategie-bootstrapper-01-09-2026.md" für den vollständigen
+Entscheidungsverlauf). Michael, nach Abschluss der Konzeptrunde: "Meine
+Fragen sind jetzt alle beantwortet und wir können es umsetzen", auf
+Rückfrage zum Umfang explizit "Alles gleichzeitig (Bootstrapper +
+Windows/macOS + CI)" statt eines schrittweisen Linux-zuerst-Vorgehens.
+
+### Umsetzung
+
+**Neues Paket `bootstrap/`** - eigenständiges `tkinter`-Programm (Teil
+jeder Standard-Python-Installation), importiert bewusst kein PySide6/Qt
+und keine schweren Abhängigkeiten (siehe `bootstrap/__init__.py`s
+Docstring), damit es unabhängig von der eigentlichen App gebaut und
+verteilt werden kann:
+
+- `bootstrap/paths.py` - plattformspezifischer Installationsort im
+  Nutzerprofil (Linux `~/.local/share/pdf-translator` per XDG,
+  Windows `%LOCALAPPDATA%\PDF-Translator`, macOS `~/Library/Application
+  Support/pdf-translator`), venv-Pfad, App-Quellcode-Pfad,
+  Sprachdatei-Marker-Pfad.
+- `bootstrap/gpu_check.py` - `nvidia-smi`-basierte Vorab-Prüfung ohne
+  PyTorch-Abhängigkeit (`GPU_MIN_VRAM_GB = 8.0`, bewusst konservativer
+  als der bestehende technische 4-GB-Wert in
+  `pipeline/images/inpainting.py` - kein Widerspruch, siehe dortiger
+  Docstring-Verweis).
+- `bootstrap/system_lang.py` - Systemsprachen-Erkennung je Plattform
+  (Windows: `GetUserDefaultUILanguage()`, macOS: `defaults read -g
+  AppleLocale`, Linux: `LANG`/verwandte Umgebungsvariablen), normalisiert
+  auf "de"/"en", Fallback **Englisch** (nicht Deutsch) bei nicht
+  unterstützter Systemsprache - wie von Michael ausdrücklich verlangt,
+  bewusst abweichend von `ui/i18n.py::LanguageManager`s eigenem
+  hartcodierten "de"-Fallback (siehe "Offen" unten).
+- `bootstrap/release_source.py` - lädt eine versionierte GitHub-Release-
+  ZIP-Datei des Repos `MiSte-Git/TranslatePDF` per `urllib.request`
+  (keine `requests`-Abhängigkeit, kein `git` nötig), entpackt und
+  entfernt dabei automatisch den von GitHub erzeugten Wrapper-Ordner.
+  Lokaler Testmodus über die Umgebungsvariable
+  `PDF_TRANSLATOR_BOOTSTRAP_SOURCE` (Verzeichnis oder ZIP), da zum
+  jetzigen Zeitpunkt noch kein echtes GitHub-Release existiert.
+- `bootstrap/desktop_integration.py` - Anwendungsmenü-Eintrag je
+  Plattform ohne Admin-/root-Rechte und ohne `.deb`/`.rpm`: `.desktop`-
+  Datei unter `~/.local/share/applications/` (Linux), `.lnk`-
+  Verknüpfung im Startmenü über PowerShells `WScript.Shell`-COM-Objekt
+  (Windows, kein `pywin32` nötig), minimales `.app`-Bundle in
+  `~/Applications` (macOS).
+- `bootstrap/installer.py` - Orchestrierung der Stufe-2-Installation in
+  der Reihenfolge App-Code-Download → venv-Erstellung → `pip install -r
+  requirements.txt` (+ `-ocr`/`-gpu` je nach Modus, beide optional und
+  übersprungen falls in der heruntergeladenen App-Quelle nicht
+  vorhanden) → Anwendungsmenü-Eintrag.
+- `bootstrap/credentials_step.py` - lädt `ui/settings.py` (und darüber
+  `pipeline/credentials.py`) dynamisch aus dem bereits heruntergeladenen
+  App-Quellcode nach, statt eine zweite Speicherlogik zu bauen -
+  garantiert denselben Code-Pfad wie der bestehende Einstellungen-Dialog
+  der App. Checkliste-zuerst-dann-nacheinander-Ablauf wie in der
+  Konzeptrunde festgelegt, mit anbieterspezifischen Anmelde-Links
+  (`PROVIDER_SIGNUP_URLS`).
+- `bootstrap/controller.py` - der eigentliche, Tk-freie Zustands-/
+  Ablaufcode (Sprache, Modus, GPU-Ergebnis, Installationslauf,
+  Zugangsdaten, App-Start), bewusst aus `bootstrap/app.py` herausgelöst,
+  damit er ohne echtes Display testbar ist (siehe "Getestet" unten).
+  Nutzt `ui/i18n_data.py`s `CATALOGUES`/`DE` direkt und STATISCH (anders
+  als `credentials_step.py`s Laufzeit-Import aus dem Download-Ordner) -
+  die eigenen Bootstrapper-Bildschirme müssen schon rendern, bevor
+  überhaupt etwas heruntergeladen wurde.
+- `bootstrap/app.py` - die eigentliche `tkinter`-Oberfläche (sechs
+  Bildschirme: Willkommen/Sprache, Online/Lokal, GPU-Prüfung,
+  Installation mit Fortschrittsanzeige, Zugangsdaten, Fertig), lange
+  Arbeit (GPU-Prüfung, Installation) läuft in einem Hintergrund-Thread,
+  Ergebnisse kommen über eine `queue.Queue` zurück, per `after()`
+  abgefragt (`tkinter` selbst ist nicht thread-sicher). Auf dem Mac ist
+  die Radiobutton für "Lokal" deaktiviert und zeigt stattdessen den
+  Hinweistext, dass lokal (noch) nicht unterstützt wird (Entscheidung 3
+  der Konzeptrunde) - nicht erst nach der Auswahl.
+- `bootstrap/__main__.py` - Einstiegspunkt für `python -m bootstrap` und
+  für den PyInstaller-Build.
+- Neuer `bootstrap.*`-Schlüsselblock (45 Schlüssel) in `ui/i18n_data.py`,
+  DE und EN, wie in der Konzeptrunde festgelegt keine zweite
+  Textkatalog-Datei. DE/EN-Parität geprüft (308/308 Keys, vorher 260).
+
+**`ui/app.py`** - `MainWindow.__init__` übernimmt beim allerersten Start
+(nur wenn `QSettings` noch keinen "language"-Wert enthält, geprüft über
+`QSettings.contains()`, nicht über einen Default-Wert-Vergleich, da "de"
+sowohl "nie gesetzt" als auch "bewusst auf Deutsch gesetzt" bedeuten
+könnte) die vom Bootstrapper hinterlegte Sprachdatei
+(`bootstrap/paths.py::language_marker_file()`, ein einfaches JSON-File -
+bewusst kein direkter `QSettings`-Schreibzugriff durch den Qt-freien
+Bootstrapper, da dessen natives Speicherformat je Plattform unterschiedlich
+ist, u. a. die Windows-Registry). Ein bereits gespeicherter, expliziter
+`QSettings`-Wert hat immer Vorrang. Fehlt die Markerdatei (Entwickler-Weg
+ohne Bootstrapper) oder ist sie beschädigt, bleibt der bisherige
+"de"-Default unverändert.
+
+**`.github/workflows/build-bootstrap.yml`** (neu) - baut den Bootstrapper
+für `windows-latest`/`macos-latest`/`ubuntu-latest` per PyInstaller
+(`--onefile --windowed`), mit Import-Smoke-Check auf allen drei
+Plattformen und einem zusätzlichen Start/Kill-Smoke-Test des fertigen
+Linux-Binaries unter `Xvfb` (Windows/macOS haben in der CI kein
+verlässliches virtuelles Display, siehe Workflow-Kommentar). Bei einem
+Versions-Tag (`v*`) werden die drei Bootstrapper-Executables zusammen mit
+einem reinen `git archive`-Quellcode-ZIP als GitHub-Release
+veröffentlicht - **kein** separater PyInstaller-Build für die eigentliche
+App nötig, da Stufe 2 (siehe oben) nur noch den Quellcode plus ein
+`pip install` braucht, keinen eigenen Build mehr.
+
+**`README.md`** (neu, existierte vorher nicht) - beschreibt beide Wege wie
+von Michael verlangt: "Für Entwickler:innen" (clone, venv,
+`requirements*.txt`, `python -m ui.app`/`python -m webapp`) und "Für alle
+anderen" (Download der passenden Bootstrapper-Datei von der
+Releases-Seite, geführter Ablauf, Hinweis auf die noch fehlende
+Code-Signatur/SmartScreen-Gatekeeper-Warnung), plus ein
+Architektur-Abschnitt, der die Zwei-Stufen-Bauweise und den Verzicht auf
+`.deb`/`.rpm` erklärt.
+
+### Getestet
+
+Sieben neue Testdateien für `bootstrap/` (95 neue Tests, alle ohne echtes
+Display/Netzwerk/`nvidia-smi`/GitHub-Zugriff lauffähig, durchgehend über
+`monkeypatch`): `tests/test_bootstrap_paths.py` (8),
+`tests/test_bootstrap_gpu_check.py` (10),
+`tests/test_bootstrap_system_lang.py` (17),
+`tests/test_bootstrap_release_source.py` (9, inkl. einer echten
+ZIP-Datei mit/ohne GitHub-Wrapper-Ordner),
+`tests/test_bootstrap_desktop_integration.py` (14),
+`tests/test_bootstrap_installer.py` (8),
+`tests/test_bootstrap_credentials_step.py` (9, inkl. eines Tests, der den
+dynamischen Import tatsächlich gegen ein selbst gebautes Fake-Paket in
+einem `tmp_path`-Verzeichnis prüft, nicht nur gegen das echte
+`ui/settings.py`), `tests/test_bootstrap_controller.py` (13). Dazu
+`tests/test_ui_bootstrap_language_handoff.py` (7) für die
+`ui/app.py`-Übernahme der Bootstrapper-Sprachdatei, inkl. des Falls
+"gespeicherte Einstellung hat Vorrang vor der Markerdatei".
+
+`bootstrap/app.py` selbst (die eigentliche `tkinter`-Oberfläche) ist
+bewusst NICHT Teil der pytest-Suite (siehe eigener Docstring-Absatz in
+`bootstrap/controller.py` für die Begründung: kein verlässliches Display
+in dieser Umgebung/vielen CI-Umgebungen). Stattdessen ad hoc unter
+`Xvfb` durchgespielt (nicht als Testdatei persistiert, wie schon bei
+früheren UI-Runden): alle sechs Bildschirme bauen fehlerfrei
+(Willkommen/Sprache, Online/Lokal inkl. deaktivierter "Lokal"-Option auf
+simuliertem macOS, GPU-Prüfung, Zugangsdaten-Checkliste, Einzelschritt
+pro Anbieter, Fertig-Bildschirm), sowie ein kompletter End-to-End-
+Installationslauf über den lokalen Testmodus
+(`PDF_TRANSLATOR_BOOTSTRAP_SOURCE`) mit echter venv-Erstellung,
+Hintergrund-Thread/Queue-Polling und tatsächlich angelegter
+`.desktop`-Datei - lief bis zum Ende durch (`install_error` blieb `None`).
+
+Gesamter Testlauf am Ende: 317 passed (vorher 222) unter
+`QT_QPA_PLATFORM=offscreen`. Ein Test
+(`test_bootstrap_credentials_step.py`s dynamischer Import-Test) hat beim
+ersten Schreiben `sys.modules["ui"]` per einfachem `.pop()` dauerhaft
+durch ein Fake-Paket ersetzt und dadurch `tests/test_ui_models.py` bei
+vollem Testlauf zum Scheitern gebracht (isoliert lief der betroffene Test
+weiterhin durch) - behoben durch `monkeypatch.delitem(...)` statt
+manuellem Pop/Restore, damit pytest den ursprünglichen Modul-Cache
+zuverlässig wiederherstellt.
+
+### Offen / bewusst nicht umgesetzt
+
+Deckt sich mit dem "Offen"-Abschnitt der Konzeptdiskussion vom selben Tag
+- durch diese Umsetzungsrunde nicht kleiner geworden, teils sogar
+konkreter:
+
+- Ob `GPU_MIN_VRAM_GB` im bestehenden `pipeline/images/inpainting.py`
+  (4 GB) an die neue Bootstrapper-Empfehlung (8 GB) angeglichen wird,
+  bleibt offen - beide Werte bewusst unterschiedlich belassen.
+- `ui/i18n.py::LanguageManager`s eigener interner "de"-Fallback (bei
+  nicht unterstütztem Sprachcode) wurde NICHT geändert - bleibt
+  inkonsistent zum neuen "en"-Fallback in `bootstrap/system_lang.py`,
+  betrifft aber den Regelfall nicht, da der Bootstrapper der App immer
+  einen bereits gültigen Code übergibt (siehe Konzeptdoc).
+- Kein echtes GitHub-Release existiert bisher - `bootstrap/
+  release_source.py` wurde nur über den lokalen Testmodus
+  (`PDF_TRANSLATOR_BOOTSTRAP_SOURCE`) end-to-end geprüft, nicht gegen
+  einen echten `api.github.com/.../releases/latest`-Aufruf.
+- Kein echter Windows-/macOS-Testlauf (weder der Bootstrapper-GUI noch
+  des CI-Builds) - nur Linux unter `Xvfb` in dieser Umgebung tatsächlich
+  ausgeführt; der neue CI-Workflow ist geschrieben und YAML-geprüft, aber
+  in dieser Sitzung nicht tatsächlich auf GitHub ausgeführt worden.
+- Icon/Branding für `.desktop`/`.lnk`/`.app`-Einträge weiterhin nicht
+  besprochen - `desktop_integration.py` akzeptiert einen optionalen
+  `icon_path`, der aktuell nirgends befüllt wird.
+- Updateverfahren (Bootstrapper erneut ausführen? App prüft selbst auf
+  neue Releases?) weiterhin nicht Teil dieser Runde.
+- Code-Signing weiterhin bewusst verschoben (27.08-Entscheidung) - erster
+  Start auf Windows/macOS zeigt SmartScreen-/Gatekeeper-Warnung, siehe
+  README.
+- Kein Video-/GIF-Walkthrough des fertigen Assistenten erstellt.

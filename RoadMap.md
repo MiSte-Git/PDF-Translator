@@ -1129,8 +1129,25 @@ behandelt und Kosten sind vor dem Start nachvollziehbar.
       Übersetzungsdienste prüfen.
 - [ ] Konfigurierbare Diagnoseprotokolle und Support-Bundle ohne Geheimnisse.
 - [ ] Abhängigkeiten und unterstützte Python-/Betriebssystemversionen festlegen.
-- [ ] Reproduzierbare PyInstaller-Pakete erstellen.
-- [ ] Installer, Desktop-Starter, Versionsnummern und Updateverfahren definieren.
+- [ ] Reproduzierbare PyInstaller-Pakete erstellen. (Bezieht sich auf die
+      eigentliche App/Stufe 2; der geführte Installations-Assistent selbst
+      hat sein eigenes, bereits fertiges PyInstaller-Build - siehe
+      Zeile darunter. Stufe 2 braucht laut aktueller Bootstrapper-
+      Architektur ohnehin kein separates PyInstaller-Paket mehr - siehe
+      Backlog.md 01.09.2026, "Geführter Installations-Assistent".)
+- [x] Geführter, kein Terminal benötigender Installations-Assistent
+      ("Bootstrapper") für Laien: Sprachauswahl, Online-/Lokal-
+      Entscheidung mit GPU-Vorabprüfung, App-Code-Download, `pip
+      install` in ein eigenes venv ohne Admin-/root-Rechte, optionaler
+      API-Schlüssel-Schritt, Anwendungsmenü-Eintrag je Plattform (ohne
+      `.deb`/`.rpm`) - `bootstrap/`, für Windows/macOS/Linux per
+      `.github/workflows/build-bootstrap.yml` gebaut. Details:
+      Backlog.md 01.09.2026, "Geführter Installations-Assistent
+      (Bootstrapper) implementiert".
+- [ ] Versionsnummern und Updateverfahren definieren (für den
+      Bootstrapper UND die per Bootstrapper installierte App - noch nicht
+      Teil der bisherigen Umsetzung, siehe offene Punkte im
+      Backlog-Eintrag).
 - [ ] Benutzerhandbuch und kurze modusspezifische Anleitungen erstellen.
 - [ ] Optionales PyPI-Paket erst nach Stabilisierung der öffentlichen APIs
       bewerten.

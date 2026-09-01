@@ -404,6 +404,110 @@ DE = {
         "{matches} Treffer von {scanned} durchsuchten DOCX-Datei(en) ({errors} nicht lesbar)."
     ),
     "word_merge_search.status_cancelled": "Abgebrochen: {matches} Treffer von {scanned} durchsuchten DOCX-Datei(en).",
+    # Geführter Bootstrapper (01.09.2026, Konzeptdiskussion siehe Projekt-
+    # Doc "deployment-strategie-bootstrapper-01-09-2026.md") - eigenes
+    # eigenständiges tkinter-Programm (bootstrap/), nicht Teil der Qt-App,
+    # nutzt aber dieselbe DE/EN-Kataloglogik hier statt eines zweiten
+    # Textkatalogs (siehe dieses Dok "Mehrsprachigkeit"-Abschnitt für die
+    # Begründung). Startsprache wird nach Systemsprache vorausgewählt,
+    # Fallback Englisch (nicht Deutsch) bei nicht unterstützter
+    # Systemsprache - bootstrap/system_lang.py.
+    "bootstrap.window_title": "PDF-Translator einrichten",
+    "bootstrap.back_button": "Zurück",
+    "bootstrap.next_button": "Weiter",
+    "bootstrap.cancel_button": "Abbrechen",
+    "bootstrap.welcome_title": "Willkommen",
+    "bootstrap.welcome_text": (
+        "Dieser Assistent richtet PDF-Translator auf diesem Rechner ein - "
+        "ganz ohne Kommandozeile. Er lädt die benötigten Komponenten "
+        "herunter und legt am Ende einen Eintrag im Anwendungsmenü an."
+    ),
+    "bootstrap.language_label": "Sprache",
+    "bootstrap.mode_title": "Online oder lokal?",
+    "bootstrap.mode_intro": (
+        "Wie soll übersetzt werden? Das lässt sich später in den "
+        "Einstellungen jederzeit ändern."
+    ),
+    "bootstrap.mode_online_label": "Online (Cloud-Anbieter)",
+    "bootstrap.mode_online_desc": (
+        "Übersetzung läuft über einen externen Anbieter (DeepL, Google, "
+        "OpenAI oder Grok). Dafür fallen laufende Kosten pro Übersetzung "
+        "an, und es wird ein eigener API-Schlüssel des jeweiligen "
+        "Anbieters benötigt - dazu gleich mehr. Empfohlen, wenn keine "
+        "starke Grafikkarte vorhanden ist."
+    ),
+    "bootstrap.mode_local_label": "Lokal (auf dieser Grafikkarte)",
+    "bootstrap.mode_local_desc": (
+        "Übersetzung/Bildbearbeitung läuft direkt auf diesem Rechner, "
+        "keine laufenden Kosten. Braucht aber eine ausreichend starke "
+        "NVIDIA-Grafikkarte - wird im nächsten Schritt geprüft - und einen "
+        "größeren einmaligen Download."
+    ),
+    "bootstrap.gpu_checking": "Grafikkarte wird geprüft …",
+    "bootstrap.gpu_ok": (
+        "Gefunden: {name} mit {vram_gb:.0f} GB Grafikspeicher - das reicht."
+    ),
+    "bootstrap.gpu_insufficient": (
+        "Gefunden: {name} mit {vram_gb:.0f} GB Grafikspeicher - empfohlen "
+        "sind mindestens {min_gb:.0f} GB. Lokal wird vermutlich sehr "
+        "langsam sein."
+    ),
+    "bootstrap.gpu_not_found": (
+        "Keine unterstützte NVIDIA-Grafikkarte gefunden. Lokal ist auf "
+        "diesem Rechner nicht sinnvoll nutzbar."
+    ),
+    "bootstrap.gpu_mac_unsupported": (
+        "Der lokale Modus wird auf dem Mac aktuell nicht unterstützt. "
+        "Bitte stattdessen Online wählen."
+    ),
+    "bootstrap.gpu_continue_local_button": "Trotzdem lokal fortfahren",
+    "bootstrap.gpu_switch_online_button": "Zu Online wechseln",
+    "bootstrap.install_title": "Installation läuft",
+    "bootstrap.install_step_venv": "Lege Arbeitsumgebung an …",
+    "bootstrap.install_step_deps": "Installiere Komponenten ({name}) …",
+    "bootstrap.install_step_source": "Lade Programmcode …",
+    "bootstrap.install_step_shortcut": "Lege Anwendungsmenü-Eintrag an …",
+    "bootstrap.install_failed_title": "Installation fehlgeschlagen",
+    "bootstrap.install_failed": "Fehlgeschlagen: {error}",
+    "bootstrap.credentials_title": "API-Schlüssel einrichten",
+    "bootstrap.credentials_intro": (
+        "Welche Anbieter möchtest du einrichten? Das lässt sich jederzeit "
+        "überspringen und später in den Einstellungen der App nachholen."
+    ),
+    "bootstrap.credentials_provider_deepl": "DeepL",
+    "bootstrap.credentials_provider_google": "Google Translate",
+    "bootstrap.credentials_provider_openai": "OpenAI",
+    "bootstrap.credentials_provider_grok": "Grok (xAI)",
+    "bootstrap.credentials_explain_deepl": (
+        "Schnelle Selbstbedienungs-Anmeldung. Kostenloses Kontingent "
+        "vorhanden, danach kostenpflichtig."
+    ),
+    "bootstrap.credentials_explain_google": (
+        "Braucht ein Google-Cloud-Projekt mit hinterlegter "
+        "Zahlungsmethode - etwas aufwendiger einzurichten als die anderen "
+        "drei Anbieter."
+    ),
+    "bootstrap.credentials_explain_openai": (
+        "Schnelle Selbstbedienungs-Anmeldung, kostenpflichtig nach "
+        "Nutzung."
+    ),
+    "bootstrap.credentials_explain_grok": (
+        "Schnelle Selbstbedienungs-Anmeldung, kostenpflichtig nach "
+        "Nutzung."
+    ),
+    "bootstrap.credentials_open_signup_button": "Schlüssel besorgen (öffnet Browser)",
+    "bootstrap.credentials_key_label": "API-Schlüssel für {provider}",
+    "bootstrap.credentials_key_placeholder": "Schlüssel einfügen …",
+    "bootstrap.credentials_save_button": "Speichern",
+    "bootstrap.credentials_saved": "Gespeichert.",
+    "bootstrap.credentials_skip_all_button": "Später in den Einstellungen",
+    "bootstrap.credentials_continue_button": "Weiter",
+    "bootstrap.finish_title": "Fertig",
+    "bootstrap.finish_text": (
+        "PDF-Translator ist eingerichtet und im Anwendungsmenü zu finden."
+    ),
+    "bootstrap.finish_launch_button": "Jetzt starten",
+    "bootstrap.finish_close_button": "Schließen",
 }
 
 EN = {
@@ -728,6 +832,94 @@ EN = {
         "{matches} match(es) out of {scanned} DOCX file(s) searched ({errors} unreadable)."
     ),
     "word_merge_search.status_cancelled": "Cancelled: {matches} match(es) out of {scanned} DOCX file(s) searched.",
+    "bootstrap.window_title": "Set up PDF-Translator",
+    "bootstrap.back_button": "Back",
+    "bootstrap.next_button": "Next",
+    "bootstrap.cancel_button": "Cancel",
+    "bootstrap.welcome_title": "Welcome",
+    "bootstrap.welcome_text": (
+        "This wizard sets up PDF-Translator on this computer - no command "
+        "line needed. It downloads the required components and adds an "
+        "entry to your application menu at the end."
+    ),
+    "bootstrap.language_label": "Language",
+    "bootstrap.mode_title": "Online or local?",
+    "bootstrap.mode_intro": (
+        "How should translation work? You can change this later in "
+        "Settings at any time."
+    ),
+    "bootstrap.mode_online_label": "Online (cloud provider)",
+    "bootstrap.mode_online_desc": (
+        "Translation runs through an external provider (DeepL, Google, "
+        "OpenAI, or Grok). This costs money per translation, and you'll "
+        "need your own API key from that provider - more on that next. "
+        "Recommended if you don't have a strong graphics card."
+    ),
+    "bootstrap.mode_local_label": "Local (on this graphics card)",
+    "bootstrap.mode_local_desc": (
+        "Translation/image editing runs directly on this computer, no "
+        "ongoing costs. Needs a sufficiently strong NVIDIA graphics card "
+        "though - checked in the next step - and a larger one-time "
+        "download."
+    ),
+    "bootstrap.gpu_checking": "Checking graphics card …",
+    "bootstrap.gpu_ok": "Found: {name} with {vram_gb:.0f} GB of video memory - that's enough.",
+    "bootstrap.gpu_insufficient": (
+        "Found: {name} with {vram_gb:.0f} GB of video memory - at least "
+        "{min_gb:.0f} GB is recommended. Local mode will likely be very "
+        "slow."
+    ),
+    "bootstrap.gpu_not_found": (
+        "No supported NVIDIA graphics card found. Local mode isn't "
+        "practically usable on this computer."
+    ),
+    "bootstrap.gpu_mac_unsupported": (
+        "Local mode isn't supported on Mac yet. Please choose Online "
+        "instead."
+    ),
+    "bootstrap.gpu_continue_local_button": "Continue with local anyway",
+    "bootstrap.gpu_switch_online_button": "Switch to Online",
+    "bootstrap.install_title": "Installing",
+    "bootstrap.install_step_venv": "Setting up the environment …",
+    "bootstrap.install_step_deps": "Installing components ({name}) …",
+    "bootstrap.install_step_source": "Downloading program code …",
+    "bootstrap.install_step_shortcut": "Adding application menu entry …",
+    "bootstrap.install_failed_title": "Installation failed",
+    "bootstrap.install_failed": "Failed: {error}",
+    "bootstrap.credentials_title": "Set up API keys",
+    "bootstrap.credentials_intro": (
+        "Which providers would you like to set up? You can skip this and "
+        "do it later in the app's Settings at any time."
+    ),
+    "bootstrap.credentials_provider_deepl": "DeepL",
+    "bootstrap.credentials_provider_google": "Google Translate",
+    "bootstrap.credentials_provider_openai": "OpenAI",
+    "bootstrap.credentials_provider_grok": "Grok (xAI)",
+    "bootstrap.credentials_explain_deepl": (
+        "Quick self-service sign-up. Free tier available, paid beyond "
+        "that."
+    ),
+    "bootstrap.credentials_explain_google": (
+        "Needs a Google Cloud project with a payment method on file - a "
+        "bit more setup than the other three providers."
+    ),
+    "bootstrap.credentials_explain_openai": (
+        "Quick self-service sign-up, pay per use."
+    ),
+    "bootstrap.credentials_explain_grok": (
+        "Quick self-service sign-up, pay per use."
+    ),
+    "bootstrap.credentials_open_signup_button": "Get a key (opens browser)",
+    "bootstrap.credentials_key_label": "API key for {provider}",
+    "bootstrap.credentials_key_placeholder": "Paste key …",
+    "bootstrap.credentials_save_button": "Save",
+    "bootstrap.credentials_saved": "Saved.",
+    "bootstrap.credentials_skip_all_button": "Later, in Settings",
+    "bootstrap.credentials_continue_button": "Next",
+    "bootstrap.finish_title": "Done",
+    "bootstrap.finish_text": "PDF-Translator is set up and ready to find in your application menu.",
+    "bootstrap.finish_launch_button": "Launch now",
+    "bootstrap.finish_close_button": "Close",
 }
 
 CATALOGUES = {"de": DE, "en": EN}
