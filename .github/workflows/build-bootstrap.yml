@@ -113,6 +113,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 01.09.2026: fails the whole release BEFORE anything is built/
+      # published if the pushed tag and _version.py's __version__ disagree -
+      # see _version.py's module docstring for why these two must never
+      # silently drift apart (bootstrap/release_source.py's self-update
+      # check keys off the tag via the GitHub API, ui/app.py compares
+      # itself against __version__ - a release where they don't match would
+      # either never show up as an update to existing installs, or show up
+      # as one forever).
+      - name: Verify tag matches _version.py
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          file_version="$(python -c 'from _version import __version__; print(__version__)')"
+          if [ "$tag_version" != "$file_version" ]; then
+            echo "::error::Tag v$tag_version does not match _version.py's __version__ ($file_version) - bump _version.py and re-tag."
+            exit 1
+          fi
+
       - name: Build app source archive
         run: git archive --format=zip --output=pdf-translator-app-source.zip HEAD
 

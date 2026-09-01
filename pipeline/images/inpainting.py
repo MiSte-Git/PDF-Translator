@@ -29,12 +29,26 @@ from pipeline.images.font_style import classify_bold, estimate_font_style
 from pipeline.images.font_style import load_font as _load_font
 from pipeline.images.ocr import OcrTextRegion, region_line_height
 
-# Mindest-VRAM für GpuInpaintingBackend (siehe gpu_inpainting_available()
-# unten) - LaMa (big-lama-Gewichte) läuft auch mit weniger, aber mit
-# spürbarem Risiko für CUDA-Out-of-Memory bei größeren Bildern/vielen
-# Regionen gleichzeitig; 4 GB ist ein konservativer, dokumentierter
-# Schwellwert, kein hart validierter Benchmark-Wert.
-GPU_MIN_VRAM_GB = 4.0
+# Empfohlene Mindest-VRAM für GpuInpaintingBackend (siehe gpu_vram_gb()/
+# gpu_inpainting_available() unten) - LaMa (big-lama-Gewichte) läuft auch
+# mit weniger, aber mit spürbarem Risiko für CUDA-Out-of-Memory bei
+# größeren Bildern/vielen Regionen gleichzeitig.
+#
+# 01.09.2026 (Michael: "Die GPU Schwelle auf den realistischen Wert
+# anheben. Mit dem Hinweis, dass es auch mit geringerem Wert laufen kann,
+# aber ohne Gewähr."): von 4.0 auf 8.0 angehoben (der realistischere Wert
+# für LaMa in der Praxis) UND von einem harten Gate zu einer reinen
+# Empfehlung herabgestuft - vorher blockierte gpu_inpainting_available()
+# jede GPU unterhalb dieses Werts komplett; jetzt zählt jede vorhandene
+# CUDA-GPU als "verfügbar", und gpu_vram_gb() erlaubt Aufrufern (siehe
+# ui/app.py::_update_inpainting_backend_hint()) stattdessen einen nicht
+# blockierenden Warnhinweis zu zeigen, wenn die gefundene GPU darunter
+# liegt. Damit ist dieser Wert jetzt inhaltlich derselbe wie
+# bootstrap/gpu_check.py::GPU_MIN_VRAM_GB (ebenfalls 8.0, ebenfalls nur
+# eine Empfehlung) - die beiden waren vorher bewusst unterschiedlich
+# (harter technischer Boden hier vs. konservative Empfehlung dort),
+# dieser Unterschied ist mit der Umstellung hier entfallen.
+GPU_MIN_VRAM_GB = 8.0
 
 # Modul-weiter Cache für das geladene LaMa-Modell (siehe
 # _get_lama_model()) - überlebt über mehrere GpuInpaintingBackend()-
@@ -1537,38 +1551,58 @@ def _average_region_color(image, x: int, y: int, width: int, height: int) -> tup
     return (r, g, b)
 
 
-def gpu_inpainting_available(min_vram_gb: float = GPU_MIN_VRAM_GB) -> bool:
-    """Whether GpuInpaintingBackend can actually run right now: PyTorch
-    must be importable, a CUDA device must be visible, and that device's
-    total memory must be at least `min_vram_gb` (see GPU_MIN_VRAM_GB).
-    Mirrors pipeline.images.ocr.tesseract_available() - never raises,
-    always returns a plain bool, checked BEFORE a job starts (see
-    ui/document_job_common.py::inpainting_backend_available()) rather
-    than failing deep inside a run.
+def gpu_vram_gb() -> float | None:
+    """Total VRAM (in GB) of CUDA device 0, or None if PyTorch is not
+    importable, no CUDA device is visible, or probing the device fails for
+    any other reason (driver mismatch, no device index 0, ...). Never
+    raises.
 
-    Deliberately no CPU fallback here (see RoadMap.md Phase 3): CPU-only
-    LaMa inference would be dramatically slower than the point of
-    offering a GPU backend in the first place - a GPU that doesn't
-    qualify (or isn't present at all) is reported as unavailable so the
-    UI can steer the user toward Cloud-Inpainting instead (see
-    ui/app.py's inpainting-backend hint, mirrors
-    _update_ocr_engine_hint()'s pattern), not silently downgraded to a
-    slow local run the user never asked for.
+    Used both by gpu_inpainting_available() (presence check, see below)
+    and by callers that want to warn when a present GPU is below
+    GPU_MIN_VRAM_GB without turning it into a hard block (see that
+    constant's docstring/comment) - e.g. ui/app.py's inpainting_backend
+    hint (_update_inpainting_backend_hint()).
     """
     try:
         import torch
     except ImportError:
-        return False
+        return None
     try:
         if not torch.cuda.is_available():
-            return False
+            return None
         total_memory = torch.cuda.get_device_properties(0).total_memory
     except Exception:
-        # Any other failure while probing the device (driver mismatch, no
-        # device index 0, ...) is treated the same as "not available" -
-        # this check must never itself crash the analysis/start flow.
-        return False
-    return total_memory >= min_vram_gb * (1024 ** 3)
+        return None
+    return total_memory / (1024 ** 3)
+
+
+def gpu_inpainting_available() -> bool:
+    """Whether GpuInpaintingBackend can actually run right now: PyTorch
+    must be importable and a CUDA device must be visible. Mirrors
+    pipeline.images.ocr.tesseract_available() - never raises, always
+    returns a plain bool, checked BEFORE a job starts (see
+    ui/document_job_common.py::inpainting_backend_available()) rather
+    than failing deep inside a run.
+
+    Until 01.09.2026 this additionally required at least GPU_MIN_VRAM_GB
+    of VRAM, hard-blocking (falling back to "unavailable", steering the
+    UI toward Cloud-Inpainting instead) anything below it. Per Michael's
+    decision that day ("Die GPU Schwelle auf den realistischen Wert
+    anheben. Mit dem Hinweis, dass es auch mit geringerem Wert laufen
+    kann, aber ohne Gewähr."), GPU_MIN_VRAM_GB is now a recommendation,
+    not a hard minimum - any CUDA GPU present counts as available, and
+    callers that want to flag a weaker-than-recommended GPU use
+    gpu_vram_gb() directly for that (non-blocking) warning instead.
+
+    Deliberately still no CPU fallback here (see RoadMap.md Phase 3):
+    CPU-only LaMa inference would be dramatically slower than the point of
+    offering a GPU backend in the first place - no CUDA GPU at all is
+    still reported as unavailable so the UI can steer the user toward
+    Cloud-Inpainting instead (see ui/app.py's inpainting-backend hint,
+    mirrors _update_ocr_engine_hint()'s pattern), not silently downgraded
+    to a slow local run the user never asked for.
+    """
+    return gpu_vram_gb() is not None
 
 
 def _build_inpainting_mask(size: tuple[int, int], replacements: list[TextReplacement], padding: int = 4):
@@ -1663,8 +1697,8 @@ class GpuInpaintingBackend:
         if not gpu_inpainting_available():
             raise InpaintingError(
                 "GPU-Inpainting ist auf diesem System nicht verfügbar (keine "
-                "ausreichend starke CUDA-GPU gefunden) - bitte ein anderes "
-                "Rückschreibe-Backend wählen (z. B. Cloud-Inpainting)."
+                "CUDA-GPU gefunden) - bitte ein anderes Rückschreibe-Backend "
+                "wählen (z. B. Cloud-Inpainting)."
             )
         try:
             import torch

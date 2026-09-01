@@ -109,9 +109,14 @@ DE = {
     "inpainting_backend.cv_inpainting": "Klassisches CPU-Inpainting (Hintergrund rekonstruieren)",
     "inpainting_backend.gpu_inpainting": "KI-Inpainting lokal (GPU, LaMa)",
     "inpainting_backend.unavailable": (
-        "Für diese Methode wurde keine ausreichend starke CUDA-GPU gefunden "
-        "(siehe requirements-gpu.txt) - bitte eine andere Rückschreibe-"
-        "Methode wählen."
+        "Für diese Methode wurde keine CUDA-GPU gefunden (siehe "
+        "requirements-gpu.txt) - bitte eine andere Rückschreibe-Methode "
+        "wählen."
+    ),
+    "inpainting_backend.below_recommended_vram": (
+        "Nur {vram_gb:.0f} GB Grafikspeicher erkannt (empfohlen: "
+        "mindestens {min_gb:.0f} GB) - läuft eventuell, aber ohne Gewähr, "
+        "besonders bei großen Bildern oder vielen Textstellen gleichzeitig."
     ),
     "source_language.placeholder": "optional / automatisch",
     "protected.placeholder": "Ein geschützter Begriff pro Zeile",
@@ -239,6 +244,59 @@ DE = {
     "image_correction.failed": "Korrektur fehlgeschlagen: {error}",
     "image_correction.choose_file_title": "Datei zum Korrigieren wählen",
     "image_correction.choose_file_label": "Welche Datei aus diesem Lauf soll korrigiert werden?",
+    "update.available": "Update verfügbar: {version}",
+    "update.confirm_title": "Update installieren?",
+    "update.confirm_body": (
+        "Eine neue Version ({version}) ist verfügbar. Jetzt herunterladen "
+        "und installieren?"
+    ),
+    "update.installing": "Update wird installiert …",
+    "update.success_title": "Update installiert",
+    "update.success_body": (
+        "Das Update wurde installiert. Bitte starte die Anwendung neu, "
+        "damit die Änderungen wirksam werden."
+    ),
+    "update.failed_title": "Update fehlgeschlagen",
+    "update.failed_body": (
+        "Das Update konnte nicht installiert werden: {error}\n\n"
+        "Die bisher installierte Version läuft unverändert weiter."
+    ),
+    "menu.help": "Hilfe",
+    "menu.help.hw_check": "Hardware-Test anzeigen/wiederholen …",
+    "menu.help.check_updates": "Nach Updates suchen …",
+    "menu.help.about": "Über …",
+    "about.body": "{app_name}\nVersion {version}",
+    "update.check.no_update_title": "Kein Update verfügbar",
+    "update.check.no_update_body": "Du verwendest bereits die neueste Version ({version}).",
+    "update.check.failed_title": "Update-Prüfung fehlgeschlagen",
+    "update.check.failed_body": "Es konnte nicht nach Updates gesucht werden: {error}",
+    "hw_check.title": "Hardware-Test",
+    "hw_check.note": (
+        "Läuft die App nicht wie erwartet (z. B. beim lokalen "
+        "KI-Inpainting), kannst du hier die Hardware erneut prüfen."
+    ),
+    "hw_check.recheck_button": "Erneut prüfen",
+    "hw_check.checking": "Prüfe Hardware …",
+    "hw_check.never_checked": (
+        "Noch keine Hardware-Prüfung vorhanden. Klicke auf „Erneut "
+        "prüfen“, um jetzt zu prüfen."
+    ),
+    "hw_check.not_found": (
+        "Keine CUDA-GPU gefunden (zuletzt geprüft: {checked_at}). Lokales "
+        "KI-Inpainting steht auf dieser Hardware nicht zur Verfügung - "
+        "Cloud-Inpainting funktioniert unabhängig davon."
+    ),
+    "hw_check.found_ok": (
+        "{name} mit {vram_gb:.0f} GB Grafikspeicher gefunden (zuletzt "
+        "geprüft: {checked_at}). Erfüllt die Empfehlung von mindestens "
+        "{min_gb:.0f} GB."
+    ),
+    "hw_check.found_below_recommended": (
+        "{name} mit {vram_gb:.0f} GB Grafikspeicher gefunden (zuletzt "
+        "geprüft: {checked_at}). Liegt unter der Empfehlung von "
+        "{min_gb:.0f} GB - läuft eventuell, aber ohne Gewähr, besonders "
+        "bei großen Bildern oder vielen Textstellen gleichzeitig."
+    ),
     "settings.button": "Einstellungen …",
     "settings.title": "Einstellungen",
     "settings.language": "Oberflächensprache",
@@ -575,8 +633,13 @@ EN = {
     "inpainting_backend.cv_inpainting": "Classic CPU inpainting (reconstruct background)",
     "inpainting_backend.gpu_inpainting": "AI inpainting, local (GPU, LaMa)",
     "inpainting_backend.unavailable": (
-        "No sufficiently strong CUDA GPU was found for this method (see "
-        "requirements-gpu.txt) - please choose a different rewrite method."
+        "No CUDA GPU was found for this method (see requirements-gpu.txt) "
+        "- please choose a different rewrite method."
+    ),
+    "inpainting_backend.below_recommended_vram": (
+        "Only {vram_gb:.0f} GB of video memory detected (recommended: at "
+        "least {min_gb:.0f} GB) - may still work, but without guarantee, "
+        "especially with large images or many text regions at once."
     ),
     "source_language.placeholder": "optional / automatic",
     "protected.placeholder": "One protected term per line",
@@ -692,6 +755,58 @@ EN = {
     "image_correction.failed": "Correction failed: {error}",
     "image_correction.choose_file_title": "Choose file to correct",
     "image_correction.choose_file_label": "Which file from this run should be corrected?",
+    "update.available": "Update available: {version}",
+    "update.confirm_title": "Install update?",
+    "update.confirm_body": (
+        "A new version ({version}) is available. Download and install it now?"
+    ),
+    "update.installing": "Installing update …",
+    "update.success_title": "Update installed",
+    "update.success_body": (
+        "The update has been installed. Please restart the application for "
+        "the changes to take effect."
+    ),
+    "update.failed_title": "Update failed",
+    "update.failed_body": (
+        "The update could not be installed: {error}\n\n"
+        "The previously installed version keeps running unchanged."
+    ),
+    "menu.help": "Help",
+    "menu.help.hw_check": "Show/repeat hardware test …",
+    "menu.help.check_updates": "Check for updates …",
+    "menu.help.about": "About …",
+    "about.body": "{app_name}\nVersion {version}",
+    "update.check.no_update_title": "No update available",
+    "update.check.no_update_body": "You're already using the latest version ({version}).",
+    "update.check.failed_title": "Update check failed",
+    "update.check.failed_body": "Could not check for updates: {error}",
+    "hw_check.title": "Hardware test",
+    "hw_check.note": (
+        "If the app isn't behaving as expected (e.g. with local AI "
+        "inpainting), you can re-check the hardware here."
+    ),
+    "hw_check.recheck_button": "Check again",
+    "hw_check.checking": "Checking hardware …",
+    "hw_check.never_checked": (
+        "No hardware check on record yet. Click \"Check again\" to run "
+        "one now."
+    ),
+    "hw_check.not_found": (
+        "No CUDA GPU found (last checked: {checked_at}). Local AI "
+        "inpainting is not available on this hardware - Cloud inpainting "
+        "works independently of this."
+    ),
+    "hw_check.found_ok": (
+        "{name} with {vram_gb:.0f} GB of video memory found (last "
+        "checked: {checked_at}). Meets the recommendation of at least "
+        "{min_gb:.0f} GB."
+    ),
+    "hw_check.found_below_recommended": (
+        "{name} with {vram_gb:.0f} GB of video memory found (last "
+        "checked: {checked_at}). Below the recommendation of "
+        "{min_gb:.0f} GB - may still work, but without guarantee, "
+        "especially with large images or many text regions at once."
+    ),
     "settings.button": "Settings …",
     "settings.title": "Settings",
     "settings.language": "Interface language",

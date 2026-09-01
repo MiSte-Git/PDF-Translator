@@ -98,3 +98,123 @@ def test_fetch_latest_release_metadata_wraps_network_errors(monkeypatch):
     monkeypatch.setattr(release_source.urllib.request, "urlopen", fake_urlopen)
     with pytest.raises(ReleaseSourceError):
         release_source.fetch_latest_release_metadata()
+
+
+# --- self-update (01.09.2026) ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "version, expected",
+    [
+        ("v1.2.3", (1, 2, 3)),
+        ("1.2.3", (1, 2, 3)),
+        ("v0.1.0", (0, 1, 0)),
+        ("2.0", (2, 0)),
+    ],
+)
+def test_parse_version_parses_dotted_numeric(version, expected):
+    assert release_source.parse_version(version) == expected
+
+
+@pytest.mark.parametrize("version", ["v1.2.3-beta", "not-a-version", "", "v"])
+def test_parse_version_raises_on_non_numeric(version):
+    with pytest.raises(ValueError):
+        release_source.parse_version(version)
+
+
+@pytest.mark.parametrize(
+    "candidate, current, expected",
+    [
+        ("v1.1.0", "v1.0.0", True),
+        ("v1.0.0", "v1.1.0", False),
+        ("v1.0.0", "v1.0.0", False),
+        # Numeric comparison, not string comparison - "1.10.0" < "1.9.0" as
+        # plain strings but must compare as NEWER numerically.
+        ("v1.10.0", "v1.9.0", True),
+        ("v1.9.0", "v1.10.0", False),
+    ],
+)
+def test_is_newer_version_numeric_comparison(candidate, current, expected):
+    assert release_source.is_newer_version(candidate, current) is expected
+
+
+def test_is_newer_version_falls_back_to_true_when_unparseable():
+    # An unparseable tag must never make the self-update check go silent -
+    # see is_newer_version()'s docstring.
+    assert release_source.is_newer_version("v1.2.3-beta", "v1.0.0") is True
+
+
+def test_is_newer_version_equal_unparseable_strings_is_false():
+    assert release_source.is_newer_version("nightly", "nightly") is False
+
+
+def test_check_for_update_returns_none_when_already_latest(monkeypatch):
+    monkeypatch.setattr(
+        release_source,
+        "fetch_latest_release_metadata",
+        lambda: {"tag_name": "v1.0.0", "assets": [{"name": "app.zip", "browser_download_url": "https://x/app.zip"}]},
+    )
+    assert release_source.check_for_update("v1.0.0") is None
+
+
+def test_check_for_update_returns_none_when_current_is_newer(monkeypatch):
+    # Local dev build ahead of the last tagged release, say.
+    monkeypatch.setattr(
+        release_source,
+        "fetch_latest_release_metadata",
+        lambda: {"tag_name": "v1.0.0", "assets": [{"name": "app.zip", "browser_download_url": "https://x/app.zip"}]},
+    )
+    assert release_source.check_for_update("v2.0.0") is None
+
+
+def test_check_for_update_returns_update_info_when_newer_release_exists(monkeypatch):
+    monkeypatch.setattr(
+        release_source,
+        "fetch_latest_release_metadata",
+        lambda: {
+            "tag_name": "v1.2.0",
+            "body": "Release notes here.",
+            "assets": [{"name": "app.zip", "browser_download_url": "https://x/app-1.2.0.zip"}],
+        },
+    )
+    info = release_source.check_for_update("v1.0.0")
+    assert info == release_source.UpdateInfo(
+        version="v1.2.0", zip_url="https://x/app-1.2.0.zip", release_notes="Release notes here."
+    )
+
+
+def test_check_for_update_propagates_missing_zip_asset(monkeypatch):
+    monkeypatch.setattr(
+        release_source,
+        "fetch_latest_release_metadata",
+        lambda: {"tag_name": "v1.2.0", "assets": []},
+    )
+    with pytest.raises(ReleaseSourceError):
+        release_source.check_for_update("v1.0.0")
+
+
+def test_check_for_update_propagates_network_errors(monkeypatch):
+    def fake_fetch():
+        raise ReleaseSourceError("no network")
+
+    monkeypatch.setattr(release_source, "fetch_latest_release_metadata", fake_fetch)
+    with pytest.raises(ReleaseSourceError):
+        release_source.check_for_update("v1.0.0")
+
+
+def test_download_release_downloads_and_extracts_the_given_zip_url(tmp_path, monkeypatch):
+    zip_path = _make_release_zip(tmp_path, wrapped=True)
+
+    def fake_download_to_file(url, dest, progress_cb=None):
+        assert url == "https://x/app-1.2.0.zip"
+        dest.write_bytes(zip_path.read_bytes())
+
+    monkeypatch.setattr(release_source, "_download_to_file", fake_download_to_file)
+    info = release_source.UpdateInfo(version="v1.2.0", zip_url="https://x/app-1.2.0.zip")
+    dest = tmp_path / "installed"
+
+    result = release_source.download_release(info, dest)
+
+    assert result == dest
+    assert (dest / "requirements.txt").is_file()
+    assert (dest / "pipeline" / "__init__.py").is_file()

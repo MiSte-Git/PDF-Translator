@@ -8,12 +8,17 @@ here is the LOGIC that doesn't need real hardware or the (optional, heavy,
 requirements-gpu.txt) torch/simple-lama-inpainting packages actually
 installed:
 
-- gpu_inpainting_available()'s branching (torch missing, CUDA missing,
-  insufficient VRAM, a device-probe failure, sufficient VRAM) - exercised
-  by inserting a FAKE `torch` module into sys.modules rather than
-  installing the real (~500 MB+) package, since none of these branches
-  need genuine PyTorch behaviour, only the shape gpu_inpainting_available()
-  reads off of it (torch.cuda.is_available()/get_device_properties()).
+- gpu_inpainting_available()'s branching (torch missing, CUDA missing, a
+  device-probe failure, CUDA present) - exercised by inserting a FAKE
+  `torch` module into sys.modules rather than installing the real
+  (~500 MB+) package, since none of these branches need genuine PyTorch
+  behaviour, only the shape gpu_inpainting_available() reads off of it
+  (torch.cuda.is_available()/get_device_properties()). Until 01.09.2026
+  this also had a "GPU present but below GPU_MIN_VRAM_GB" branch that
+  returned False - Michael that day: "GPU Schwelle auf den realistischen
+  Wert anheben. Mit dem Hinweis, dass es auch mit geringerem Wert laufen
+  kann, aber ohne Gewähr." - VRAM size no longer gates availability at
+  all, gpu_vram_gb() covers that branching now (see its own tests below).
 - _build_inpainting_mask()'s pure PIL logic (padding, clamping to image
   bounds, empty-replacements case).
 - GpuInpaintingBackend.apply()'s fail-fast guard when
@@ -36,11 +41,13 @@ import pytest
 from PIL import Image, ImageDraw, ImageFont
 
 from pipeline.images.inpainting import (
+    GPU_MIN_VRAM_GB,
     GpuInpaintingBackend,
     InpaintingError,
     TextReplacement,
     _build_inpainting_mask,
     gpu_inpainting_available,
+    gpu_vram_gb,
 )
 from pipeline.images.ocr import OcrTextRegion
 
@@ -92,14 +99,46 @@ def test_gpu_inpainting_available_false_without_cuda(monkeypatch: pytest.MonkeyP
     assert gpu_inpainting_available() is False
 
 
-def test_gpu_inpainting_available_false_with_insufficient_vram(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gpu_inpainting_available_true_even_below_recommended_vram(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 01.09.2026: VRAM size no longer hard-gates availability (see module
+    # docstring) - a weak-but-present CUDA GPU still counts as available,
+    # only gpu_vram_gb() (tested separately below) lets a caller warn.
     _install_fake_torch(monkeypatch, cuda_available=True, total_memory=1 * 1024**3)  # 1 GB
-    assert gpu_inpainting_available(min_vram_gb=4.0) is False
+    assert gpu_inpainting_available() is True
 
 
-def test_gpu_inpainting_available_true_with_sufficient_vram(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gpu_inpainting_available_true_with_recommended_vram(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_torch(monkeypatch, cuda_available=True, total_memory=8 * 1024**3)  # 8 GB
-    assert gpu_inpainting_available(min_vram_gb=4.0) is True
+    assert gpu_inpainting_available() is True
+
+
+def test_gpu_vram_gb_none_when_torch_not_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "torch", None)
+    assert gpu_vram_gb() is None
+
+
+def test_gpu_vram_gb_none_without_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_torch(monkeypatch, cuda_available=False)
+    assert gpu_vram_gb() is None
+
+
+def test_gpu_vram_gb_none_when_device_probe_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_torch(monkeypatch, cuda_available=True, probe_raises=True)
+    assert gpu_vram_gb() is None
+
+
+def test_gpu_vram_gb_reports_detected_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_torch(monkeypatch, cuda_available=True, total_memory=1 * 1024**3)  # 1 GB
+    assert gpu_vram_gb() == pytest.approx(1.0)
+
+
+def test_gpu_vram_gb_below_recommendation_flagged_by_caller(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Not gpu_inpainting_available()'s job any more (see above) - this is
+    # exactly the comparison ui/app.py's inpainting_backend hint makes.
+    _install_fake_torch(monkeypatch, cuda_available=True, total_memory=1 * 1024**3)  # 1 GB
+    vram = gpu_vram_gb()
+    assert vram is not None
+    assert vram < GPU_MIN_VRAM_GB
 
 
 def test_gpu_inpainting_available_false_when_device_probe_raises(monkeypatch: pytest.MonkeyPatch) -> None:

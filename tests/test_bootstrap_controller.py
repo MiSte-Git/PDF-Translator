@@ -52,13 +52,26 @@ def test_write_language_marker_writes_json(controller, monkeypatch, tmp_path):
     assert json.loads(marker_path.read_text()) == {"language": "en"}
 
 
-def test_check_gpu_stores_and_returns_result(controller, monkeypatch):
+def test_check_gpu_stores_and_returns_result(controller, monkeypatch, tmp_path):
     fake_gpu = GpuInfo(name="RTX 4070", vram_gb=12.0)
     monkeypatch.setattr("bootstrap.controller.gpu_check.detect_nvidia_gpu", lambda: fake_gpu)
+    # 01.09.2026: check_gpu() now also persists via
+    # gpu_check.save_gpu_check_result(), which defaults to the real
+    # per-user gpu_check_marker_file() - redirected here exactly like
+    # test_write_language_marker_writes_json redirects language_marker_file
+    # above, so this test never touches a real machine's install directory.
+    marker_path = tmp_path / "gpu_check.json"
+    monkeypatch.setattr("bootstrap.gpu_check.paths.gpu_check_marker_file", lambda: marker_path)
+
     result = controller.check_gpu()
+
     assert result is fake_gpu
     assert controller.gpu_info is fake_gpu
     assert controller.gpu_meets_recommendation() is True
+    saved = json.loads(marker_path.read_text())
+    assert saved["found"] is True
+    assert saved["name"] == "RTX 4070"
+    assert saved["meets_recommendation"] is True
 
 
 def test_gpu_meets_recommendation_false_when_no_gpu(controller):

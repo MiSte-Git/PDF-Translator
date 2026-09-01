@@ -14,6 +14,9 @@ from PySide6.QtWidgets import (
     QMessageBox, QProgressBar, QPushButton, QSpinBox, QTextEdit, QVBoxLayout, QWidget,
 )
 
+from _version import __version__
+from bootstrap.release_source import UpdateInfo
+from pipeline.images.inpainting import GPU_MIN_VRAM_GB, gpu_vram_gb
 from pipeline.pdf.translate_pdf import PdfTranslationStats
 from pipeline.presentation.translate_presentation import PresentationTranslationStats
 from pipeline.translation.cost_control import DEFAULT_MAX_CHARS_PER_RUN
@@ -41,6 +44,8 @@ from ui.workers import (
     ImageTranslationWorker,
     PdfTranslationWorker,
     PresentationTranslationWorker,
+    UpdateApplyWorker,
+    UpdateCheckWorker,
     WordTranslationWorker,
 )
 
@@ -181,6 +186,111 @@ class SettingsDialog(QDialog):
         self.accept()
 
 
+def _format_checked_at(iso_timestamp: str) -> str:
+    """"2026-09-01T14:32:07.123456+00:00" -> "2026-09-01 16:32" in the
+    machine's own local time zone - HardwareCheckDialog's only use of this,
+    since GpuCheckResult.checked_at is stored as UTC (see
+    bootstrap/gpu_check.py::save_gpu_check_result()) but a "zuletzt
+    geprüft"/"last checked" line is far more readable in local time.
+    Falls back to the raw string on any parse failure (e.g. a marker file
+    from a future format this version doesn't understand) rather than
+    raising - this is a display nicety, never worth breaking the whole
+    dialog over.
+    """
+    try:
+        from datetime import datetime
+
+        return datetime.fromisoformat(iso_timestamp).astimezone().strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return iso_timestamp
+
+
+class HardwareCheckDialog(QDialog):
+    """"Hilfe" -> Hardware-Test: shows the last persisted GPU check result
+    and lets the user re-run it without reinstalling anything.
+
+    01.09.2026 (Michael: "Ist es möglich den HW Check beim Installieren zu
+    speichern und in einem Hilfe Menü in der App eine Möglichkeit den HW
+    Test anzeigen zu lassen und auch noch mal zu wiederholen. Dort sollte
+    auch angezeigt werden ob die HW die Mindestanforderung erfüllt.") - the
+    installer's own GPU check (bootstrap/app.py::_show_gpu_check(), LOCAL
+    mode only) never had anywhere durable to put its result, so a user who
+    installed in ONLINE mode, or upgraded a driver/GPU since installing, or
+    just wants to double-check why local GPU-Inpainting isn't behaving as
+    expected, had no way to see or repeat that check short of
+    reinstalling. Reuses bootstrap.gpu_check directly rather than
+    duplicating the nvidia-smi logic - same "safe to import from ui/"
+    reasoning as bootstrap.release_source (see that module's own
+    docstring): bootstrap.gpu_check pulls in nothing beyond the standard
+    library.
+
+    Deliberately synchronous (no QThreadPool worker the way the self-update
+    check is) - nvidia-smi answers in well under a second in practice, and
+    _NVIDIA_SMI_TIMEOUT_SECONDS (10s) caps the absolute worst case; a modal
+    dialog briefly not responding to a button click it just received is a
+    reasonable trade against the extra signal/worker plumbing for
+    something the user only ever triggers by hand.
+    """
+
+    def __init__(self, language: LanguageManager, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.language = language
+        self._result = None
+        self.status = QLabel()
+        self.status.setWordWrap(True)
+        self.note = QLabel()
+        self.note.setWordWrap(True)
+        self.recheck_button = QPushButton()
+        self.recheck_button.clicked.connect(self._recheck)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        self.buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.status)
+        layout.addWidget(self.note)
+        layout.addWidget(self.recheck_button)
+        layout.addWidget(self.buttons)
+        self.language.changed.connect(self.retranslate)
+        self._load_last_result()
+        self.retranslate()
+
+    def _load_last_result(self) -> None:
+        from bootstrap.gpu_check import read_gpu_check_marker
+
+        self._result = read_gpu_check_marker()
+
+    def _recheck(self) -> None:
+        from bootstrap.gpu_check import detect_and_save_gpu_check
+
+        self.recheck_button.setEnabled(False)
+        self.status.setText(self.language.text("hw_check.checking"))
+        try:
+            _gpu, self._result = detect_and_save_gpu_check()
+        finally:
+            self.recheck_button.setEnabled(True)
+        self._render_status()
+
+    def retranslate(self) -> None:
+        self.setWindowTitle(self.language.text("hw_check.title"))
+        self.note.setText(self.language.text("hw_check.note"))
+        self.recheck_button.setText(self.language.text("hw_check.recheck_button"))
+        self._render_status()
+
+    def _render_status(self) -> None:
+        result = self._result
+        t = self.language.text
+        if result is None:
+            self.status.setText(t("hw_check.never_checked"))
+            return
+        checked_at = _format_checked_at(result.checked_at)
+        if not result.found:
+            self.status.setText(t("hw_check.not_found", checked_at=checked_at))
+            return
+        key = "hw_check.found_ok" if result.meets_recommendation else "hw_check.found_below_recommended"
+        self.status.setText(
+            t(key, name=result.name, vram_gb=result.vram_gb, min_gb=result.min_vram_gb, checked_at=checked_at)
+        )
+
+
 def _bootstrap_language_marker() -> str | None:
     """Language chosen during a guided bootstrapper install, if any - see
     bootstrap/paths.py::language_marker_file() and
@@ -252,6 +362,19 @@ class MainWindow(QMainWindow):
         self._busy_timer = QTimer(self)
         self._busy_timer.setInterval(30)
         self._busy_timer.timeout.connect(self._tick_busy_progress)
+
+        # "Hilfe" menu (01.09.2026, Michael: "in einem Hilfe Menü in der
+        # App eine Möglichkeit den HW Test anzeigen zu lassen und auch noch
+        # mal zu wiederholen") - the app's first menu bar; only ever needed
+        # this one entry point before now (everything else lives on
+        # settings_button/inline hints, see settings_row further below).
+        # Built once here and retranslated by name via _rebuild_help_menu()
+        # (called from retranslate()) rather than tracked action-by-action,
+        # since QMenu has no equivalent of a plain QLabel.setText() and
+        # rebuilding three short-lived QAction objects is simpler than
+        # keeping references to each just to retranslate them in place.
+        self.help_menu = self.menuBar().addMenu("")
+        self._rebuild_help_menu()
 
         self.mode = QComboBox()
         for mode in MODE_KEYS:
@@ -433,6 +556,18 @@ class MainWindow(QMainWindow):
         # into preselect_provider instead of the intended default. The
         # lambda pins the call to zero arguments.
         self.settings_button.clicked.connect(lambda: self._open_settings())
+        # Self-update (01.09.2026, Michael: "Update sollte die App selbst
+        # prüfen.") - a plain link-style label next to settings_button,
+        # hidden until _check_for_update()'s background check actually
+        # finds something (see _update_check_finished()). RichText +
+        # linkActivated mirrors provider_hint's own inline-link pattern
+        # above rather than introducing a whole menu bar for this one
+        # entry point.
+        self.update_hint = QLabel()
+        self.update_hint.setTextFormat(Qt.RichText)
+        self.update_hint.setVisible(False)
+        self.update_hint.linkActivated.connect(self._offer_update)
+        self._pending_update: UpdateInfo | None = None
         # 26.08.2026 - the form used to sit directly in `root`, the only
         # section of the window WITHOUT a card around it (cost_box/job_box
         # already were QGroupBoxes). Wrapped in its own card so the whole
@@ -448,11 +583,22 @@ class MainWindow(QMainWindow):
         root.addWidget(self.config_box)
         root.addWidget(self.cost_box)
         root.addWidget(self.job_box)
-        root.addWidget(self.settings_button, alignment=Qt.AlignRight)
+        settings_row = QHBoxLayout()
+        settings_row.addStretch()
+        settings_row.addWidget(self.update_hint)
+        settings_row.addWidget(self.settings_button)
+        root.addLayout(settings_row)
         root.addStretch()
         widget = QWidget(); widget.setLayout(root); self.setCentralWidget(widget)
         self.language.changed.connect(self.retranslate)
         self.retranslate()
+        # Self-update: fired once, shortly after the window is up rather
+        # than from inside __init__ directly - QThreadPool.start() below
+        # would work either way, but a short delay means this network call
+        # never competes with the window actually becoming visible/
+        # responsive on a slow machine. 3s, not immediately: not urgent
+        # enough to be the very first thing competing for I/O on startup.
+        QTimer.singleShot(3000, self._check_for_update)
         # Restored BEFORE _mode_changed(): that call re-derives which
         # rows/checkboxes are actually valid for the (just-restored) mode -
         # e.g. it resets ico_mode if the restored mode is neither Word nor
@@ -559,6 +705,8 @@ class MainWindow(QMainWindow):
         self.open_report_button.setText(t("job.open_report"))
         self.correct_translation_button.setText(t("job.correct_translation"))
         self.settings_button.setText(t("settings.button"))
+        self._render_update_hint()
+        self._rebuild_help_menu()
         if self.last_result is None: self.result.setText(t("analysis.required"))
         else: self._show_analysis(self.last_result)
         if self._worker is None and self._job_result is None:
@@ -569,6 +717,140 @@ class MainWindow(QMainWindow):
         self._update_ocr_engine_hint()
         self._update_inpainting_backend_hint()
         self._update_start_state()
+
+    # --- self-update (01.09.2026, Michael: "Update sollte die App selbst
+    # prüfen.") --------------------------------------------------------
+
+    def _render_update_hint(self) -> None:
+        """(Re-)renders update_hint from self._pending_update - the current
+        language's wording for whichever state it's in (nothing pending,
+        an update found, installing). Split out from _update_check_finished()
+        so retranslate() can re-run it on a language change without
+        re-running the network check itself.
+        """
+        if self._pending_update is None:
+            self.update_hint.setVisible(False)
+            return
+        text = self.language.text("update.available", version=self._pending_update.version)
+        self.update_hint.setText(f'<a href="update">{text}</a>')
+        self.update_hint.setVisible(True)
+
+    def _check_for_update(self) -> None:
+        worker = UpdateCheckWorker(__version__)
+        worker.signals.finished.connect(self._update_check_finished)
+        worker.signals.failed.connect(self._update_check_failed)
+        self.thread_pool.start(worker)
+
+    def _update_check_finished(self, info: UpdateInfo | None) -> None:
+        self._pending_update = info
+        self._render_update_hint()
+
+    def _update_check_failed(self, message: str) -> None:
+        # Deliberately silent (see UpdateCheckWorker's own docstring) - an
+        # unattended startup check going offline/unreachable must never
+        # interrupt someone who never asked for it. Logged for anyone
+        # actually debugging a "why doesn't it ever find an update" report.
+        log.debug("Update check failed: %s", message)
+
+    def _offer_update(self, _href: str = "") -> None:
+        info = self._pending_update
+        if info is None:
+            return
+        reply = QMessageBox.question(
+            self,
+            self.language.text("update.confirm_title"),
+            self.language.text("update.confirm_body", version=info.version),
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self.update_hint.setText(self.language.text("update.installing"))
+        self.update_hint.setVisible(True)
+        worker = UpdateApplyWorker(info)
+        worker.signals.finished.connect(self._update_apply_finished)
+        worker.signals.failed.connect(self._update_apply_failed)
+        self.thread_pool.start(worker)
+
+    def _update_apply_finished(self) -> None:
+        # No auto-restart - see UpdateApplyWorker's own docstring for why.
+        self._pending_update = None
+        self.update_hint.setVisible(False)
+        QMessageBox.information(
+            self, self.language.text("update.success_title"), self.language.text("update.success_body")
+        )
+
+    def _update_apply_failed(self, message: str) -> None:
+        # The update attempt failed, but the OLD source/venv were never
+        # touched until download_release()/pip_install() each fully
+        # succeeded (see UpdateApplyWorker) - the app keeps running exactly
+        # as before, so this is a plain error dialog, not a "please
+        # restart"/recovery flow. self._pending_update is deliberately kept
+        # (not cleared) so the hint goes back to offering the same update
+        # rather than disappearing on a failure the user may want to retry.
+        self._render_update_hint()
+        QMessageBox.warning(
+            self, self.language.text("update.failed_title"), self.language.text("update.failed_body", error=message)
+        )
+
+    # --- "Hilfe" menu (01.09.2026) --------------------------------------
+
+    def _rebuild_help_menu(self) -> None:
+        """Rebuilds help_menu's actions from scratch in the current
+        language - see help_menu's own setup comment in __init__ for why a
+        rebuild rather than retranslating three tracked QAction objects in
+        place.
+        """
+        t = self.language.text
+        self.help_menu.setTitle(t("menu.help"))
+        self.help_menu.clear()
+        hw_check_action = self.help_menu.addAction(t("menu.help.hw_check"))
+        hw_check_action.triggered.connect(self._open_hardware_check)
+        update_action = self.help_menu.addAction(t("menu.help.check_updates"))
+        update_action.triggered.connect(self._check_for_update_manual)
+        about_action = self.help_menu.addAction(t("menu.help.about"))
+        about_action.triggered.connect(self._about)
+
+    def _open_hardware_check(self) -> None:
+        dialog = HardwareCheckDialog(self.language, self)
+        dialog.exec()
+
+    def _check_for_update_manual(self) -> None:
+        """"Hilfe" -> "Nach Updates suchen …" - unlike the silent startup
+        check (_check_for_update()), a check the user explicitly asked for
+        always gets a visible outcome, success or failure (see
+        _update_check_manual_finished()/_update_check_manual_failed()
+        below) - a manual click that visibly does nothing when there is no
+        update reads as broken, not as "already up to date".
+        """
+        worker = UpdateCheckWorker(__version__)
+        worker.signals.finished.connect(self._update_check_manual_finished)
+        worker.signals.failed.connect(self._update_check_manual_failed)
+        self.thread_pool.start(worker)
+
+    def _update_check_manual_finished(self, info: UpdateInfo | None) -> None:
+        self._pending_update = info
+        self._render_update_hint()
+        if info is None:
+            QMessageBox.information(
+                self,
+                self.language.text("update.check.no_update_title"),
+                self.language.text("update.check.no_update_body", version=__version__),
+            )
+            return
+        self._offer_update()
+
+    def _update_check_manual_failed(self, message: str) -> None:
+        QMessageBox.warning(
+            self,
+            self.language.text("update.check.failed_title"),
+            self.language.text("update.check.failed_body", error=message),
+        )
+
+    def _about(self) -> None:
+        QMessageBox.about(
+            self,
+            self.language.text("menu.help.about"),
+            self.language.text("about.body", app_name=self.language.text("app.title"), version=__version__),
+        )
 
     def _update_provider_credential_hint(self) -> None:
         provider = self.provider.currentText()
@@ -667,10 +949,21 @@ class MainWindow(QMainWindow):
         is_images = self.mode.currentData() == TranslationMode.IMAGES
         backend = self.inpainting_backend.currentData()
         available = backend is None or inpainting_backend_available(backend)
-        self.inpainting_backend_hint.setText(
-            "" if available else self.language.text("inpainting_backend.unavailable")
-        )
-        self.inpainting_backend_hint.setVisible(is_images and not available)
+        hint_text = "" if available else self.language.text("inpainting_backend.unavailable")
+        # 01.09.2026 (Michael: "GPU Schwelle auf den realistischen Wert
+        # anheben. Mit dem Hinweis, dass es auch mit geringerem Wert
+        # laufen kann, aber ohne Gewähr."): GPU_MIN_VRAM_GB no longer
+        # hard-blocks gpu_inpainting_available() - a GPU below it still
+        # counts as "available" above, so it needs its own, separate,
+        # non-blocking warning here instead of the "unavailable" text.
+        if available and backend == "gpu_inpainting":
+            vram = gpu_vram_gb()
+            if vram is not None and vram < GPU_MIN_VRAM_GB:
+                hint_text = self.language.text(
+                    "inpainting_backend.below_recommended_vram", vram_gb=vram, min_gb=GPU_MIN_VRAM_GB
+                )
+        self.inpainting_backend_hint.setText(hint_text)
+        self.inpainting_backend_hint.setVisible(is_images and bool(hint_text))
 
     def _choose_sources(self) -> None:
         mode = self.mode.currentData()

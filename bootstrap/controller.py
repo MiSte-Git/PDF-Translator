@@ -67,6 +67,14 @@ class BootstrapController:
 
     def check_gpu(self) -> gpu_check.GpuInfo | None:
         self.gpu_info = gpu_check.detect_nvidia_gpu()
+        # 01.09.2026 (Michael: "Ist es möglich den HW Check beim
+        # Installieren zu speichern...") - persists through to
+        # bootstrap.paths.gpu_check_marker_file() so ui/app.py's "Hilfe" ->
+        # Hardware-Test dialog can show this install-time result later.
+        # save_gpu_check_result() takes the already-detected self.gpu_info
+        # rather than re-probing (see that function's own docstring) - one
+        # nvidia-smi call per check_gpu() call, not two.
+        gpu_check.save_gpu_check_result(self.gpu_info)
         return self.gpu_info
 
     def gpu_meets_recommendation(self) -> bool:

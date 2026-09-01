@@ -80,8 +80,8 @@ Prüft, ohne irgendeine OCR-/Übersetzungs-API zu bemühen:
 - ob `config.json`s `ocr.backend` auf diesem Rechner verfügbar ist
   (aktuell nur `tesseract`: Binary muss auf PATH liegen),
 - ob `config.json`s `inpainting.backend` verfügbar ist (`box_overlay` und
-  `cv_inpainting` immer; `gpu_inpainting` nur mit ausreichend starker
-  CUDA-GPU).
+  `cv_inpainting` immer; `gpu_inpainting` nur mit einer CUDA-GPU - ab
+  8 GB VRAM empfohlen, läuft aber auch mit weniger, ohne Gewähr).
 
 Exit-Code `0`, wenn alle drei Prüfungen bestehen, sonst `1` (Details stehen
 in der Ausgabe). Config-Fehler (siehe unten) geben `2`. Gedacht als
@@ -277,8 +277,8 @@ Feldreferenz:
   Ausreißerschutz gegen als Text fehlerkannte Icons/Grafiken.
 - `inpainting.backend` (optional, Default `"box_overlay"`): `"box_overlay"`
   (immer verfügbar), `"cv_inpainting"` (klassisches OpenCV-Inpainting) oder
-  `"gpu_inpainting"` (LaMa/CUDA, braucht eine ausreichend starke GPU -
-  siehe `check`).
+  `"gpu_inpainting"` (LaMa/CUDA, braucht eine CUDA-GPU - ab 8 GB VRAM
+  empfohlen, läuft aber auch mit weniger, ohne Gewähr; siehe `check`).
 - `budget.max_chars_per_run` (optional, Default `200000`): harte
   Zeichenobergrenze pro `translate`-Lauf, siehe
   `pipeline/translation/cost_control.py`.

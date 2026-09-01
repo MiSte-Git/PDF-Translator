@@ -83,6 +83,26 @@ def language_marker_file() -> Path:
     return install_root() / "language.json"
 
 
+def gpu_check_marker_file() -> Path:
+    """JSON file persisting the last GPU capability check result - see
+    bootstrap/gpu_check.py::save_gpu_check_result()/read_gpu_check_marker().
+
+    01.09.2026 (Michael: "Ist es möglich den HW Check beim Installieren zu
+    speichern und in einem Hilfe Menü in der App eine Möglichkeit den HW
+    Test anzeigen zu lassen und auch noch mal zu wiederholen."): written
+    once during a LOCAL-mode install's Stage 1 GPU-check step
+    (bootstrap/controller.py::check_gpu()), and again any time the user
+    re-runs the check from the real app's "Hilfe" -> Hardware-Test dialog
+    (ui/app.py::HardwareCheckDialog). Same plain-JSON-file reasoning as
+    language_marker_file() above (no direct QSettings access from this
+    Qt-free package) - and the same file whether the check that produced it
+    ran from inside the bootstrapper or from inside the already-installed
+    app, so the dialog shows an install-time result until the user
+    explicitly re-checks, not two separate histories.
+    """
+    return install_root() / "gpu_check.json"
+
+
 def is_frozen() -> bool:
     """True when running from a PyInstaller-built executable rather than
     from source - relevant for release_source.py's local dev-mode fallback,

@@ -1,12 +1,17 @@
 """Background workers for the Qt UI."""
 from __future__ import annotations
 
+import importlib.util
+import sys
 import threading
 from pathlib import Path
 from typing import Sequence
 
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
+from bootstrap import paths as bootstrap_paths
+from bootstrap import release_source
+from bootstrap.installer import pip_install
 from pipeline.pdf.pymupdf_engine import MergeSourceSpec
 from pipeline.pdf.translate_pdf import PdfTranslationStats
 from pipeline.presentation.translate_presentation import PresentationTranslationStats
@@ -676,3 +681,110 @@ def _copy_image_batch_stats(stats: ImageBatchStats) -> ImageBatchStats:
         stats.translated, stats.skipped, stats.failed, stats.chars_sent,
         stats.cancelled, stats.files_processed, stats.files_total, list(stats.results),
     )
+
+
+# --- self-update (01.09.2026, Michael: "Update sollte die App selbst
+# prüfen.") ------------------------------------------------------------
+#
+# Both workers below import from bootstrap/ - safe in this direction only
+# (see bootstrap/__init__.py's own docstring: that package must never
+# import from ui/ or pipeline/, but nothing stops ui/ from importing its
+# Tk-free modules). bootstrap.release_source/bootstrap.paths pull in
+# nothing beyond the standard library, so this adds no new dependency to
+# the already-installed venv.
+
+
+class UpdateCheckSignals(QObject):
+    finished = Signal(object)  # release_source.UpdateInfo | None
+    failed = Signal(str)
+
+
+class UpdateCheckWorker(QRunnable):
+    """Background check for a newer GitHub release than `current_version` -
+    see bootstrap/release_source.py::check_for_update(). Runs via
+    QThreadPool exactly like AnalysisWorker above, so the network call
+    never blocks the Qt event loop.
+
+    `failed` is used for genuine surprises only, not "no update found" -
+    that is `finished.emit(None)`, a normal outcome. ui/app.py's startup
+    check connects `failed` to nothing but a debug print: being offline, or
+    GitHub being briefly unreachable, must never surface as an error dialog
+    for a check nobody explicitly asked for (mirrors this project's
+    general pattern of never letting a background availability check
+    interrupt the user - see e.g. _update_ocr_engine_hint()/
+    _update_inpainting_backend_hint() in ui/app.py, which show an inline
+    hint rather than a popup for their own "not available" cases).
+    """
+
+    def __init__(self, current_version: str) -> None:
+        super().__init__()
+        self.current_version = current_version
+        self.signals = UpdateCheckSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            info = release_source.check_for_update(self.current_version)
+        except Exception as exc:  # noqa: BLE001 - mirrors every other worker's catch-all above
+            self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
+        else:
+            self.signals.finished.emit(info)
+
+
+class UpdateApplySignals(QObject):
+    finished = Signal()
+    failed = Signal(str)
+
+
+class UpdateApplyWorker(QRunnable):
+    """Downloads and installs the release described by `info` OVER the
+    currently running app's own source directory
+    (bootstrap.paths.app_source_dir() - the same directory
+    bootstrap/installer.py's Stage 2 populated on first install) using the
+    exact same download/extract code Stage 2 uses
+    (bootstrap.release_source.download_release(), pointed at the SPECIFIC
+    release the user already confirmed rather than re-resolving "latest" a
+    second time - see that function's own docstring for why).
+
+    Re-installs requirements*.txt afterwards via `sys.executable -m pip
+    install` (bootstrap.installer.pip_install(), reused as-is) -
+    sys.executable IS this already-running venv's own python (ui/app.py
+    only ever runs from inside the venv bootstrap/installer.py created,
+    never system Python), so this needs no separate venv path the way
+    bootstrap/installer.py's own caller (BootstrapController, Stage 2 of a
+    FRESH install) has to look up. requirements-gpu.txt is only reinstalled
+    if `torch` is already importable in THIS process: the running app has
+    no record of which InstallMode the user originally chose (that
+    decision lives only in the bootstrapper's own BootstrapController,
+    long gone by the time the real app is running) - "is torch already
+    here" is the best available signal for "was this a LOCAL install"
+    without adding a whole persisted-install-mode concept just for this.
+
+    Deliberately does NOT restart the app itself - ui/app.py shows a
+    "please restart" message instead (see MainWindow._update_apply_
+    finished()) rather than this worker trying to relaunch the process,
+    which would need different handling per platform for comparatively
+    little benefit over asking the user to close and reopen it themselves.
+    """
+
+    def __init__(self, info: release_source.UpdateInfo) -> None:
+        super().__init__()
+        self.info = info
+        self.signals = UpdateApplySignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            app_source_dir = bootstrap_paths.app_source_dir()
+            release_source.download_release(self.info, app_source_dir)
+            had_gpu_deps = importlib.util.find_spec("torch") is not None
+            for name in ("requirements.txt", "requirements-ocr.txt", "requirements-gpu.txt"):
+                if name == "requirements-gpu.txt" and not had_gpu_deps:
+                    continue
+                requirements_file = app_source_dir / name
+                if requirements_file.is_file():
+                    pip_install(Path(sys.executable), requirements_file)
+        except Exception as exc:  # noqa: BLE001 - mirrors every other worker's catch-all above
+            self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
+        else:
+            self.signals.finished.emit()

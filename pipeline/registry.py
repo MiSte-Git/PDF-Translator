@@ -252,11 +252,12 @@ def inpainting_backend_available(name: str) -> bool:
     have no real availability question (both only need Pillow, resp.
     Pillow+OpenCV, which are hard dependencies of running IMAGES mode at
     all - see requirements-ocr.txt) so they're always reported available;
-    only "gpu_inpainting" has a real check today (CUDA GPU with enough
-    VRAM, see pipeline.images.inpainting.gpu_inpainting_available()) - a
-    future Cloud-Inpainting backend would check for a configured API key
-    instead, the same way build_provider()'s providers do lazily on first
-    use.
+    only "gpu_inpainting" has a real check today (any CUDA GPU present -
+    VRAM size is a recommendation, not a hard gate, since 01.09.2026, see
+    pipeline.images.inpainting.gpu_inpainting_available()/GPU_MIN_VRAM_GB)
+    - a future Cloud-Inpainting backend would check for a configured API
+    key instead, the same way build_provider()'s providers do lazily on
+    first use.
     """
     if name == "gpu_inpainting":
         from pipeline.images.inpainting import gpu_inpainting_available

@@ -32,6 +32,7 @@ def test_derived_paths_are_children_of_install_root(monkeypatch):
     assert paths.venv_dir() == root / "venv"
     assert paths.app_source_dir() == root / "app"
     assert paths.language_marker_file() == root / "language.json"
+    assert paths.gpu_check_marker_file() == root / "gpu_check.json"
 
 
 def test_venv_python_platform_specific(monkeypatch, tmp_path):
