@@ -26,7 +26,7 @@ unten).
 ## Für alle anderen (geführte Installation)
 
 1. Lade die passende Datei für dein Betriebssystem von der
-   [Releases-Seite](https://github.com/MiSte-Git/TranslatePDF/releases)
+   [Releases-Seite](https://github.com/MiSte-Git/PDF-Translator/releases)
    herunter:
    - Windows: `pdf-translator-setup-windows.exe`
    - macOS: `pdf-translator-setup-macos`
@@ -70,8 +70,8 @@ Ein Eintrag im Anwendungsmenü ist überall das Ergebnis, kein `.deb`/`.rpm`/
 ## Für Entwickler:innen
 
 ```bash
-git clone https://github.com/MiSte-Git/TranslatePDF.git
-cd TranslatePDF
+git clone https://github.com/MiSte-Git/PDF-Translator.git
+cd PDF-Translator
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 

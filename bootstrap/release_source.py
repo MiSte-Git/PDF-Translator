@@ -44,10 +44,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
-# See project doc "deployment-strategie-27-08-2026.md" - confirmed GitHub
-# repository for this project.
+# Actual GitHub repository for this project - confirmed 01.09.2026 via the
+# real v0.1.0 release notification email (the project doc's earlier
+# "TranslatePDF" name was never verified against GitHub and was wrong).
 REPO_OWNER = "MiSte-Git"
-REPO_NAME = "TranslatePDF"
+REPO_NAME = "PDF-Translator"
 
 GITHUB_API_LATEST_RELEASE = (
     f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/releases/latest"
