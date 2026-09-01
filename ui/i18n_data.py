@@ -263,6 +263,147 @@ DE = {
     "dialog.analysis": "Analyse",
     "dialog.choose_images": "Bilder auswählen",
     "dialog.choose_document": "Dokument auswählen",
+    # PDFs zusammenführen/zwischeneinfügen (01.09.2026, Backlog.md
+    # 26.08.2026) - eigenständiger Dialog, siehe ui/merge_dialog.py und
+    # ui/merge_job.py's Modulkommentar dazu, warum dies NICHT über
+    # TranslationRequest/self.mode läuft.
+    "merge.button": "PDFs zusammenführen / einfügen …",
+    "merge.title": "PDFs zusammenführen / einfügen",
+    "merge.intro": (
+        "Quelldateien in der gewünschten Reihenfolge zusammenstellen. Pro "
+        "Datei kann optional eine Seitenauswahl angegeben werden (leer = "
+        "ganze Datei) - dieselbe Datei mehrfach mit unterschiedlicher "
+        "Seitenauswahl hinzufügen, um sie an einer bestimmten Stelle in "
+        "eine andere Datei einzufügen."
+    ),
+    "merge.column_file": "Datei",
+    "merge.column_pages": "Seiten",
+    "merge.pages_placeholder": "alle",
+    "merge.pages_tooltip": (
+        "Leer = ganze Datei. Sonst z. B. \"1-3,5\" oder \"6-\" (Seite 6 bis "
+        "zum Ende) oder \"-4\" (Anfang bis Seite 4). \"5-3\" fügt die "
+        "Seiten 5,4,3 in dieser (umgekehrten) Reihenfolge ein."
+    ),
+    "merge.add_files": "Dateien hinzufügen …",
+    "merge.remove_selected": "Entfernen",
+    "merge.move_up": "Nach oben",
+    "merge.move_down": "Nach unten",
+    "merge.output_file_label": "Zieldatei",
+    "merge.output_placeholder": "Zieldatei wählen …",
+    "merge.choose_output_file": "Speichern unter …",
+    "merge.start_button": "Zusammenführen starten",
+    "merge.cancel_button": "Abbrechen",
+    "merge.close_button": "Schließen",
+    "merge.status_running": "Verarbeite: {message}",
+    "merge.status_done": "Fertig: {pages} Seite(n) aus {files} Datei(en) geschrieben.",
+    "merge.status_cancelled": "Abgebrochen (Teilergebnis gespeichert): {pages} Seite(n) geschrieben.",
+    "merge.status_failed": "Fehlgeschlagen: {error}",
+    "merge.error_dialog_choose_files": "PDF-Dateien auswählen",
+    "merge.error_dialog_choose_output": "Zieldatei wählen",
+    "merge.failed_title": "Zusammenführen fehlgeschlagen",
+    # "Ordner durchsuchen" (01.09.2026, ui/merge_search_dialog.py) -
+    # Michael: "Ordner mit 1000 oder mehr PDFs [...] nur bestimmte von
+    # ihnen zusammenführen [...] Developer Name steht im oberen
+    # geschützten Teil."
+    "merge_search.button": "Ordner durchsuchen …",
+    "merge_search.title": "PDFs im Ordner suchen",
+    "merge_search.folder_label": "Ordner",
+    "merge_search.folder_placeholder": "Ordner wählen …",
+    "merge_search.choose_folder": "Ordner wählen …",
+    "merge_search.choose_folder_dialog_title": "Ordner zum Durchsuchen wählen",
+    "merge_search.recursive_checkbox": "Inkl. Unterordner",
+    "merge_search.query_label": "Suchtext (nur ICO-Kopfbereich auf Seite 1)",
+    "merge_search.query_placeholder": (
+        "z. B. Firmenname des Developers – leer lassen für alle PDFs im Ordner"
+    ),
+    "merge_search.search_button": "Suchen",
+    "merge_search.cancel_button": "Abbrechen",
+    "merge_search.select_all": "Alle auswählen",
+    "merge_search.select_none": "Keine auswählen",
+    "merge_search.take_selected": "Ausgewählte übernehmen",
+    "merge_search.close_button": "Schließen",
+    "merge_search.status_running": "Durchsuche: {current} ({done}/{total})",
+    "merge_search.status_done": "{matches} Treffer von {scanned} durchsuchten PDF(s).",
+    "merge_search.status_done_with_errors": (
+        "{matches} Treffer von {scanned} durchsuchten PDF(s) ({errors} nicht lesbar)."
+    ),
+    "merge_search.status_cancelled": "Abgebrochen: {matches} Treffer von {scanned} durchsuchten PDF(s).",
+    "merge_search.status_failed": "Fehlgeschlagen: {error}",
+    "merge_search.error_missing_folder": "Bitte zuerst einen Ordner wählen.",
+    "merge_search.failed_title": "Suche fehlgeschlagen",
+    # Google-Drive-Ordnersuche (01.09.2026) - Michael: "Können wir eine
+    # Google Drive Ordner durchsuchen?" Umschalter im selben Dialog statt
+    # eigenem Fenster (siehe ui/merge_search_dialog.py's Docstring).
+    "merge_search.source_local": "Lokaler Ordner",
+    "merge_search.source_drive": "Google Drive",
+    "merge_search.drive_folder_label": "Drive-Ordnerlink oder -ID",
+    "merge_search.drive_folder_placeholder": "Freigabelink oder Ordner-ID einfügen …",
+    "merge_search.drive_resolve_button": "Prüfen",
+    "merge_search.drive_folder_unresolved": "Noch nicht geprüft.",
+    "merge_search.drive_folder_resolved": "Ordner „{name}“ gefunden.",
+    "merge_search.drive_folder_resolve_failed": "Fehlgeschlagen: {error}",
+    "merge_search.drive_cache_label": "Cache-Ordner (Downloads bleiben hier erhalten)",
+    "merge_search.drive_choose_cache": "Cache-Ordner wählen …",
+    "merge_search.drive_choose_cache_dialog_title": "Ordner für heruntergeladene Treffer wählen",
+    "merge_search.drive_credentials_label": "Google-OAuth-Zugangsdaten (einmalig, siehe docs/google_drive_setup.md)",
+    "merge_search.drive_client_id_placeholder": "Client-ID",
+    "merge_search.drive_client_secret_placeholder": "Client-Secret",
+    "merge_search.drive_save_credentials": "Zugangsdaten speichern",
+    "merge_search.drive_credentials_saved": "Zugangsdaten gespeichert.",
+    "merge_search.drive_not_configured": "Noch keine Client-ID/Client-Secret hinterlegt.",
+    "merge_search.drive_configured_not_connected": "Konfiguriert, aber noch nicht verbunden.",
+    "merge_search.drive_connected": "Verbunden{account}.",
+    "merge_search.drive_connect_button": "Mit Google verbinden",
+    "merge_search.drive_disconnect_button": "Trennen",
+    "merge_search.drive_connecting": "Öffne Browser zur Anmeldung …",
+    "merge_search.drive_connect_failed": "Verbindung fehlgeschlagen: {error}",
+    "merge_search.drive_error_missing_folder": "Bitte zuerst einen Drive-Ordner angeben und prüfen.",
+    "merge_search.drive_error_missing_cache": "Bitte zuerst einen Cache-Ordner wählen.",
+    "merge_search.drive_error_not_connected": "Bitte zuerst mit Google verbinden.",
+    # DOCX zusammenführen/zwischeneinfügen (01.09.2026, Michael: "Jetzt noch
+    # das ganze für *.docx.") - ui/word_merge_dialog.py, mirrors merge.*
+    # above; nur die Strings, die inhaltlich vom PDF-Pendant abweichen
+    # (Seitenkonzept, Datei-Endung, Batching-Zusammenfassung) sind eigene
+    # Keys, alles Formatunabhängige (Knöpfe, Zieldatei-Auswahl, ...) nutzt
+    # dieselben merge.*-Keys weiter - wie job.* bereits für PDF/Word/PPTX
+    # gemeinsam genutzt wird.
+    "word_merge.button": "DOCX-Dateien zusammenführen / einfügen …",
+    "word_merge.title": "DOCX-Dateien zusammenführen / einfügen",
+    "word_merge.intro": (
+        "Quelldateien in der gewünschten Reihenfolge zusammenstellen - immer "
+        "ganze Dateien (DOCX kennt anders als PDF keine feste Seitenzahl im "
+        "Dateiformat selbst). Dieselbe Datei mehrfach hinzufügen, um sie an "
+        "mehreren Stellen einzufügen. Ab mehr als 100 Dateien wird "
+        "automatisch in Gruppen zusammengeführt (siehe Statuszeile nach dem "
+        "Lauf)."
+    ),
+    "word_merge.status_done": (
+        "Fertig: {segments} von {files} Datei(en) übernommen"
+        "{batch_suffix}{warning_suffix}."
+    ),
+    "word_merge.status_cancelled": (
+        "Abgebrochen (Teilergebnis gespeichert): {segments} Datei(en) übernommen"
+        "{batch_suffix}{warning_suffix}."
+    ),
+    "word_merge.status_batch_suffix": " in {batches} Gruppen",
+    "word_merge.status_warning_suffix": ", {count} übersprungen (siehe unten)",
+    "word_merge.warnings_title": "Übersprungene Dateien:",
+    "word_merge.error_dialog_choose_files": "DOCX-Dateien auswählen",
+    # "Ordner durchsuchen" für DOCX (01.09.2026, ui/word_merge_search_dialog.py) -
+    # gleiche Anforderung wie bei PDF, nur der ICO-Kopfbereich ist hier NICHT
+    # an "Seite 1" gebunden (DOCX hat keine Seiten im Dateiformat) sondern an
+    # die Absätze vor dem Trennelement (siehe pipeline/word/docx_engine.py's
+    # extract_docx_ico_header_text()).
+    "word_merge_search.title": "DOCX-Dateien im Ordner suchen",
+    "word_merge_search.query_label": "Suchtext (nur ICO-Kopfbereich am Dokumentanfang)",
+    "word_merge_search.query_placeholder": (
+        "z. B. Firmenname des Developers – leer lassen für alle DOCX-Dateien im Ordner"
+    ),
+    "word_merge_search.status_done": "{matches} Treffer von {scanned} durchsuchten DOCX-Datei(en).",
+    "word_merge_search.status_done_with_errors": (
+        "{matches} Treffer von {scanned} durchsuchten DOCX-Datei(en) ({errors} nicht lesbar)."
+    ),
+    "word_merge_search.status_cancelled": "Abgebrochen: {matches} Treffer von {scanned} durchsuchten DOCX-Datei(en).",
 }
 
 EN = {
@@ -471,6 +612,122 @@ EN = {
     "dialog.analysis": "Analysis",
     "dialog.choose_images": "Select images",
     "dialog.choose_document": "Select document",
+    "merge.button": "Merge / insert PDFs …",
+    "merge.title": "Merge / insert PDFs",
+    "merge.intro": (
+        "Assemble source files in the order you want them merged. Each "
+        "file can optionally have a page selection (empty = whole file) - "
+        "add the same file twice with different page selections to insert "
+        "another file at a specific point inside it."
+    ),
+    "merge.column_file": "File",
+    "merge.column_pages": "Pages",
+    "merge.pages_placeholder": "all",
+    "merge.pages_tooltip": (
+        "Empty = whole file. Otherwise e.g. \"1-3,5\" or \"6-\" (page 6 to "
+        "the end) or \"-4\" (start to page 4). \"5-3\" inserts pages "
+        "5,4,3 in that (reversed) order."
+    ),
+    "merge.add_files": "Add files …",
+    "merge.remove_selected": "Remove",
+    "merge.move_up": "Move up",
+    "merge.move_down": "Move down",
+    "merge.output_file_label": "Output file",
+    "merge.output_placeholder": "Choose an output file …",
+    "merge.choose_output_file": "Save as …",
+    "merge.start_button": "Start merging",
+    "merge.cancel_button": "Cancel",
+    "merge.close_button": "Close",
+    "merge.status_running": "Processing: {message}",
+    "merge.status_done": "Done: wrote {pages} page(s) from {files} file(s).",
+    "merge.status_cancelled": "Cancelled (partial result saved): wrote {pages} page(s).",
+    "merge.status_failed": "Failed: {error}",
+    "merge.error_dialog_choose_files": "Select PDF files",
+    "merge.error_dialog_choose_output": "Choose output file",
+    "merge.failed_title": "Merge failed",
+    "merge_search.button": "Search a folder …",
+    "merge_search.title": "Search PDFs in a folder",
+    "merge_search.folder_label": "Folder",
+    "merge_search.folder_placeholder": "Choose a folder …",
+    "merge_search.choose_folder": "Choose folder …",
+    "merge_search.choose_folder_dialog_title": "Choose a folder to search",
+    "merge_search.recursive_checkbox": "Include subfolders",
+    "merge_search.query_label": "Search text (ICO header on page 1 only)",
+    "merge_search.query_placeholder": (
+        "e.g. the developer's company name – leave empty for every PDF in the folder"
+    ),
+    "merge_search.search_button": "Search",
+    "merge_search.cancel_button": "Cancel",
+    "merge_search.select_all": "Select all",
+    "merge_search.select_none": "Select none",
+    "merge_search.take_selected": "Add selected",
+    "merge_search.close_button": "Close",
+    "merge_search.status_running": "Searching: {current} ({done}/{total})",
+    "merge_search.status_done": "{matches} match(es) out of {scanned} PDF(s) searched.",
+    "merge_search.status_done_with_errors": (
+        "{matches} match(es) out of {scanned} PDF(s) searched ({errors} unreadable)."
+    ),
+    "merge_search.status_cancelled": "Cancelled: {matches} match(es) out of {scanned} PDF(s) searched.",
+    "merge_search.status_failed": "Failed: {error}",
+    "merge_search.error_missing_folder": "Please choose a folder first.",
+    "merge_search.failed_title": "Search failed",
+    "merge_search.source_local": "Local folder",
+    "merge_search.source_drive": "Google Drive",
+    "merge_search.drive_folder_label": "Drive folder link or ID",
+    "merge_search.drive_folder_placeholder": "Paste a share link or folder ID …",
+    "merge_search.drive_resolve_button": "Check",
+    "merge_search.drive_folder_unresolved": "Not checked yet.",
+    "merge_search.drive_folder_resolved": "Found folder “{name}”.",
+    "merge_search.drive_folder_resolve_failed": "Failed: {error}",
+    "merge_search.drive_cache_label": "Cache folder (downloads are kept here)",
+    "merge_search.drive_choose_cache": "Choose cache folder …",
+    "merge_search.drive_choose_cache_dialog_title": "Choose a folder for downloaded matches",
+    "merge_search.drive_credentials_label": "Google OAuth credentials (one-time, see docs/google_drive_setup.md)",
+    "merge_search.drive_client_id_placeholder": "Client ID",
+    "merge_search.drive_client_secret_placeholder": "Client secret",
+    "merge_search.drive_save_credentials": "Save credentials",
+    "merge_search.drive_credentials_saved": "Credentials saved.",
+    "merge_search.drive_not_configured": "No Client ID/secret saved yet.",
+    "merge_search.drive_configured_not_connected": "Configured, but not connected yet.",
+    "merge_search.drive_connected": "Connected{account}.",
+    "merge_search.drive_connect_button": "Connect to Google",
+    "merge_search.drive_disconnect_button": "Disconnect",
+    "merge_search.drive_connecting": "Opening browser for sign-in …",
+    "merge_search.drive_connect_failed": "Connection failed: {error}",
+    "merge_search.drive_error_missing_folder": "Please enter and check a Drive folder first.",
+    "merge_search.drive_error_missing_cache": "Please choose a cache folder first.",
+    "merge_search.drive_error_not_connected": "Please connect to Google first.",
+    "word_merge.button": "Merge / insert DOCX files …",
+    "word_merge.title": "Merge / insert DOCX files",
+    "word_merge.intro": (
+        "Assemble source files in the desired order - always whole files "
+        "(unlike PDF, DOCX has no fixed page count in the file format "
+        "itself). Add the same file more than once to insert it in "
+        "multiple places. Above 100 files, merging happens automatically "
+        "in groups (see the status line after the run)."
+    ),
+    "word_merge.status_done": (
+        "Done: took {segments} of {files} file(s)"
+        "{batch_suffix}{warning_suffix}."
+    ),
+    "word_merge.status_cancelled": (
+        "Cancelled (partial result saved): took {segments} file(s)"
+        "{batch_suffix}{warning_suffix}."
+    ),
+    "word_merge.status_batch_suffix": " in {batches} group(s)",
+    "word_merge.status_warning_suffix": ", {count} skipped (see below)",
+    "word_merge.warnings_title": "Skipped files:",
+    "word_merge.error_dialog_choose_files": "Select DOCX files",
+    "word_merge_search.title": "Search DOCX files in a folder",
+    "word_merge_search.query_label": "Search text (ICO header at the start of the document only)",
+    "word_merge_search.query_placeholder": (
+        "e.g. the developer's company name – leave empty for every DOCX file in the folder"
+    ),
+    "word_merge_search.status_done": "{matches} match(es) out of {scanned} DOCX file(s) searched.",
+    "word_merge_search.status_done_with_errors": (
+        "{matches} match(es) out of {scanned} DOCX file(s) searched ({errors} unreadable)."
+    ),
+    "word_merge_search.status_cancelled": "Cancelled: {matches} match(es) out of {scanned} DOCX file(s) searched.",
 }
 
 CATALOGUES = {"de": DE, "en": EN}

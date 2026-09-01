@@ -72,6 +72,43 @@ def set_api_key(key_name: str, value: str) -> None:
         raise RuntimeError(f"OS keyring is unavailable: {exc}") from exc
 
 
+def has_api_key(key_name: str, env_names: tuple[str, ...] = ()) -> bool:
+    """True if get_api_key(key_name, env_names) would succeed, without raising.
+
+    Added 01.09.2026 for the Google-Drive-Ordnersuche feature: unlike every
+    other credential in this module (which either IS configured at startup
+    via env/keyring, or the whole provider is simply unusable), Drive OAuth
+    has three distinct, UI-relevant states - "not configured at all",
+    "configured but not yet connected", "connected" - and the UI needs to
+    check each one without ever triggering get_api_key()'s RuntimeError as
+    control flow.
+    """
+    try:
+        get_api_key(key_name, env_names)
+    except RuntimeError:
+        return False
+    return True
+
+
+def delete_api_key(key_name: str) -> None:
+    """Remove a keyring-stored credential (no-op if it was never stored).
+
+    Deliberately does NOT touch any environment variable of the same name -
+    an env var was set outside this app's control and clearing it here would
+    be surprising. Used by the Google-Drive "Trennen" (disconnect) action to
+    drop the stored refresh token; a still-set GOOGLE_DRIVE_REFRESH_TOKEN env
+    var would keep overriding this either way (see get_api_key()'s env-first
+    order), which is documented at the call site.
+    """
+    keyring = _keyring_module()
+    if keyring is None:
+        return
+    try:
+        keyring.delete_password(_KEYRING_SERVICE, key_name)
+    except Exception:
+        pass  # nothing stored under this name, or backend unavailable - fine
+
+
 def get_google_translate_api_key() -> str:
     """Google Cloud Translation API key from the OS keyring."""
     return get_api_key("google_translate_api_key", ("GOOGLE_TRANSLATE_API_KEY",))
@@ -90,3 +127,29 @@ def get_openai_api_key() -> str:
 def get_grok_api_key() -> str:
     """xAI Grok API key from the OS keyring."""
     return get_api_key("grok_api_key", ("GROK_API_KEY", "XAI_API_KEY"))
+
+
+# --- Google Drive OAuth (01.09.2026, Google-Drive-Ordnersuche) -------------
+#
+# Unlike the four translation providers above, Drive access is not a single
+# static API key: it is a per-user OAuth "installed app" client (Client-ID +
+# Client-Secret, created once by the user in Google Cloud Console - this app
+# cannot provision that itself) plus a refresh token obtained by an
+# interactive consent flow (see pipeline/drive_auth.py::connect_interactively()).
+# All three pieces are still just opaque strings from this module's point of
+# view, so they reuse get_api_key()/set_api_key()/has_api_key() as-is rather
+# than needing new storage machinery.
+
+def get_google_drive_client_id() -> str:
+    """OAuth Client-ID for the Drive-Ordnersuche feature, from the OS keyring."""
+    return get_api_key("google_drive_client_id", ("GOOGLE_DRIVE_CLIENT_ID",))
+
+
+def get_google_drive_client_secret() -> str:
+    """OAuth Client-Secret for the Drive-Ordnersuche feature, from the OS keyring."""
+    return get_api_key("google_drive_client_secret", ("GOOGLE_DRIVE_CLIENT_SECRET",))
+
+
+def get_google_drive_refresh_token() -> str:
+    """Stored OAuth refresh token from a previous successful Google sign-in."""
+    return get_api_key("google_drive_refresh_token", ("GOOGLE_DRIVE_REFRESH_TOKEN",))

@@ -560,6 +560,56 @@ Einbettung bleibt bewusste, offene Architekturentscheidung, kein Bug). Der
 echte Live-Lauf ist ebenfalls erledigt (17.08.2026, siehe oben) - diese
 Formulierung war hier nicht mehr aktuell.
 
+**PDFs zusammenführen/zwischeneinfügen (01.09.2026):** eigenständige,
+NICHT-übersetzende PDF-Operation - ursprünglich nicht Teil dieser Phase
+(deren Ziel der gemeinsame ÜBERSETZUNGS-Ablauf war), aber naheliegend
+hier vermerkt, da sie an derselben `pipeline/pdf/pymupdf_engine.py`
+ansetzt. Umgesetzt als eigener Qt-Dialog (`ui/merge_dialog.py`), bewusst
+NICHT über `self.mode`/`TranslationRequest` - siehe Backlog.md
+01.09.2026 für Details/Testabdeckung/offene Punkte (v. a.: Webapp-
+Anbindung noch offen).
+
+**Ordner nach ICO-Kopfbereich durchsuchen (01.09.2026):** direkter
+Anschluss an obiges Feature, auf Nutzerfrage, wie man aus einem Ordner
+mit 1000+ PDFs gezielt nur die eines bestimmten Developers zum Merge
+hinzufügt. Neuer "Ordner durchsuchen …"-Knopf in `ui/merge_dialog.py`
+öffnet `ui/merge_search_dialog.py`: Ordner (optional rekursiv per
+Checkbox) wird nach PDFs durchsucht, ein Suchtext wird NUR gegen den
+ICO-Metadaten-Kopfbereich von Seite 1 geprüft (`pipeline/pdf/
+pymupdf_engine.py::extract_ico_header_text()`, dieselbe Fläche, die der
+bestehende "ICO-Dokument"-Modus schützt), Treffer werden vor der
+Übernahme in einer Liste mit Textausschnitt zur Kontrolle angezeigt.
+Details/Testabdeckung/offene Punkte: siehe Backlog.md 01.09.2026.
+
+**Google-Drive-Ordnersuche (01.09.2026):** Michael: "Können wir eine
+Google Drive Ordner durchsuchen?" - zweite Quelle neben dem lokalen
+Ordner, im selben Dialog über einen Umschalter ("Lokaler Ordner" /
+"Google Drive"). Eigene, isolierte OAuth-/API-Schicht
+`pipeline/drive_auth.py` (einzige Datei mit Google-API-Import, spiegelt
+`pymupdf_engine.py`s Exklusivitätsregel für PyMuPDF), Scan-/Download-
+Orchestrierung in `ui/drive_search.py`. Treffer landen als echte lokale
+Dateien in einem vom Nutzer gewählten Cache-Ordner und bleiben dort
+liegen. Einmalige Einrichtung eines eigenen Google-Cloud-OAuth-Clients
+durch den Nutzer nötig, Anleitung: `docs/google_drive_setup.md`.
+Details/Testabdeckung/offene Punkte (u. a.: noch nicht gegen ein echtes
+Google-Konto verifiziert): siehe Backlog.md 01.09.2026.
+
+**Dasselbe für DOCX (01.09.2026):** Michael: "Jetzt noch das ganze für
+*.docx." - volle Parität zu den drei obigen Features (Zusammenführen,
+ICO-Ordnersuche, Google-Drive-Suche), aber whole-file-only (kein
+Seiten-/Abschnittsauswahl-Äquivalent, da DOCX anders als PDF keine feste
+Seitenzahl im Dateiformat kennt) und mit automatischem zweistufigem
+Batching für sehr große Mengen (bestätigt: "automatisch batchen"). Neue
+Merge-Engine `pipeline/word/merge.py` (einzige Datei mit
+`docx`-/`docxcompose`-Import), eigene UI-Dateien
+(`ui/word_merge_dialog.py`, `ui/word_merge_search_dialog.py`,
+`ui/word_merge_job.py`) statt Parametrisierung der PDF-Dialoge - die
+reine Scan-/Filter-Logik in `ui/merge_search.py`/`ui/drive_search.py`
+wurde dafür generisch gemacht, die PDF-Funktionen bleiben unverändert als
+dünne Wrapper erhalten. Details/Testabdeckung/offene Punkte (v. a.: noch
+nicht gegen einen echten ~2000-Datei-Korpus getestet): siehe Backlog.md
+01.09.2026 (Fortsetzung 3).
+
 ## Phase 3 – Bildübersetzung und OCR
 
 - [x] Architektur abgestimmt (18.08.2026, Nutzerentscheidung nach Rücksprache):

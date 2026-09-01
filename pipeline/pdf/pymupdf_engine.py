@@ -10,7 +10,9 @@ from __future__ import annotations
 import html
 import json
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable, Sequence
 
 import pymupdf as fitz
 
@@ -2007,3 +2009,302 @@ class PyMuPdfEngine:
             )
         self._restore_missing_links()
         self._doc.save(path, garbage=4, deflate=True)
+
+
+# --- PDFs zusammenführen / zwischeneinfügen (01.09.2026) -------------------
+#
+# Backlog.md 26.08.2026, Michael: "Ich möchte später noch eine Funktion
+# hinzufügen die PDFs zusammenführt und auch noch PDFs zwischeneinfügt."
+# Deliberately a SEPARATE operation from PyMuPdfEngine above, not a new
+# method on it: merging touches whole documents/pages, never a single
+# TextBlock, needs no TranslationProvider, no redaction, no font/insert_text
+# machinery - none of PyMuPdfEngine's actual job. Kept in this file anyway
+# (rather than a new pipeline/pdf/merge.py) because of this module's own
+# "only file allowed to import PyMuPDF" rule above: splitting the fitz calls
+# out into a second file would either violate that rule or force an awkward
+# two-file split for something this self-contained. ui/merge_job.py is the
+# thin caller-facing layer on top (destination-safety checks, QA-report-
+# style text) - the same relationship ui/pdf_job.py has to translate_pdf().
+#
+# "Zwischeneinfügen" (inserting B in the middle of A) is not a separate code
+# path from "merge whole files" - it falls out of the same ordered
+# MergeSourceSpec list for free: split A into two segments around the
+# insertion point (e.g. pages "1-4" and "5-") with B's segment in between.
+
+
+def parse_page_selection(spec: str, page_count: int) -> list[int]:
+    """Parse a 1-indexed, comma-separated page/range spec into a 0-indexed
+    page list, in EXACTLY the order and repetition given.
+
+    Grammar per comma-separated token (whitespace around commas/dashes is
+    ignored): "N" a single page; "N-M" a range, ascending OR descending
+    depending on whether N<=M or N>M (so "10-8" deliberately reverses those
+    three pages within the segment - a real, if niche, way to reorder pages
+    from one file without a dedicated "reverse" control); "N-" from N to the
+    LAST page (lets a user split a file at an insertion point without first
+    having to look up its page count); "-M" from the FIRST page to M.
+    Repeating a page (e.g. "1,1") is allowed and copies it twice - not
+    rejected as a mistake, since PyMuPDF's own Document.select() already
+    supports it and rejecting it would be an arbitrary extra restriction.
+
+    An empty/whitespace-only spec means "every page, in order" -
+    list(range(page_count)) - the default a MergeSourceSpec with pages=""
+    (merge this file in whole) uses.
+
+    Raises ValueError, never silently clamping or dropping a bad token, for:
+    a non-integer token; a page number below 1 or above page_count (message
+    names the actual valid range, e.g. "1-12", so a typo is easy to spot);
+    or a spec that resolves to zero pages while page_count is 0 (an
+    explicit, non-empty page selection against a file that has no pages at
+    all - almost certainly a wrong source file, not a real 0-page request).
+    """
+    spec = (spec or "").strip()
+    if not spec:
+        return list(range(page_count))
+    if page_count <= 0:
+        raise ValueError(
+            f'Datei hat keine Seiten, aber Seitenauswahl "{spec}" wurde angegeben.'
+        )
+
+    def to_int(text: str) -> int:
+        try:
+            return int(text)
+        except ValueError:
+            raise ValueError(f'Ungültige Seitenzahl "{text}" in Seitenauswahl "{spec}".') from None
+
+    def bounded(page: int) -> int:
+        if not (1 <= page <= page_count):
+            raise ValueError(
+                f'Seite {page} in Seitenauswahl "{spec}" liegt außerhalb des gültigen '
+                f"Bereichs 1-{page_count}."
+            )
+        return page
+
+    pages: list[int] = []
+    for raw_token in spec.split(","):
+        token = raw_token.strip()
+        if not token:
+            continue
+        if token.startswith("-"):
+            end = bounded(to_int(token[1:]))
+            pages.extend(page - 1 for page in range(1, end + 1))
+        elif token.endswith("-"):
+            start = bounded(to_int(token[:-1]))
+            pages.extend(page - 1 for page in range(start, page_count + 1))
+        elif "-" in token:
+            left, right = token.split("-", 1)
+            start, end = bounded(to_int(left)), bounded(to_int(right))
+            step = 1 if start <= end else -1
+            pages.extend(page - 1 for page in range(start, end + step, step))
+        else:
+            pages.append(bounded(to_int(token)) - 1)
+    if not pages:
+        raise ValueError(f'Seitenauswahl "{spec}" ergibt keine einzige Seite.')
+    return pages
+
+
+@dataclass
+class MergeSourceSpec:
+    """One entry in the ordered list merge_pdfs() copies from, in list
+    order - the list AS A WHOLE is the merge order; there is no separate
+    "insert position" concept (see the module-level comment above)."""
+
+    path: Path
+    pages: str = ""
+    """Page-range spec in parse_page_selection()'s grammar; "" (the
+    default) means the whole file, in its original order."""
+
+
+@dataclass
+class PdfMergeStats:
+    segments: int
+    """len(sources) actually attempted - see `cancelled` below for why this
+    can be less than the length of the list merge_pdfs() was called with."""
+    files_processed: int
+    """Distinct source files actually opened, counted by resolved path -
+    the SAME file listed twice (the "insert" case) counts once here, unlike
+    `segments`."""
+    pages_written: int
+    cancelled: bool = False
+    warnings: list[str] = field(default_factory=list)
+
+
+def merge_pdfs(
+    sources: Sequence[MergeSourceSpec],
+    destination: Path,
+    progress_callback: Callable[[str], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+) -> PdfMergeStats:
+    """Merge/insert: copy every source's selected pages, in list order,
+    into one new PDF at `destination`.
+
+    Bookmarks: each source is opened, reduced to its selected pages via
+    Document.select() (which also re-numbers/drops that COPY's own table of
+    contents to match - PyMuPDF's own behaviour, verified empirically since
+    it isn't spelled out this precisely in PyMuPDF's docs), and its
+    (possibly now-empty) TOC is copied into the merged result's TOC with
+    page numbers offset by how many pages the output already has - so
+    nested bookmarks a source already had survive a partial-page selection
+    correctly positioned in the merged file. insert_pdf() itself does NOT
+    carry a source's TOC over on its own (confirmed empirically) - that
+    offset-and-append step is why this function builds the TOC by hand
+    instead of relying on insert_pdf(). A source segment that contributes
+    pages but has no TOC of its own gets ONE synthesized top-level bookmark
+    instead (its filename, plus the page spec if it's not the whole file),
+    so every segment stays reachable via the outline even if the source
+    itself has no chapters - segments with their own real TOC are left as
+    they are, not given a redundant extra entry.
+
+    Metadata: kept minimal on purpose (fitz.open()'s own defaults - empty
+    title/author/etc.) rather than guessing which source file's metadata
+    "should" win for a document assembled from several unrelated files;
+    RoadMap.md/Backlog.md can record a real user request for something more
+    specific (e.g. "title = destination filename") if that turns out to
+    matter in practice.
+
+    Cancellation is cooperative and polled BETWEEN sources only, exactly
+    like translate_pdf()'s between-block polling - copying one source's
+    pages is not interrupted partway. On cancellation, whatever was already
+    inserted is still saved (stats.cancelled=True) rather than discarded,
+    the same "keep the partial result" choice ui/pdf_job.py's caller-facing
+    docs already document for translation runs.
+
+    Raises ValueError (never lets a raw PyMuPDF exception escape) for: an
+    empty `sources` list; a source file that can't be opened (missing,
+    corrupt, encrypted - reported with that source's filename, not a bare
+    traceback); an out-of-range/malformed page spec (via
+    parse_page_selection(), same per-file-named-error treatment); or a
+    combined page selection across every (non-cancelled) source that adds
+    up to zero pages, which PyMuPDF itself refuses to save.
+    """
+    if not sources:
+        raise ValueError("Keine Quelldateien zum Zusammenführen angegeben.")
+
+    output = fitz.open()
+    combined_toc: list[list[object]] = []
+    files_processed = 0
+    segments_done = 0
+    cancelled = False
+    warnings: list[str] = []
+    seen_paths: set[Path] = set()
+    try:
+        for index, source in enumerate(sources):
+            if should_cancel is not None and should_cancel():
+                cancelled = True
+                break
+            if progress_callback is not None:
+                progress_callback(f"Datei {index + 1}/{len(sources)}: {source.path.name}")
+            try:
+                src = fitz.open(str(source.path))
+            except Exception as exc:  # noqa: BLE001 - re-raised as a clear, file-named ValueError below
+                raise ValueError(f'"{source.path.name}" konnte nicht geöffnet werden: {exc}') from exc
+            try:
+                pages = parse_page_selection(source.pages, src.page_count)
+                whole_file = pages == list(range(src.page_count))
+                if not whole_file:
+                    try:
+                        src.select(pages)
+                    except Exception as exc:  # noqa: BLE001 - PyMuPDF's own message is not file-named
+                        raise ValueError(
+                            f'"{source.path.name}": ungültige Seitenauswahl "{source.pages}" ({exc}).'
+                        ) from exc
+                offset = output.page_count
+                src_toc = src.get_toc(simple=True)
+                if src_toc:
+                    combined_toc.extend([level, title, page + offset] for level, title, page in src_toc)
+                elif src.page_count:
+                    label = source.path.name if whole_file else f"{source.path.name} ({source.pages})"
+                    combined_toc.append([1, label, offset + 1])
+                elif not src.page_count:
+                    # Only reachable with an empty (whole-file) page spec
+                    # against a genuinely 0-page PDF - a non-empty spec
+                    # against a 0-page file is already rejected by
+                    # parse_page_selection() above. Contributes nothing,
+                    # not an error by itself, but easy to mistake for "this
+                    # segment did nothing" without a QA-report-visible note.
+                    warnings.append(f'"{source.path.name}" hat keine Seiten - trägt nichts zum Ergebnis bei.')
+                output.insert_pdf(src)
+            finally:
+                src.close()
+            resolved = source.path.resolve()
+            if resolved not in seen_paths:
+                seen_paths.add(resolved)
+                files_processed += 1
+            segments_done += 1
+
+        if output.page_count == 0:
+            raise ValueError("Die Seitenauswahl ergibt zusammen keine einzige Seite.")
+        if combined_toc:
+            output.set_toc(combined_toc)
+        pages_written = output.page_count
+        destination = Path(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        output.save(str(destination))
+    finally:
+        output.close()
+
+    return PdfMergeStats(
+        segments=segments_done,
+        files_processed=files_processed,
+        pages_written=pages_written,
+        cancelled=cancelled,
+        warnings=warnings,
+    )
+
+
+# --- PDFs nach ICO-Kopfbereich durchsuchen (01.09.2026) ---------------------
+#
+# Michael: "Wie sollten wir es machen wenn ich einen Ordner mit 1000 oder
+# mehr PDFs habe aber nur bestimmte von ihnen zusammenführen möchte. [...]
+# Der Developer Name steht ja im oberen geschützten Teil." - ui/merge_search.py
+# is the folder-walk/matching orchestration on top of this; this function is
+# only the per-file extraction, kept here for the same "only file allowed to
+# import PyMuPDF" reason merge_pdfs() above is.
+
+
+def extract_ico_header_text(path: str) -> str | None:
+    """Return page 0's ICO metadata-chunk text (the same "Issuer Address"/
+    "Asset Matrix"-anchored region ico_mode=True excludes from translation
+    - see PyMuPdfEngine.open()'s docstring), or None if page 0 has no
+    FIRST_PAGE_ANCHOR_TERMS match at all - most PDFs are not this internal
+    document type, and that's not an error.
+
+    Deliberately NOT built on PyMuPdfEngine/extract_blocks(): that class's
+    open() snapshots EVERY page's link annotations up front (needed for
+    redaction-safe translation runs, useless here) and extract_blocks()
+    additionally does highlight-rect/link-bbox splitting this search has no
+    use for - all real cost for a function meant to run in a loop over
+    possibly 1000+ files, touching only page 0 of each. Instead calls the
+    same, already-tested `_group_lines_by_x0()`/`_split_first_page_metadata()`
+    building blocks extract_blocks() itself uses for this exact split,
+    directly on one freshly opened+closed document - same boundary logic,
+    without the rest of the engine's per-document setup cost.
+
+    Raises ValueError (never a raw PyMuPDF exception) if `path` can't be
+    opened as a PDF at all (missing, corrupt, encrypted) - the caller
+    (ui/merge_search.py) turns that into a per-file, non-fatal error entry
+    rather than aborting an entire folder scan over one bad file.
+    """
+    try:
+        doc = fitz.open(path)
+    except Exception as exc:  # noqa: BLE001 - re-raised as a clear, file-named ValueError below
+        raise ValueError(f'"{Path(path).name}" konnte nicht geöffnet werden: {exc}') from exc
+    try:
+        if doc.page_count == 0:
+            return None
+        raw = doc[0].get_text("dict", flags=_EXTRACT_FLAGS)
+        chunks: list[str] = []
+        for raw_block in raw.get("blocks", []):
+            if raw_block.get("type") != 0:
+                continue  # skip image blocks
+            lines = raw_block.get("lines", [])
+            if not lines:
+                continue
+            for group in _group_lines_by_x0(lines, _COLUMN_SPLIT_THRESHOLD):
+                subgroups = _split_first_page_metadata(group, FIRST_PAGE_ANCHOR_TERMS)
+                if len(subgroups) == 2:
+                    metadata_part = subgroups[0]
+                    chunks.append("\n".join(_line_text(line.get("spans", [])) for line in metadata_part))
+        return "\n".join(chunks) if chunks else None
+    finally:
+        doc.close()

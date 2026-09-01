@@ -633,3 +633,55 @@ class DocxEngine:
             for info, data in self._archive_entries:
                 data = replacements.get(info.filename, data)
                 archive.writestr(info, data)
+
+
+# --- DOCX-Dateien nach ICO-Kopfbereich durchsuchen (01.09.2026) -------------
+#
+# Michael, im direkten Anschluss an die gleichnamige PDF-Funktion
+# (pipeline/pdf/pymupdf_engine.py::extract_ico_header_text()): "Jetzt noch
+# das ganze für *.docx." ui/word_merge_search.py is the folder-walk/
+# matching orchestration on top of this (mirrors ui/merge_search.py for
+# PDF); this function is only the per-file extraction.
+
+
+def extract_docx_ico_header_text(path: str) -> str | None:
+    """Return the plain text of every body paragraph BEFORE the page-1
+    metadata separator shape (see _has_separator_shape()) - the DOCX
+    counterpart of extract_ico_header_text() in
+    pipeline/pdf/pymupdf_engine.py, same "only the protected metadata
+    region, never the rest of the document" contract. Returns None if no
+    separator shape is found at all (most .docx files are not this
+    internal document type - not an error).
+
+    Deliberately built on the full DocxEngine(ico_mode=True) rather than a
+    bespoke, leaner parser the way extract_ico_header_text() is (see that
+    function's docstring for why it avoids PyMuPdfEngine's overhead): a
+    .docx's word/document.xml plus its header/footer parts are small XML
+    payloads (kilobytes, not the page-by-page image/link scanning PDF's
+    full engine does), so open()'s modest extra header/footer parsing here
+    is not worth hand-rolling a second, separate DOCX parser for - reusing
+    the same, already-tested DocxEngine/_has_separator_shape() this
+    module's translation path already relies on is the safer choice.
+
+    Raises ValueError (never a raw exception) if `path` can't be opened as
+    a .docx at all (missing, corrupt, not actually a .docx) - the caller
+    (ui/word_merge_search.py) turns that into a per-file, non-fatal error
+    entry rather than aborting an entire folder scan over one bad file,
+    exactly like the PDF search's identical error contract.
+    """
+    engine = DocxEngine()
+    try:
+        engine.open(path, ico_mode=True)
+    except Exception as exc:  # noqa: BLE001 - re-raised as a clear, file-named ValueError below
+        raise ValueError(f'"{Path(path).name}" konnte nicht geöffnet werden: {exc}') from exc
+
+    if not engine.separator_found:
+        return None
+
+    metadata_paragraphs = [p for p in engine.get_paragraphs() if not p.translatable]
+    lines = [
+        "".join(run.text for run in paragraph.runs).replace(BREAK_MARKER, " ").strip()
+        for paragraph in metadata_paragraphs
+    ]
+    lines = [line for line in lines if line]
+    return "\n".join(lines) if lines else None

@@ -27,6 +27,8 @@ from ui.document_job_common import (
 )
 from ui.i18n import LOCALES, LanguageManager
 from ui.image_job import ImageBatchJobResult, ImageBatchStats, ImageJobResult
+from ui.merge_dialog import MergeDialog
+from ui.word_merge_dialog import WordMergeDialog
 from ui.models import AnalysisResult, EmbeddedImageMode, TranslationMode, TranslationRequest
 from ui.pdf_job import PdfJobResult
 from ui.pptx_job import PresentationJobResult
@@ -221,6 +223,21 @@ class MainWindow(QMainWindow):
         self.source_label.setWordWrap(True)
         self.choose = QPushButton()
         self.choose.clicked.connect(self._choose_sources)
+        # PDFs zusammenführen/zwischeneinfügen (01.09.2026, Backlog.md
+        # 26.08.2026) - a plain button opening ui/merge_dialog.py's
+        # MergeDialog, deliberately NOT wired through self.mode/MODE_KEYS -
+        # see that dialog's module docstring for why. Always visible/
+        # enabled regardless of the mode combo above: it starts its own,
+        # completely independent flow (no provider, no cost analysis, no
+        # interaction with self.paths/self.last_result at all).
+        self.merge_button = QPushButton()
+        self.merge_button.clicked.connect(self._open_merge_dialog)
+        # DOCX-Gegenstück (01.09.2026, Michael: "Jetzt noch das ganze für
+        # *.docx.") - ui/word_merge_dialog.py's WordMergeDialog, gleiche
+        # Behandlung wie merge_button oben (eigener, unabhängiger Ablauf,
+        # nicht über self.mode/MODE_KEYS geführt).
+        self.word_merge_button = QPushButton()
+        self.word_merge_button.clicked.connect(self._open_word_merge_dialog)
 
         self.image_mode = QComboBox()
         for value in EmbeddedImageMode:
@@ -287,6 +304,8 @@ class MainWindow(QMainWindow):
         self.form = QFormLayout()
         self.form_labels = [QLabel() for _ in range(12)]
         self.form.addRow(self.form_labels[0], self.mode)
+        self.form.addRow("", self.merge_button)
+        self.form.addRow("", self.word_merge_button)
         source_row = QHBoxLayout(); source_row.addWidget(self.source_label, 1); source_row.addWidget(self.choose)
         self.form.addRow(self.form_labels[1], source_row)
         self.form.addRow(self.form_labels[2], self.image_mode)
@@ -482,6 +501,8 @@ class MainWindow(QMainWindow):
             self.inpainting_backend.setItemText(index, t(f"inpainting_backend.{key}"))
         if not self.paths: self.source_label.setText(t("source.none"))
         self.choose.setText(t("source.choose"))
+        self.merge_button.setText(t("merge.button"))
+        self.word_merge_button.setText(t("word_merge.button"))
         self.source_lang.setPlaceholderText(t("source_language.placeholder"))
         self.protected.setPlaceholderText(t("protected.placeholder"))
         self.cost_box.setTitle(t("analysis.group"))
@@ -1194,7 +1215,7 @@ class MainWindow(QMainWindow):
             self._worker = None
         for widget in (
             self.mode, self.choose, self.analyze, self.confirm, self.settings_button, self.provider,
-            self.ico_mode, self.ocr_engine, self.inpainting_backend,
+            self.ico_mode, self.ocr_engine, self.inpainting_backend, self.merge_button, self.word_merge_button,
         ):
             widget.setEnabled(not running)
         self._update_start_state()
@@ -1237,6 +1258,21 @@ class MainWindow(QMainWindow):
         # A key may have been saved even if the dialog was cancelled
         # afterwards (Save key/Cancel are independent), so always refresh.
         self._update_provider_credential_hint()
+
+    def _open_merge_dialog(self) -> None:
+        # Modal (exec(), like SettingsDialog above) - simplest choice for a
+        # v1 that runs no more than one merge job at a time anyway (see
+        # ui/merge_dialog.py); nothing stops this window's own translation
+        # flow from being made to run alongside it later if that turns out
+        # to matter to Michael in practice.
+        dialog = MergeDialog(self.language, self.settings, self)
+        dialog.exec()
+
+    def _open_word_merge_dialog(self) -> None:
+        # DOCX-Gegenstück zu _open_merge_dialog() oben (01.09.2026) - siehe
+        # dort für die Begründung (modal, ein Lauf zur Zeit).
+        dialog = WordMergeDialog(self.language, self.settings, self)
+        dialog.exec()
 
 
 def apply_explicit_palette(app: QApplication) -> None:

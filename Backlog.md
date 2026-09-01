@@ -521,6 +521,11 @@
   Formatierung/Bookmarks/Metadaten der Ergebnisdatei) - keine Umsetzung
   begonnen.
 
+  **Update (01.09.2026, Cowork-Sitzung):** mit Michael konkretisiert (Qt-
+  Oberfläche statt Webapp, Seitenbereiche pro Quelldatei jetzt wählbar) und
+  umgesetzt - siehe "## 01.09.2026 (Cowork-Sitzung) - PDFs zusammenführen/
+  zwischeneinfügen implementiert" unten in "Erledigt".
+
 ## Zu verifizieren
 - [ ] Word-Pfad: PAGE-Feld in footer1.xml sollte sich bei Neuberechnung automatisch aktualisieren, auch wenn das übersetzte Dokument länger wird als das Original - noch nicht an einem tatsächlich länger werdenden Dokument verifiziert (Word aktualisiert Felder nicht immer automatisch beim programmatischen Schreiben, ggf. muss ein Feld-Update erzwungen werden)
 - [x] Prüfen, ob Link-Annotationen (page.get_links()) nach redact_block()/apply_redactions() auf anderen Blöcken derselben Seite technisch erhalten und weiterhin klickbar bleiben (nicht nur der Link-Text unübersetzt, sondern auch die zugrunde liegende Annotation intakt) – war tatsächlich ein realer Bug, jetzt behoben, siehe "Erledigt" unten (17.08.2026, Punkt 1).
@@ -7324,3 +7329,492 @@ scheduleRender()s eigene Debounce-Werte, nie automatisiert getestet).
 vergrössern/verkleinern und beobachten, ob die Vorschau jetzt während
 der Bewegung mehrfach sichtbar aktualisiert statt nur am Ende, und ob
 das "Hängen/Einfrieren" bei schnellem Klicken jetzt weg ist.
+
+## 01.09.2026 (Cowork-Sitzung) - PDFs zusammenführen/zwischeneinfügen implementiert
+
+Michael, auf die Nachfrage "Ist schon das Mergen und einfügen von PDFs
+implementiert?": nein, siehe der "Ideen/später bewerten"-Eintrag vom
+26.08.2026 - noch keine feste Spezifikation, keine Umsetzung begonnen.
+Michael: "Dann lass uns das bitte angehen." Zwei offene Fragen aus diesem
+Eintrag vorab geklärt: Bedienoberfläche in der bestehenden Qt-App (nicht
+in der Webapp, die für PDF-Modus ohnehin noch nicht angebunden ist -
+Webapp-Anbindung bewusst zurückgestellt für einen späteren Schritt) und
+volle Seitenbereichs-Auswahl pro Quelldatei (nicht nur ganze Dateien).
+
+### Umsetzung
+
+- `pipeline/pdf/pymupdf_engine.py` (einziges Modul mit PyMuPDF-Import,
+  siehe dessen eigene Regel dazu): neue Funktionen `parse_page_selection()`
+  (Grammatik: `""`=ganze Datei, `"1-3,5"`, offene Enden `"6-"`/`"-4"`,
+  auch absichtlich umgekehrte Bereiche wie `"5-3"`) und `merge_pdfs()`
+  (Kern der eigentlichen Operation - kopiert pro `MergeSourceSpec` die
+  gewählten Seiten in der angegebenen Reihenfolge in ein neues PDF).
+  "Zwischeneinfügen" ist dabei bewusst KEIN eigener Codepfad, sondern
+  fällt aus derselben geordneten Liste heraus: Datei A einmal mit
+  Seiten "1-4", dann Datei B, dann A nochmal mit "5-" - siehe
+  `test_insert_between_pages_of_the_same_file`. Lesezeichen (TOC) der
+  Quelldateien werden bei einer Teilauswahl korrekt neu nummeriert und im
+  Ergebnis zusammengeführt (empirisch geprüft: `insert_pdf()` überträgt
+  die TOC NICHT automatisch, `Document.select()` passt sie aber pro
+  Quelldatei korrekt an) - eine Quelle ohne eigene TOC bekommt stattdessen
+  ein einzelnes Lesezeichen mit Dateiname(+Seitenbereich), damit jedes
+  Segment über die Gliederung erreichbar bleibt. Abbruch wird zwischen
+  (nicht während) Quelldateien abgefragt, ein Teilergebnis wird trotzdem
+  gespeichert - dasselbe Prinzip wie bei `translate_pdf()`.
+- `ui/merge_job.py`: Ziel-Sicherheitsprüfung (nur "identisch mit einer
+  Quelldatei" wird abgelehnt) plus `validate_merge_sources()` für die
+  Live-Validierung im Dialog. Bewusst NICHT auf `TranslationRequest`/
+  `self.mode` aufgesetzt (siehe Moduldocstring): keine Kosten, kein
+  Anbieter, keine Analyse-/Bestätigungspflicht - das RoadMap-Leitprinzip
+  dazu betrifft ausdrücklich nur kostenpflichtige Läufe. Anders als bei
+  den Übersetzungs-Jobs darf eine bereits existierende Zieldatei
+  überschrieben werden (der native "Datei ersetzen?"-Dialog beim
+  Speichern-unter fragt das schon selbst ab).
+- `ui/merge_dialog.py`: eigenständiger `QDialog`
+  ("PDFs zusammenführen / einfügen …", neuer Button in `ui/app.py` neben
+  dem Modus-Dropdown, unabhängig von `self.mode`) mit Tabelle
+  (Datei + Seitenauswahl-Feld pro Zeile), Hinzufügen/Entfernen/Nach oben/
+  Nach unten, Zieldatei-Auswahl und Start/Abbrechen über einen eigenen
+  `MergeWorker` (`ui/workers.py`, eigene `MergeSignals` statt der
+  Übersetzungs-`TranslationSignals`, da kein `stats`/`total` existiert).
+  Bewusst ein separater Dialog statt eines neuen `self.mode`-Werts (siehe
+  Moduldocstring): `_mode_changed()`/`_analyze()`/`_start()` sind
+  vollständig auf den Ein-Datei-plus-Anbieter-Ablauf zugeschnitten, ein
+  Umbau dafür hätte ein deutlich höheres Regressionsrisiko gehabt als ein
+  neuer, komplett unabhängiger Dialog.
+- Neue i18n-Schlüssel (`merge.*`) in `ui/i18n_data.py`, DE und EN
+  vollständig (siehe `test_ui_i18n.py`'s Schlüssel-Paritätstest).
+
+### Getestet
+
+`tests/test_pdf_merge.py` (22 Tests: Seitenauswahl-Parsing inkl.
+Fehlerfälle, Merge ganzer/teilweiser Dateien, Zwischeneinfügen, TOC-
+Aufbau, Abbruch mit Teilergebnis, fehlende/kaputte Quelldatei) und
+`tests/test_ui_merge_job.py` (9 Tests: Validierung, Ziel-Sicherheits-
+prüfung, Überschreiben erlaubt). Zwei kleine, synthetische Fixture-PDFs
+dafür angelegt (`tests/fixtures/merge_source_a.pdf`/`_b.pdf`, je mit
+eindeutigem Seiteninhalt zum Prüfen der Reihenfolge). `MainWindow` und
+`MergeDialog` zusätzlich unter `QT_QPA_PLATFORM=offscreen` konstruiert
+und ein kompletter Merge-Lauf über den echten `MergeWorker` (synchron statt
+über den `QThreadPool`, für den Test) durchgespielt - Ergebnisdatei geprüft
+(Seiteninhalt, -reihenfolge, TOC). Zur Regressionsabsicherung zusätzlich
+die bestehenden, durch die `ui/app.py`-/`ui/workers.py`-Änderungen
+potenziell betroffenen Suiten erneut grün: `test_ui_i18n.py`,
+`test_ui_models.py`, `test_ui_enum_identity.py`,
+`test_document_job_common.py`, `test_credentials.py`, `test_pdf_job.py`,
+`test_ui_settings_persistence.py`, `test_ui_theme.py`,
+`test_ui_provider_credentials.py`, `test_ui_images_mode.py`,
+`test_ui_word_mode.py`, `test_ui_pdf_correction.py`,
+`test_pdf_correction_job.py` (insgesamt 117 Tests, alle grün). NICHT
+gegen die volle Suite gelaufen (`test_image_*`/`test_translate_image.py`
+brauchen OCR-/GPU-Abhängigkeiten, die in dieser Cowork-Sitzung nicht
+installiert wurden) - von dieser Änderung unberührt, da weder
+`pipeline/images/` noch dessen Tests angefasst wurden.
+
+### Offen / bewusst nicht umgesetzt
+
+- Webapp-Anbindung (siehe oben) - nur die Qt-Oberfläche ist verbunden.
+- Metadaten der Ergebnisdatei (Titel/Autor) bleiben leer (PyMuPDF-
+  Standard) statt von einer Quelldatei übernommen zu werden - siehe
+  `merge_pdfs()`s Docstring für die Begründung; falls Michael dazu eine
+  konkrete Erwartung hat, einfach melden.
+- Kein automatischer Build-/Installer-Bezug (siehe
+  `deployment-strategie-27-08-2026.md`) - reine Feature-Umsetzung, keine
+  Auswirkung auf die dort besprochene Deployment-Strategie.
+- Noch nicht auf einem echten Rechner mit echten mehrseitigen PDFs (mit
+  Formularen/Verschlüsselung/eingebetteten Schriften) durchgespielt -
+  bitte bei Gelegenheit ein paar echte Dateien durchprobieren, v. a.
+  Link-Erhalt über `insert_pdf()`s Standardverhalten wurde nur an den
+  synthetischen Test-PDFs verifiziert.
+
+## 01.09.2026 (Cowork-Sitzung, Fortsetzung) - "Ordner durchsuchen": PDFs nach ICO-Kopfbereich (z. B. Developer-Name) filtern und in Massen zum Merge hinzufügen
+
+Direkte Anschlussfrage an den Merge/Insert-Eintrag von eben: "Können wir
+eine Liste von PDFs zusammenfügen? Wie sollten wir es machen wenn ich
+einen Ordner mit 1000 oder mehr PDFs habe aber nur bestimmte von ihnen
+zusammenführen möchte. Zum Beispiel eines bestimmten Developers in den
+ICO PDFs. Der Developer Name steht ja im oberen geschützten Teil. Das
+wird vielleicht auch nur einmal am Anfang benutzt uns später nicht mehr.
+Aber ich hätte gerne eine solide Lösung." Zwei Rückfragen vorab geklärt:
+Suchbereich ausschließlich der ICO-Kopfbereich (nicht ganze Seite 1, nicht
+ganzes Dokument - dieselbe Fläche, die der bestehende "ICO-Dokument"-
+Modus bereits als geschützt erkennt), und Unterordner-Rekursion als
+Checkbox im Dialog statt fest verdrahtet.
+
+### Umsetzung
+
+- `pipeline/pdf/pymupdf_engine.py`: neue Funktion `extract_ico_header_text()`
+  - liefert NUR den Text des ICO-Metadaten-Chunks einer Seite 0 (derselbe
+    Bereich, den `ico_mode=True` von der Übersetzung ausschließt), `None`
+    wenn kein Anker (`FIRST_PAGE_ANCHOR_TERMS`) gefunden wurde. Bewusst
+    NICHT über `PyMuPdfEngine`/`extract_blocks()` gebaut (das würde beim
+    Öffnen unnötig JEDE Seite nach Links durchsuchen, für eine reine
+    Textsuche über 1000+ Dateien spürbarer Overhead), sondern direkt auf
+    den bereits getesteten Bausteinen `_group_lines_by_x0()`/
+    `_split_first_page_metadata()` - dieselbe Grenzlogik, ohne den Rest
+    des Engine-Overheads. Am realistischen Fixture-Muster aus
+    `tests/test_pdf_ico_mode.py` verifiziert (eigene, künstlich gebaute
+    Fixtures mit `insert_textbox()`/gleichmäßigem `insert_text()` bildeten
+    die reale Block-Aufteilung NICHT korrekt nach - siehe Testdatei-
+    Docstring dort).
+- `ui/merge_search.py` (neu): `find_pdf_files()` (rekursiver/flacher
+  Ordner-Scan nach `*.pdf`, gross-/kleinschreibungs-unabhängig) und
+  `find_pdfs_matching()` - leerer Suchtext = alle gefundenen PDFs (keine
+  Datei wird dafür überhaupt geöffnet, reiner Dateisystem-Scan), sonst
+  Substring-Vergleich (case-insensitive) NUR gegen
+  `extract_ico_header_text()`. Ein Treffer erwähnt einen anderen
+  Developer nur im Fließtext -> KEIN Treffer (per Test abgesichert).
+  Fortschritt ist deterministisch (Gesamtzahl steht vorher fest, da der
+  Ordner-Scan komplett vor dem ersten Datei-Öffnen läuft), Abbruch
+  zwischen Dateien, nicht lesbare Dateien werden gesammelt statt den
+  ganzen Scan abzubrechen.
+- `ui/merge_search_dialog.py` (neu): `MergeSearchDialog` - Ordner wählen,
+  "Inkl. Unterordner"-Checkbox, Suchtext, Start/Abbrechen über einen
+  eigenen `IcoSearchWorker` (`ui/workers.py`, determinierter
+  Fortschrittsbalken dank bekannter Gesamtzahl), Ergebnisliste mit
+  Checkboxen UND dem gefundenen Textausschnitt pro Treffer zur Kontrolle
+  (nichts landet ungeprüft in der Merge-Liste), "Alle/Keine auswählen".
+  Aufgerufen über einen neuen "Ordner durchsuchen …"-Button in
+  `ui/merge_dialog.py`, übernimmt die angehakten Treffer als ganze
+  Dateien (ohne Seitenauswahl) in die bestehende Merge-Tabelle - keine
+  Deduplizierung gegen bereits vorhandene Zeilen, aus demselben Grund wie
+  beim normalen "Dateien hinzufügen" (dieselbe Datei zweimal ist der
+  unterstützte Zwischeneinfügen-Fall, kein Bug).
+
+### Getestet
+
+`tests/test_pdf_ico_header_search.py` (4 Tests: Metadaten-Chunk korrekt
+isoliert vom übrigen Seiteninhalt, unterscheidbare Developer-Namen, kein
+Treffer ohne Anker, fehlende Datei) und `tests/test_ui_merge_search.py`
+(9 Tests: rekursiv/flach, leerer Suchtext = alles ohne Datei-Öffnen,
+Filter greift nur auf den Kopfbereich, Groß-/Kleinschreibung, kein
+Treffer bei Erwähnung nur im Fließtext, kaputte Datei wird als Fehler
+statt Absturz behandelt, Fortschritt, Abbruch mit Teilergebnis) - macht
+zusammen mit den bereits bestehenden 31 Merge-Tests jetzt 44 neue Tests
+für PDFs-zusammenführen/durchsuchen insgesamt. Zusätzlich end-to-end
+unter `QT_QPA_PLATFORM=offscreen` durchgespielt: echter Ordner-Scan über
+den echten `IcoSearchWorker`, Treffer in die Merge-Tabelle übernommen,
+echter Merge-Lauf über den echten `MergeWorker` - Ergebnisdatei geprüft
+(2 Seiten aus den 2 gefundenen Dateien). Komplette bisherige
+Regressionsauswahl von eben (142 Tests) erneut grün.
+
+### Offen
+
+- Wie beim Merge selbst: noch nicht an echten ICO-PDFs mit 1000+ Dateien
+  in einem echten Ordner ausprobiert - nur an synthetischen Fixtures. Die
+  reale Laufzeit bei 1000+ Dateien (jede wird für eine nicht-leere Suche
+  einzeln geöffnet, nur Seite 0) ist noch nicht auf dem echten Rechner
+  gemessen worden.
+- Kein Persistieren der zuletzt benutzten Suchtexte (nur Ordner wird wie
+  gewohnt über `QSettings` gemerkt).
+
+## 01.09.2026 (Cowork-Sitzung, Fortsetzung 2) - Google-Drive-Ordnersuche als Quelle neben dem lokalen Ordner
+
+Direkte Anschlussfrage: "Können wir eine Google Drive Ordner
+durchsuchen?" Auf Rückfrage geklärt: fest als App-Feature (nicht nur
+einmalig hier im Chat durchsucht), im SELBEN Dialog wie die lokale
+Ordnersuche über einen Umschalter statt einem eigenen Fenster, und
+heruntergeladene Treffer bleiben in einem vom Nutzer gewählten
+Cache-Ordner liegen statt danach gelöscht zu werden.
+
+### Umsetzung
+
+- `pipeline/drive_auth.py` (neu): einzige Datei im Projekt, die
+  `google-auth`/`google-auth-oauthlib`/`google-api-python-client`
+  importieren darf - exakt dieselbe Exklusivitäts-Regel wie
+  `pymupdf_engine.py` für PyMuPDF. OAuth-"Installed app"-Flow (Scope
+  `drive.readonly` - bewusst nicht das engere `drive.file`, das eine
+  Google-Picker-Integration bräuchte, siehe Moduldocstring),
+  Zugangsdaten (Client-ID/-Secret/Refresh-Token) über
+  `pipeline/credentials.py`s bestehenden Keyring-Mechanismus (neue
+  `get_google_drive_*()`-Helfer dort plus `has_api_key()`/
+  `delete_api_key()`, da Drive - anders als die vier reinen
+  API-Key-Provider - drei UI-relevante Zustände hat: nicht
+  konfiguriert / konfiguriert-nicht-verbunden / verbunden).
+  `DriveClient` (dünner Wrapper: `resolve_folder()`,
+  `list_children()` mit Paginierung, `download()`, `whoami()`) kapselt
+  die eigentlichen API-Aufrufe hinter einfachen `DriveEntry`/str/bytes-
+  Formen, damit `ui/drive_search.py` (und dessen Tests) NIE echte
+  Google-SDK-Objekte anfassen muss - nur einen handgeschriebenen Fake
+  mit denselben drei Methoden. `_execute_with_retry()` fängt
+  transiente 403/429/5xx-Fehler mit Backoff ab (bei 1000+ Dateien über
+  entsprechend viele API-Aufrufe realistisch).
+- `ui/drive_search.py` (neu): `find_drive_pdfs_matching()` - Drive-
+  Pendant zu `find_pdfs_matching()`. Der Ordnerbaum wird zuerst
+  komplett (rekursiv nur bei aktivierter Checkbox) eingelesen
+  (Metadaten-Aufrufe, billig auch bei 1000+ Dateien), damit der
+  Fortschrittsbalken von Anfang an eine feste Gesamtzahl kennt - genau
+  wie beim lokalen Scan. Jede gefundene PDF wird sofort probeweise in
+  ein Temp-Verzeichnis heruntergeladen (ein Download ist bei Drive,
+  anders als beim lokalen Lesen, unumgänglich, um den Kopfbereich
+  überhaupt prüfen zu können): Treffer (oder bei leerem Suchtext -
+  siehe unten - jede Datei) werden von dort in den Cache-Ordner
+  verschoben und bleiben liegen, Nicht-Treffer werden sofort verworfen
+  - der Cache-Ordner enthält damit ausschließlich tatsächlich
+  relevante Dateien, keine Karteileichen. Namenskollisionen zwischen
+  zwei Treffern (unterschiedliche Unterordner, gleicher Dateiname)
+  werden über einen Zähler-Suffix aufgelöst, nie stillschweigend
+  überschrieben (per Test abgesichert). `extract_folder_id()` löst
+  sowohl den vollen Freigabelink als auch die reine Ordner-ID auf, mit
+  einer für den Nutzer direkt verständlichen Fehlermeldung.
+  Bewusste Vereinfachungen für diese erste Version, im Moduldocstring
+  begründet und nicht stillschweigend übergangen:
+  - Bei leerem Suchtext ("ganzen Ordner übernehmen") wird trotzdem
+    sofort ALLES heruntergeladen statt erst beim tatsächlichen
+    Übernehmen der Auswahl - vermeidet eine zweite, komplexere
+    Zwei-Phasen-Architektur für einen Fall, der laut Nutzer ohnehin
+    die Ausnahme ist ("nur bestimmte von ihnen" war die eigentliche
+    Fragestellung).
+  - Kein Vorfilter über Drives eigene `fullText contains`-Suche vor
+    dem Download. Würde bei 1000+ Dateien Downloads sparen, sucht aber
+    über das GESAMTE Dokument statt nur den Kopfbereich - genau der
+    Fehler, den die lokale Suche bewusst vermeidet. Als möglicher
+    künftiger Geschwindigkeits-Ausbau festgehalten (Kandidaten-
+    Vorauswahl, die anschließend trotzdem exakt verifiziert würde),
+    nicht umgesetzt, um die Standardkorrektheit nicht von einer
+    Heuristik zur Bedingung zu machen ("eine solide Lösung", so der
+    Nutzer wörtlich).
+- `ui/merge_search_dialog.py`: Umschalter (`source_local_radio`/
+  `source_drive_radio`) plus `QStackedWidget` mit den quellenspezifischen
+  Feldern; Suchtext, Rekursiv-Checkbox, Fortschritt, Ergebnisliste und
+  Übernehmen/Schließen-Knöpfe bleiben gemeinsam (quellenunabhängiges
+  Verhalten). Drive-Bereich: Ordnerlink/-ID-Feld mit "Prüfen"-Knopf (löst
+  vorab auf und zeigt den gefundenen Ordnernamen zur Kontrolle, bevor ein
+  potenziell langer Scan startet), Cache-Ordner-Wahl, sowie eine eigene,
+  kleine Zugangsdaten-Maske (Client-ID/-Secret einfügen + "Mit Google
+  verbinden"/"Trennen") statt Mitbenutzung von `ui/app.py`s bestehendem
+  Zugangsdaten-Dialog - dessen `provider`-Auswahl ist an
+  `TranslationRequest.provider` gekoppelt und ausschließlich für
+  Übersetzungs-Provider gedacht, Drive ist keiner. Verbindungsstatus
+  (`is_configured()`/`is_connected()`) ist reiner Keyring-Check ohne
+  Netzwerkaufruf - erst "Prüfen" oder "Suchen" lösen tatsächlich einen
+  Token-Refresh aus, nicht das bloße Öffnen des Dialogs.
+  `ui/workers.py`: `DriveSearchWorker` (spiegelt `IcoSearchWorker`) und
+  `DriveConnectWorker` (führt `connect_interactively()` - blockiert auf
+  einem lokalen Loopback-Server für den Browser-Redirect - im
+  Hintergrund aus, sonst würde die komplette UI einfrieren).
+- `docs/google_drive_setup.md` (neu): Schritt-für-Schritt-Anleitung zum
+  Anlegen des Google-Cloud-OAuth-"Desktop app"-Clients - kann die App
+  nicht selbst automatisieren, Google verlangt einen selbst
+  registrierten Client pro Anwendung.
+- `requirements.txt`: `google-api-python-client`,
+  `google-auth-httplib2`, `google-auth-oauthlib` ergänzt.
+
+### Getestet
+
+`tests/test_drive_auth.py` (23 Tests: Konfigurations-/Verbindungsstatus
+über alle drei Zustände, `_execute_with_retry()`s Backoff- und
+Aufgabe-Verhalten gegen einen Request-Stub, `DriveClient` komplett gegen
+einen handgeschriebenen Fake-Service - Ordner auflösen inkl. Ablehnung
+von Nicht-Ordnern/Papierkorb, paginierte `list_children()`, `download()`,
+`whoami()`) und `tests/test_ui_drive_search.py` (21 Tests:
+Ordnerlink-/ID-Erkennung, Kollisions-Auflösung im Cache-Ordner, leerer
+vs. gefüllter Suchtext, Groß-/Kleinschreibung, Nicht-Treffer werden NICHT
+im Cache behalten, rekursiv/flach, Download-Fehler pro Datei werden
+gesammelt statt die Suche abzubrechen, Listing-Fehler bricht nicht ab,
+Fortschritt mit stabiler Gesamtzahl, Abbruch mit Teilergebnis) - beide
+komplett ohne echtes Google-Konto, gegen handgeschriebene Fakes (siehe
+`DriveClientProtocol`), die echten PDF-Fixtures aus der lokalen
+ICO-Kopfbereich-Suche wiederverwendend. Zusätzlich ad hoc (nicht als
+Testdatei persistiert, wie schon beim `IcoSearchWorker`-Smoke-Test der
+lokalen Suche) unter `QT_QPA_PLATFORM=offscreen` durchgespielt: kompletter
+Dialog-Durchlauf über den echten `MergeSearchDialog` mit simuliertem
+Drive-Service - Ordner auflösen, Suchen, Treffer landen als echte lokale
+Datei im Cache-Ordner, `selected_paths()` liefert den korrekten Pfad.
+Gesamter Testlauf am Ende: 186 passed (vorher 142).
+
+### Offen / bewusst nicht umgesetzt
+
+- Nicht gegen ein echtes Google-Konto/echten Drive-Ordner getestet -
+  `connect_interactively()` öffnet einen echten Systembrowser und
+  blockiert auf einem lokalen Loopback-Server für den OAuth-Redirect,
+  das kann grundsätzlich nur auf einem echten Rechner mit echtem
+  Google-Konto laufen, nie in dieser Sandbox. Vor dem ersten echten
+  Einsatz: den in `docs/google_drive_setup.md` beschriebenen Google-
+  Cloud-OAuth-Client selbst anlegen, Client-ID/-Secret im Programm
+  hinterlegen, "Mit Google verbinden" klicken.
+- Kein Vorfilter über Drives `fullText contains`-Suche (siehe oben,
+  bewusste Entscheidung für Korrektheit statt Geschwindigkeit bei sehr
+  großen Ordnern mit leerem Suchtext).
+- Kein automatisches Aufräumen des Cache-Ordners - Downloads bleiben
+  dauerhaft liegen (Nutzerentscheidung), müssen bei Bedarf manuell
+  gelöscht werden.
+- Freigegebene Laufwerke ("Shared Drives") werden in den API-Aufrufen
+  zwar berücksichtigt (`supportsAllDrives`/`includeItemsFromAllDrives`),
+  aber nicht gegen ein echtes Shared Drive verifiziert.
+- Kein Persistieren der zuletzt benutzten Client-ID im UI-Feld (bewusst -
+  das Secret-Feld wird nach jedem Speichern geleert, ein persistiertes
+  Client-ID-Feld ohne das zugehörige Secret wäre nur halb hilfreich).
+
+## 01.09.2026 (Cowork-Sitzung, Fortsetzung 3) - Dasselbe für DOCX: Zusammenführen, ICO-Ordnersuche und Google-Drive-Suche
+
+Michael, direkt im Anschluss an die drei vorangegangenen PDF-Runden: "Jetzt
+noch das ganze für *.docx. Kann man überhaupt mittlerweile ca. 2000 docx
+zusammenführen?" Auf Rückfrage bestätigt: (1) volle Parität zum PDF-Weg,
+inklusive Google-Drive-Suche; (2) nur ganze Dateien zusammenführen, keine
+Seiten-/Abschnittsauswahl pro Quelldatei (DOCX kennt anders als PDF keine
+feste Seitenzahl im Dateiformat selbst - das ist ein Rendering-Konzept,
+abhängig von Betrachter/Drucker/installierten Schriften); (3) für sehr
+große Mengen automatisch batchen, nicht manuell.
+
+Zur zweiten Frage: keine öffentlich dokumentierten Berichte gefunden, dass
+jemand mit den hier verfügbaren Bibliotheken (python-docx +
+[`docxcompose`](https://pypi.org/project/docxcompose/), 4teamwork, aktiv
+gepflegt) in der Größenordnung 1000-2000 einzelner .docx-Dateien
+zusammengeführt hat - öffentlich belegt ist im Wesentlichen nur ein
+niedriger zweistelliger Bereich. Kein Hinweis auf eine harte technische
+Obergrenze, aber auch keine Garantie; Details siehe "Offen" unten.
+
+### Umsetzung
+
+**Merge-Engine** (`pipeline/word/merge.py`, neu - einzige Datei mit
+`docx`-/`docxcompose`-Import, dieselbe Import-Exklusivität wie
+`pymupdf_engine.py` für PyMuPDF/`pipeline/drive_auth.py` für die
+Google-APIs): `merge_docx_files(sources, destination, batch_size=100,
+progress_callback, should_cancel) -> WordMergeStats`. Zwei bewusste
+Abweichungen vom PDF-Pendant `merge_pdfs()`:
+- Zwischen je zwei zusammengeführten Dokumenten wird ein Seitenumbruch
+  eingefügt (`add_page_break()`) - DOCX hat anders als PDF keine
+  automatische Seitengrenze zwischen zusammengefügten Inhalten.
+- Eine Quelldatei, die sich öffnen lässt, aber beim Anhängen selbst
+  scheitert (bekannte `docxcompose`-Grenzen: SmartArt, bestimmte
+  Textboxen, defekte komplexe Feld-Strukturen), bricht den gesamten Lauf
+  NICHT ab, sondern wird übersprungen und als Warnung protokolliert -
+  bewusste Abweichung von `merge_pdfs()`s strikter Alles-oder-Fehler-
+  Politik: bei der hier explizit anvisierten Größenordnung (1000-2000
+  Dateien) wäre ein mehrstündiger Lauf wegen einer einzelnen
+  inkompatiblen Datei unverhältnismäßig teuer. Eine Datei, die sich gar
+  nicht erst öffnen lässt, bricht dagegen weiterhin den ganzen Lauf ab
+  (wie bei PDF) - das ist fast immer ein Problem der Quell-Liste selbst.
+
+**Batching** (Michaels dritte Bestätigung, "automatisch batchen"): ab mehr
+als `batch_size` Dateien (Standard 100) läuft der Merge zweistufig -
+Quelldateien werden in `batch_size`-große Gruppen zerlegt, jede Gruppe
+wird zu einer temporären Zwischendatei zusammengeführt, und diese
+Zwischendateien werden anschließend selbst zusammengeführt. Grund: keine
+der verfügbaren Bibliotheken unterstützt Streaming/inkrementelles
+Zusammenführen (alles läuft im Arbeitsspeicher), daher hält diese zweite
+Stufe die kumulative Style-/Nummerierungs-Buchführung von `docxcompose`
+für jeweils nur eine Gruppe (statt aller 2000 Originale) gleichzeitig im
+Speicher, und ein Absturz mitten im Lauf lässt bereits fertige
+Zwischendateien als gültige, prüfbare .docx-Dateien zurück (zumindest für
+die Dauer des Laufs - danach räumt `TemporaryDirectory` sie wieder auf).
+
+Dabei ein echter Bug beim eigenen Testen gefunden und behoben, bevor er
+Michael je begegnet wäre: Abbrechen mitten in einem zweistufigen Lauf
+verwarf ursprünglich jede bereits fertige Gruppe außer der ersten - Ursache
+war, dass `should_cancel` in der echten Nutzung ein `threading.Event` ist,
+das einmal gesetzt GESETZT BLEIBT; wurde es an die zweite ("Zwischen-
+ergebnisse zusammenführen")-Stufe weitergereicht, brach diese sofort ab,
+noch bevor sie die bereits fertigen Zwischendateien überhaupt öffnete. Fix:
+die zweite Stufe bekommt bewusst `should_cancel=None` - das Konsolidieren
+bereits fertiger Zwischendateien ist schnelle, klar begrenzte Arbeit und
+läuft deshalb nach dem Start immer bis zum Ende durch, statt selbst
+unterbrechbar zu sein. Ein Abbruch mitten im Lauf behält so alles, was bis
+zu diesem Zeitpunkt fertig war - nicht nur die erste Gruppe. Eigene
+Regressionstest dafür: `test_cancellation_after_the_first_batch_keeps_every_completed_batch`.
+
+**ICO-Kopfbereich-Erkennung für DOCX**
+(`pipeline/word/docx_engine.py::extract_docx_ico_header_text()`, neu) -
+nutzt das bereits vorhandene `DocxEngine(ico_mode=True)` (erkennt die
+ICO-Metadaten-/Inhalts-Grenze über eine `<a:prstGeom
+prst="straightConnector1">`-Trennform, siehe `_has_separator_shape()`) und
+gibt den Text aller Absätze VOR dieser Trennform zurück - das DOCX-
+Gegenstück zu `extract_ico_header_text()` (PDF), nur nicht an "Seite 1"
+gebunden (DOCX hat keine Seiten im Dateiformat), sondern an "Absätze vor
+dem Trennelement am Dokumentanfang".
+
+**Wiederverwendung statt Duplikat** für die reine Scan-/Filter-Logik:
+`ui/merge_search.py` und `ui/drive_search.py` wurden auf generische,
+formatunabhängige Kernfunktionen umgebaut
+(`find_files_by_extension()`/`find_matching()` bzw.
+`find_drive_matching()`/`_unique_destination()`, jetzt mit
+`extension`/`file_mime_type`/`extractor`-Parametern), `list_children()` in
+`pipeline/drive_auth.py` bekam einen `file_mime_type`-Parameter dazu. Die
+ursprünglichen PDF-Funktionsnamen (`find_pdf_files()`,
+`find_pdfs_matching()`, `find_drive_pdfs_matching()`) bleiben als dünne,
+verhaltensgleiche Wrapper erhalten (durch die komplette bestehende
+PDF-Testsuite unverändert abgesichert) - `find_docx_files()`,
+`find_docx_files_matching()`, `find_drive_docx_matching()` sind die neuen
+DOCX-Wrapper darüber.
+
+**UI-Schicht** (eigene Dateien statt Parametrisierung der PDF-Dialoge -
+konsistent mit dem bestehenden Muster `ui/word_job.py`/`ui/pdf_job.py`,
+`WordTranslationWorker`/`PdfTranslationWorker`: format-spezifische
+UI-Klassen, die zugrunde liegende reine Logik ist der geteilte Teil):
+- `ui/word_merge_job.py` (neu) - Zielsicherheits-/Vorprüfungs-Schicht wie
+  `ui/merge_job.py`, ohne jedes Seitenauswahl-Konzept (siehe oben).
+- `ui/word_merge_dialog.py` (neu) - wie `MergeDialog`, aber die
+  Quell-Tabelle hat nur eine Spalte (Dateiname, keine "Seiten"-Spalte) und
+  die Ergebniszeile zeigt Segmente/Dateien/Gruppen sowie - neu, PDF-Pfad
+  kennt das nicht - eine Liste übersprungener Dateien bei
+  Anhäng-Warnungen.
+- `ui/word_merge_search_dialog.py` (neu) - wie `MergeSearchDialog`
+  (gleicher Quellen-Umschalter Lokal/Google-Drive, dieselbe
+  Drive-Zugangsdaten-/Verbindungs-Maske, dasselbe Cache-Ordner-Verhalten),
+  nur mit den DOCX-Suchfunktionen darunter.
+- `ui/workers.py`: `WordMergeWorker`/`WordMergeSignals`,
+  `WordIcoSearchWorker`, `WordDriveSearchWorker` dazu -
+  `DriveConnectWorker` (Google-Verbindung) bleibt unverändert
+  gemeinsam genutzt, da die Google-Auth-Ebene formatunabhängig ist.
+  `docxcompose` zu `requirements.txt` ergänzt.
+- Neuer, immer sichtbarer Knopf "DOCX-Dateien zusammenführen / einfügen …"
+  in `ui/app.py`, gleich behandelt wie der bestehende PDF-Knopf (eigener,
+  unabhängiger Ablauf, nicht über `self.mode`/`MODE_KEYS` geführt).
+- i18n (`ui/i18n_data.py`): neuer `word_merge.*`/`word_merge_search.*`
+  Block nur für die Strings, die sich inhaltlich vom PDF-Pendant
+  unterscheiden (Titel, Seitenkonzept-freie Formulierungen,
+  Batch-/Warnungs-Zusammenfassung, "Seite 1" -> "Dokumentanfang" in der
+  Such-Beschriftung) - alles Formatunabhängige (Knöpfe, Zieldatei-Auswahl,
+  Drive-Block, ...) nutzt weiterhin dieselben `merge.*`/`merge_search.*`
+  Keys, wie es `job.*` bereits projektweit für PDF/Word/PPTX gemeinsam
+  tut. DE/EN-Parität geprüft (260/260 Keys).
+
+### Getestet
+
+`tests/test_word_merge.py` (15 Tests: Reihenfolge, Seitenumbrüche,
+Dedup-Zählung, leere Liste, Ziel-Ordner wird angelegt, harter Abbruch bei
+nicht öffenbarer Quelle, weicher Überspring bei Anhäng-Fehler via
+`Composer.append`-Monkeypatch, Batching-Schwellwerte, und die beiden
+kritischen Abbruch-Regressionstests für den zweistufigen Pfad),
+`tests/test_docx_ico_header_search.py` (4 Tests, spiegelt die PDF-ICO-
+Kopfbereich-Tests exakt), `tests/test_ui_word_merge_search.py` (3 Tests,
+lokale DOCX-Wrapper), `tests/test_ui_word_drive_search.py` (3 Tests,
+DOCX-Drive-Wrapper, u. a. dass tatsächlich der DOCX-Mime-Type angefragt
+wird statt PDF), `tests/test_ui_word_merge_job.py` (10 Tests,
+Vorprüfung/Zielsicherheit inkl. Batch-Weiterreichung). Zusätzlich ad hoc
+(nicht als Testdatei persistiert, wie bei den vorherigen drei Runden)
+unter `QT_QPA_PLATFORM=offscreen` durchgespielt: `MainWindow` baut mit dem
+neuen Knopf, `WordMergeDialog`/`WordMergeSearchDialog` konstruieren und
+übersetzen sich in beiden Sprachen korrekt, `WordMergeWorker.run()`
+direkt aufgerufen (ohne `QThreadPool`) führt drei echte .docx-Dateien
+zusammen und liefert ein korrektes `WordMergeJobResult`, die
+Statuszeilen-Formatierung (Gruppen-/Warnungs-Suffix, Abbruch-Variante) in
+beiden Sprachen geprüft, die Such-Ergebnisliste inkl. `selected_paths()`
+gegen ein simuliertes Ergebnis geprüft. Gesamter Testlauf am Ende: 222
+passed (vorher 186).
+
+### Offen / bewusst nicht umgesetzt
+
+- Nicht gegen einen echten Korpus von ~2000 realen .docx-Dateien getestet
+  - weder Laufzeit noch Speicherbedarf noch die tatsächliche
+    `docxcompose`-Kompatibilitätsrate wurden an echten Dokumenten dieser
+    Größenordnung gemessen. `batch_size=100` ist eine bewusst
+    konservative, aber ungemessene Annahme (siehe
+    `pipeline/word/merge.py`s Docstring), keine belegte Grenze - vor dem
+    ersten produktiven ~2000-Datei-Lauf empfiehlt sich ein Testlauf mit
+    einer repräsentativen Teilmenge, inklusive Beobachtung von Warnungen
+    (übersprungene Dateien) und Ergebnisqualität (Formatierung/Nummerierung
+    an den Übergängen).
+  - Formatierungstreue über sehr viele Quellen hinweg (Nummerierung,
+    Kopf-/Fußzeilen - laut `docxcompose`-Dokumentation überlebt ohnehin nur
+    die Kopf-/Fußzeile des ERSTEN Dokuments, jede weitere wird verworfen)
+    ist eine bekannte Bibliotheksgrenze, keine App-Entscheidung - nicht
+    weiter untersucht, da Michael "ganze Dateien reichen" bereits als
+    ausreichend bestätigt hat.
+- Kein manueller Live-Test mit einem echten Google-Drive-Ordner voller
+  .docx-Dateien - die zugrunde liegende Drive-Suche selbst ist bereits
+  über die PDF-Runde ausführlich (Fakes) getestet, nur der DOCX-
+  Mime-Filter ist neu und dafür gezielt getestet (siehe oben).
+- `batch_size` ist keine UI-Einstellung (bewusst - Michael bestätigte
+  automatisches Batchen, keine manuell zu tunende Option).

@@ -17,3 +17,14 @@ qtpy
 # dieser Fehler beim Installieren auftritt: vorher
 # `pip install --upgrade setuptools` ausführen und danach erneut
 # installieren.
+# Google-Drive-Ordnersuche (01.09.2026, pipeline/drive_auth.py - siehe
+# dessen Docstring für die Import-Exklusivität): OAuth-"Installed app"-
+# Flow plus die Drive-v3-API. Nur in dieser einen Datei importiert.
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+# DOCX-Zusammenführung (01.09.2026, pipeline/word/merge.py - siehe dessen
+# Docstring für die Import-Exklusivität): baut auf python-docx (oben) auf
+# und übernimmt numId/abstractNumId- sowie Style-Namens-Remapping beim
+# Anhängen von Dokumenten. Nur in pipeline/word/merge.py importiert.
+docxcompose

@@ -3,19 +3,25 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
+from typing import Sequence
 
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
+from pipeline.pdf.pymupdf_engine import MergeSourceSpec
 from pipeline.pdf.translate_pdf import PdfTranslationStats
 from pipeline.presentation.translate_presentation import PresentationTranslationStats
 from pipeline.translation.cost_control import PricingModel
 from pipeline.word.translate_document import TranslationStats as WordTranslationStats
 from ui.analysis import analyze_request
 from ui.image_job import ImageBatchJobResult, ImageBatchStats, run_image_batch_job
+from ui.drive_search import DriveClientProtocol, DriveSearchResult, find_drive_docx_matching, find_drive_pdfs_matching
+from ui.merge_job import MergeJobResult, run_merge_job
+from ui.merge_search import IcoSearchResult, find_docx_files_matching, find_pdfs_matching
 from ui.models import AnalysisResult, TranslationRequest
 from ui.pdf_job import PdfJobResult, run_pdf_job
 from ui.pptx_job import PresentationJobResult, run_presentation_job
 from ui.word_job import WordJobResult, run_word_job
+from ui.word_merge_job import WordMergeJobResult, run_word_merge_job
 
 
 class AnalysisSignals(QObject):
@@ -357,6 +363,305 @@ class ImageTranslationWorker(QRunnable):
             self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
         else:
             self.signals.finished.emit(result)
+
+
+class MergeSignals(QObject):
+    """Own signal set (01.09.2026) rather than reusing TranslationSignals
+    above: a merge run has no per-block/per-character `stats` or a
+    determinate `total` to report (see ui/merge_job.py's module docstring
+    for why merge isn't built on the translation flow at all) - only a
+    per-source `progress` message and the eventual finished/failed
+    outcome."""
+
+    progress = Signal(str)
+    finished = Signal(object)
+    failed = Signal(str)
+
+
+class MergeWorker(QRunnable):
+    """Runs one PDF merge/insert job (ui/merge_job.py::run_merge_job()) on
+    a background thread. Structurally the odd one out among this module's
+    workers - no provider/pricing/target_lang (nothing here is a
+    translation run) - but otherwise the same shape: MergeSignals instead
+    of TranslationSignals, same cooperative cancel_event polled between
+    sources (see merge_pdfs()'s docstring for why only between, not
+    during, one source's copy).
+    """
+
+    def __init__(self, sources: Sequence[MergeSourceSpec], destination: Path) -> None:
+        super().__init__()
+        self.sources = sources
+        self.destination = destination
+        self.signals = MergeSignals()
+        self._cancel_event = threading.Event()
+
+    def request_cancel(self) -> None:
+        self._cancel_event.set()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result: MergeJobResult = run_merge_job(
+                self.sources,
+                self.destination,
+                progress_callback=self.signals.progress.emit,
+                should_cancel=self._cancel_event.is_set,
+            )
+        except Exception as exc:  # noqa: BLE001 - mirrors every other worker's catch-all above
+            self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
+        else:
+            self.signals.finished.emit(result)
+
+
+class WordMergeSignals(QObject):
+    """DOCX counterpart of MergeSignals above (01.09.2026, Michael: "Jetzt
+    noch das ganze für *.docx.") - same shape, same reasoning (no
+    determinate `total`/per-block `stats`, just a per-source `progress`
+    message)."""
+
+    progress = Signal(str)
+    finished = Signal(object)
+    failed = Signal(str)
+
+
+class WordMergeWorker(QRunnable):
+    """Runs one DOCX merge/insert job (ui/word_merge_job.py::run_word_merge_job())
+    on a background thread - the DOCX counterpart of MergeWorker above,
+    same cooperative cancel_event/between-files polling contract (see
+    pipeline/word/merge.py's merge_docx_files() docstring for the one
+    difference: cancellation is not polled again during a batched merge's
+    final "combine the completed chunks" pass, so that step is not
+    interruptible mid-way once started - this worker doesn't need to know
+    that, it just relays whatever should_cancel()/progress the underlying
+    job reports).
+
+    `batch_size` is not exposed as a constructor default override from the
+    UI (Michael confirmed batching should happen automatically, not be a
+    per-run setting) - the default comes from run_word_merge_job() itself.
+    """
+
+    def __init__(self, sources: Sequence[Path], destination: Path) -> None:
+        super().__init__()
+        self.sources = sources
+        self.destination = destination
+        self.signals = WordMergeSignals()
+        self._cancel_event = threading.Event()
+
+    def request_cancel(self) -> None:
+        self._cancel_event.set()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result: WordMergeJobResult = run_word_merge_job(
+                self.sources,
+                self.destination,
+                progress_callback=self.signals.progress.emit,
+                should_cancel=self._cancel_event.is_set,
+            )
+        except Exception as exc:  # noqa: BLE001 - mirrors every other worker's catch-all above
+            self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
+        else:
+            self.signals.finished.emit(result)
+
+
+class IcoSearchSignals(QObject):
+    """progress carries (files_done_so_far, total_files, current_filename) -
+    see find_pdfs_matching()'s docstring - so ui/merge_search_dialog.py can
+    drive a DETERMINATE progress bar (total is known upfront from the
+    directory walk), unlike MergeSignals.progress above."""
+
+    progress = Signal(int, int, str)
+    finished = Signal(object)
+    failed = Signal(str)
+
+
+class IcoSearchWorker(QRunnable):
+    """Runs one folder scan (ui/merge_search.py::find_pdfs_matching()) on a
+    background thread - ui/merge_search_dialog.py's "Suchen" button. Same
+    cooperative cancel_event/between-files polling as MergeWorker above."""
+
+    def __init__(self, folder: Path, query: str, recursive: bool) -> None:
+        super().__init__()
+        self.folder = folder
+        self.query = query
+        self.recursive = recursive
+        self.signals = IcoSearchSignals()
+        self._cancel_event = threading.Event()
+
+    def request_cancel(self) -> None:
+        self._cancel_event.set()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result: IcoSearchResult = find_pdfs_matching(
+                self.folder,
+                self.query,
+                recursive=self.recursive,
+                progress_callback=self.signals.progress.emit,
+                should_cancel=self._cancel_event.is_set,
+            )
+        except Exception as exc:  # noqa: BLE001 - mirrors every other worker's catch-all above
+            self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
+        else:
+            self.signals.finished.emit(result)
+
+
+class DriveSearchSignals(QObject):
+    """Same shape as IcoSearchSignals above (progress carries (done, total,
+    current_name), a determinate total known upfront) - the local-vs-Drive
+    scan share MergeSearchDialog's progress bar/status label code, only the
+    worker underneath differs (01.09.2026, Google-Drive-Ordnersuche)."""
+
+    progress = Signal(int, int, str)
+    finished = Signal(object)
+    failed = Signal(str)
+
+
+class DriveSearchWorker(QRunnable):
+    """Runs one Drive folder scan (ui/drive_search.py::find_drive_pdfs_matching())
+    on a background thread - the Drive counterpart of IcoSearchWorker above,
+    same cooperative cancel_event/between-files polling. Takes an already-
+    authorized `client` (see pipeline/drive_auth.py::build_service() +
+    DriveClient) rather than building one itself, so constructing this
+    worker never itself makes a network call - MergeSearchDialog builds the
+    client once (surfacing any auth error immediately, before "Suchen" even
+    starts) and passes it in.
+    """
+
+    def __init__(self, client: DriveClientProtocol, folder_id: str, query: str, recursive: bool, cache_dir: Path) -> None:
+        super().__init__()
+        self.client = client
+        self.folder_id = folder_id
+        self.query = query
+        self.recursive = recursive
+        self.cache_dir = cache_dir
+        self.signals = DriveSearchSignals()
+        self._cancel_event = threading.Event()
+
+    def request_cancel(self) -> None:
+        self._cancel_event.set()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result: DriveSearchResult = find_drive_pdfs_matching(
+                self.client,
+                self.folder_id,
+                self.query,
+                recursive=self.recursive,
+                cache_dir=self.cache_dir,
+                progress=self.signals.progress.emit,
+                is_cancelled=self._cancel_event.is_set,
+            )
+        except Exception as exc:  # noqa: BLE001 - mirrors every other worker's catch-all above
+            self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
+        else:
+            self.signals.finished.emit(result)
+
+
+class WordIcoSearchWorker(QRunnable):
+    """DOCX counterpart of IcoSearchWorker above (01.09.2026) - runs one
+    folder scan via ui/merge_search.py::find_docx_files_matching() on a
+    background thread. Same IcoSearchSignals/cooperative-cancel contract
+    (the result shape - IcoSearchResult - is already format-agnostic, see
+    ui/merge_search.py's module docstring), so this only differs from
+    IcoSearchWorker in which matching function it calls."""
+
+    def __init__(self, folder: Path, query: str, recursive: bool) -> None:
+        super().__init__()
+        self.folder = folder
+        self.query = query
+        self.recursive = recursive
+        self.signals = IcoSearchSignals()
+        self._cancel_event = threading.Event()
+
+    def request_cancel(self) -> None:
+        self._cancel_event.set()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result: IcoSearchResult = find_docx_files_matching(
+                self.folder,
+                self.query,
+                recursive=self.recursive,
+                progress_callback=self.signals.progress.emit,
+                should_cancel=self._cancel_event.is_set,
+            )
+        except Exception as exc:  # noqa: BLE001 - mirrors every other worker's catch-all above
+            self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
+        else:
+            self.signals.finished.emit(result)
+
+
+class WordDriveSearchWorker(QRunnable):
+    """DOCX counterpart of DriveSearchWorker above (01.09.2026) - runs one
+    Drive folder scan via ui/drive_search.py::find_drive_docx_matching()
+    on a background thread. Same DriveSearchSignals/cooperative-cancel
+    contract and already-authorized-`client` convention as DriveSearchWorker
+    (see that class's docstring); only the matching function differs."""
+
+    def __init__(self, client: DriveClientProtocol, folder_id: str, query: str, recursive: bool, cache_dir: Path) -> None:
+        super().__init__()
+        self.client = client
+        self.folder_id = folder_id
+        self.query = query
+        self.recursive = recursive
+        self.cache_dir = cache_dir
+        self.signals = DriveSearchSignals()
+        self._cancel_event = threading.Event()
+
+    def request_cancel(self) -> None:
+        self._cancel_event.set()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result: DriveSearchResult = find_drive_docx_matching(
+                self.client,
+                self.folder_id,
+                self.query,
+                recursive=self.recursive,
+                cache_dir=self.cache_dir,
+                progress=self.signals.progress.emit,
+                is_cancelled=self._cancel_event.is_set,
+            )
+        except Exception as exc:  # noqa: BLE001 - mirrors every other worker's catch-all above
+            self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
+        else:
+            self.signals.finished.emit(result)
+
+
+class DriveConnectSignals(QObject):
+    succeeded = Signal()
+    failed = Signal(str)
+
+
+class DriveConnectWorker(QRunnable):
+    """Runs pipeline.drive_auth.connect_interactively() on a background
+    thread - it opens a system browser and blocks on a local loopback
+    server waiting for the OAuth redirect (see that function's docstring),
+    which would freeze the whole UI if run directly on the Qt thread like
+    MergeSearchDialog's "Mit Google verbinden" button click would otherwise
+    do.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.signals = DriveConnectSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            from pipeline.drive_auth import connect_interactively
+
+            connect_interactively()
+        except Exception as exc:  # noqa: BLE001 - mirrors every other worker's catch-all above
+            self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
+        else:
+            self.signals.succeeded.emit()
 
 
 def _copy_image_batch_stats(stats: ImageBatchStats) -> ImageBatchStats:
