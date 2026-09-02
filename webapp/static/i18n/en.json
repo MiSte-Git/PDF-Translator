@@ -284,6 +284,7 @@
   "settings.keyring": "OS keyring",
   "settings.language": "Interface language",
   "settings.new_key": "New API key",
+  "settings.open_log": "Open log file …",
   "settings.prepared": "prepared",
   "settings.provider": "Provider",
   "settings.run_limit": "Cost limit per run (characters)",

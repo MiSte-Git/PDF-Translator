@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from _version import __version__
 from bootstrap.release_source import UpdateInfo
+from pipeline.app_logging import LOG_FILE, configure_logging
 from pipeline.images.inpainting import GPU_MIN_VRAM_GB, gpu_vram_gb
 from pipeline.pdf.translate_pdf import PdfTranslationStats
 from pipeline.presentation.translate_presentation import PresentationTranslationStats
@@ -137,12 +138,19 @@ class SettingsDialog(QDialog):
         self.save_key.clicked.connect(self._save_key)
         self.provider.currentTextChanged.connect(self._refresh_status)
         self.locale.currentIndexChanged.connect(self._language_changed)
+        # 02.09.2026 (Michael: "Haben wir kein Log für genau solche
+        # Fälle?") - macht die neue Log-Datei (pipeline/app_logging.py)
+        # ohne Dateibrowser-Umweg erreichbar, z. B. um sie hier
+        # anzuhängen statt einen Screenshot zu machen.
+        self.open_log_button = QPushButton()
+        self.open_log_button.clicked.connect(self._open_log_file)
 
         self.form = QFormLayout()
         self.form_labels = [QLabel() for _ in range(6)]
         for label, field in zip(self.form_labels, (self.locale, self.provider, self.status, self.secret, self.target, self.max_chars)):
             self.form.addRow(label, field)
         self.form.addRow("", self.save_key)
+        self.form.addRow("", self.open_log_button)
         self.buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         self.buttons.accepted.connect(self._accept)
         self.buttons.rejected.connect(self.reject)
@@ -169,10 +177,20 @@ class SettingsDialog(QDialog):
         for index, key in enumerate(("settings.environment", "settings.keyring", "settings.both")):
             self.target.setItemText(index, t(key))
         self.save_key.setText(t("settings.save_key"))
+        self.open_log_button.setText(t("settings.open_log"))
         self.note.setText(t("settings.session_note"))
 
     def _refresh_status(self) -> None:
         self.status.setText(self.language.text(credential_status(self.provider.currentText())))
+
+    def _open_log_file(self) -> None:
+        # configure_logging() (aufgerufen aus main(), bevor irgendein
+        # Fenster erscheint) hat die Datei zu diesem Zeitpunkt immer schon
+        # angelegt - kein Existenz-Check nötig, aber ein leeres Verzeichnis
+        # würde openUrl schlicht ignorieren, falls main() doch mal nicht
+        # durchlaufen wurde (z. B. ein Test, der SettingsDialog isoliert
+        # instanziiert).
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(LOG_FILE)))
 
     def _save_key(self) -> None:
         try:
@@ -1671,6 +1689,11 @@ def apply_explicit_palette(app: QApplication) -> None:
 
 
 def main() -> int:
+    # 02.09.2026 (Michael: "Haben wir kein Log für genau solche Fälle?",
+    # nach einem Google-Drive-Fehler, der sich per Screenshot nur mühsam
+    # mitteilen ließ) - vor allem anderen aufrufen, damit auch ein Fehler
+    # ganz am Anfang von MainWindow.__init__() noch in der Datei landet.
+    configure_logging()
     app = QApplication(sys.argv)
     apply_explicit_palette(app)
     window = MainWindow(); window.show()

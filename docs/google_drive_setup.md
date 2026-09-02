@@ -92,3 +92,36 @@ verbinden".
   nur den lokal gespeicherten Token), oder unter
   https://myaccount.google.com/permissions den Zugriff der App komplett
   widerrufen.
+
+## Fehlerbehebung
+
+- **"Prüfen"/eine Ordnersuche meldet einen Google-HttpError** (z. B.
+  "Project '...' not found or deleted."): Das Anmelden selbst (Schritt 5.4 -
+  Browser öffnet sich, Konto bestätigen, App vertrauen) prüft nur
+  Client-ID/Client-Secret; der Fehler beim anschließenden Zugriff auf einen
+  Ordner kommt aus einem anderen Wert - meist die Projekt-ID. Ein falscher
+  Ordnerlink/eine falsche Ordner-ID meldet sich mit einer anderen, expliziten
+  Meldung ("Datei/Ordner nicht gefunden" mit der Ordner-ID im Text), nicht
+  mit einer Meldung über ein "Project". "Verknüpfen" mit dem eigenen
+  Google-Konto ist an dieser Stelle kein separater Schritt - wer das
+  Cloud-Projekt im eigenen Konto angelegt hat (Schritt 1), hat automatisch
+  Zugriff darauf; eine fehlende Berechtigung sähe ohnehin anders aus (eine
+  403-"permission denied"-Meldung, nicht "not found or deleted").
+- **Was genau verwendet wurde, steht im Log** (seit 02.09.2026): Menü
+  "Einstellungen" -> "Log-Datei öffnen …", oder direkt
+  `~/.pdf-translator/logs/app.log`. Dort steht bei jedem Verbindungsversuch
+  eine gekürzte Vorschau der tatsächlich verwendeten Projekt-ID sowie ob sie
+  aus einer Umgebungsvariable oder aus dem Schlüsselbund (also aus diesem
+  Dialog) stammt.
+- **Ein im Dialog gespeicherter Wert scheint wirkungslos**: Seit 02.09.2026
+  hat für die drei Drive-Zugangsdaten (Client-ID, Client-Secret, Projekt-ID)
+  und den Refresh-Token der im Schlüsselbund gespeicherte Wert (also das,
+  was "Zugangsdaten speichern"/die Anmeldung hier im Dialog erzeugt) immer
+  Vorrang - eine gleichnamige Umgebungsvariable (`GOOGLE_DRIVE_CLIENT_ID`,
+  `GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_DRIVE_PROJECT_ID`,
+  `GOOGLE_DRIVE_REFRESH_TOKEN`) wirkt nur noch, solange im Schlüsselbund
+  gar nichts gespeichert ist. Bei einer älteren Programmversion (davor)
+  galt das Gegenteil: eine gesetzte Umgebungsvariable hatte immer Vorrang,
+  auch vor einem frisch gespeicherten Wert - falls das Verhalten weiterhin
+  seltsam wirkt, in der Shell, aus der die App gestartet wird, einmal
+  `env | grep GOOGLE_DRIVE` prüfen.

@@ -1,12 +1,32 @@
 """Environment-variable and optional OS-keyring access to API keys.
 
-Environment variables are checked first for machines that have not yet been
-migrated to an OS keyring.  There is deliberately no plaintext credentials
-file fallback.
+Environment variables are checked first by default, for machines that have
+not yet been migrated to an OS keyring - and, deliberately, so a caller can
+override a stored key for a single subprocess call without touching the
+keyring at all (see image_translate_cli/CLI.md's "Zugangsdaten für den
+Provider" section: TME passes its own DEEPL_API_KEY via `env={...}` for one
+`translate`/`check` invocation - see get_api_key()'s env_first parameter).
+There is deliberately no plaintext credentials file fallback.
+
+02.09.2026 (Michael, after reloading Drive credentials from a downloaded
+JSON file and re-saving made no difference): env-first is the wrong default
+for a value the app's own UI is meant to be the sole source of truth for -
+a stray environment variable left over from an earlier debugging session
+(e.g. in .bashrc) then silently and permanently overrides whatever the
+"speichern" button just wrote, with no visible sign anything is wrong. The
+four Google-Drive-OAuth getters near the bottom of this file pass
+env_first=False for exactly that reason: keyring (i.e. what the UI saved)
+wins, environment variables are only a fallback for a value that was never
+saved at all. The four translation-provider getters above them keep the
+default env_first=True, since TME's documented per-call override relies on
+it.
 """
 from __future__ import annotations
 
+import logging
 import os
+
+log = logging.getLogger(__name__)
 
 # Service name under which all provider API keys are stored in the OS
 # keyring (Windows Credential Locker / macOS Keychain / Secret Service on
@@ -22,12 +42,19 @@ def _keyring_module():
     return keyring
 
 
-def get_api_key(key_name: str, env_names: tuple[str, ...] = ()) -> str:
-    """Read an API key from environment first, then the optional keyring.
+def get_api_key(key_name: str, env_names: tuple[str, ...] = (), env_first: bool = True) -> str:
+    """Read an API key from the environment and the optional keyring.
 
     ``env_names`` are checked in order, followed by the uppercase key name.
     Keyring import/backend errors are treated as an unavailable fallback and
     reported without exposing any credential value.
+
+    ``env_first`` (default True) picks which source wins when both an
+    environment variable AND a keyring entry are present for the same
+    ``key_name`` - see this module's docstring for why the default differs
+    from the Google-Drive-OAuth getters (env_first=False there). When only
+    one source has a value, this parameter has no effect - the one present
+    value is used either way.
     """
     # dict.fromkeys() dedupes while preserving order - without it, a
     # get_*_api_key() helper whose env_names already equals key_name.upper()
@@ -36,21 +63,44 @@ def get_api_key(key_name: str, env_names: tuple[str, ...] = ()) -> str:
     # error message below (found 22.08.2026 while building
     # image_translate_cli's `check` command, which surfaces this message
     # to a caller like TME - see CLI.md).
+    # 02.09.2026 (Michael: "Haben wir kein Log für genau solche Fälle?",
+    # nachdem ein im UI neu gespeicherter Wert scheinbar wirkungslos
+    # blieb) - Loggt NUR die Quelle (env-Variablenname oder
+    # "Schlüsselbund"), NIE den Wert selbst - auch nicht bei vermeintlich
+    # unkritischen Feldern wie einer Projekt-ID, denn genau der Bug, der
+    # zu dieser Zeile führte, zeigt, dass dort auch mal ein echtes
+    # Geheimnis (ein API-Schlüssel) drinstehen kann.
     candidates = tuple(dict.fromkeys((*env_names, key_name.upper())))
-    for env_name in candidates:
-        value = os.environ.get(env_name)
-        if value and value.strip():
-            return value.strip()
 
-    keyring = _keyring_module()
-    if keyring is not None:
+    def _from_env() -> str | None:
+        for env_name in candidates:
+            value = os.environ.get(env_name)
+            if value and value.strip():
+                log.debug("%s: geladen aus Umgebungsvariable %s", key_name, env_name)
+                return value.strip()
+        return None
+
+    def _from_keyring() -> str | None:
+        keyring = _keyring_module()
+        if keyring is None:
+            return None
         try:
             value = keyring.get_password(_KEYRING_SERVICE, key_name)
-        except Exception:  # backend not installed/configured
-            value = None
+        except Exception as exc:  # backend not installed/configured
+            log.debug("%s: Zugriff auf den OS-Schlüsselbund fehlgeschlagen: %s", key_name, exc)
+            return None
         if value and value.strip():
+            log.debug("%s: geladen aus dem OS-Schlüsselbund", key_name)
             return value.strip()
+        return None
 
+    sources = (_from_env, _from_keyring) if env_first else (_from_keyring, _from_env)
+    for source in sources:
+        value = source()
+        if value is not None:
+            return value
+
+    log.debug("%s: keine Zugangsdaten gefunden (weder Umgebungsvariable noch Schlüsselbund)", key_name)
     raise RuntimeError(
         f"No credential available for {key_name!r}. Set one of the environment "
         f"variables {', '.join(candidates)} or configure OS keyring service "
@@ -72,8 +122,9 @@ def set_api_key(key_name: str, value: str) -> None:
         raise RuntimeError(f"OS keyring is unavailable: {exc}") from exc
 
 
-def has_api_key(key_name: str, env_names: tuple[str, ...] = ()) -> bool:
-    """True if get_api_key(key_name, env_names) would succeed, without raising.
+def has_api_key(key_name: str, env_names: tuple[str, ...] = (), env_first: bool = True) -> bool:
+    """True if get_api_key(key_name, env_names, env_first) would succeed,
+    without raising.
 
     Added 01.09.2026 for the Google-Drive-Ordnersuche feature: unlike every
     other credential in this module (which either IS configured at startup
@@ -81,10 +132,12 @@ def has_api_key(key_name: str, env_names: tuple[str, ...] = ()) -> bool:
     has three distinct, UI-relevant states - "not configured at all",
     "configured but not yet connected", "connected" - and the UI needs to
     check each one without ever triggering get_api_key()'s RuntimeError as
-    control flow.
+    control flow. ``env_first`` only affects WHICH source wins when both
+    have a value - it never changes this function's True/False result, so
+    passing it through is purely for signature symmetry with get_api_key().
     """
     try:
-        get_api_key(key_name, env_names)
+        get_api_key(key_name, env_names, env_first=env_first)
     except RuntimeError:
         return False
     return True
@@ -139,15 +192,25 @@ def get_grok_api_key() -> str:
 # All three pieces are still just opaque strings from this module's point of
 # view, so they reuse get_api_key()/set_api_key()/has_api_key() as-is rather
 # than needing new storage machinery.
+#
+# 02.09.2026 (Michael, after re-loading+re-saving Drive credentials from a
+# downloaded JSON file appeared to change nothing): env_first=False on all
+# four getters below - unlike the translation-provider keys above (which
+# deliberately keep env-first for TME's documented per-call override, see
+# this module's own docstring), Drive OAuth is configured exclusively
+# through this app's own dialog. There is no legitimate reason for a
+# leftover environment variable to permanently out-rank whatever the
+# "Zugangsdaten speichern"/OAuth-sign-in flow just stored - it can only ever
+# be a stale value from an earlier debugging session silently winning.
 
 def get_google_drive_client_id() -> str:
     """OAuth Client-ID for the Drive-Ordnersuche feature, from the OS keyring."""
-    return get_api_key("google_drive_client_id", ("GOOGLE_DRIVE_CLIENT_ID",))
+    return get_api_key("google_drive_client_id", ("GOOGLE_DRIVE_CLIENT_ID",), env_first=False)
 
 
 def get_google_drive_client_secret() -> str:
     """OAuth Client-Secret for the Drive-Ordnersuche feature, from the OS keyring."""
-    return get_api_key("google_drive_client_secret", ("GOOGLE_DRIVE_CLIENT_SECRET",))
+    return get_api_key("google_drive_client_secret", ("GOOGLE_DRIVE_CLIENT_SECRET",), env_first=False)
 
 
 def get_google_drive_project_id() -> str:
@@ -166,9 +229,9 @@ def get_google_drive_project_id() -> str:
     which is exactly what surfaces to the user as a Google-side "project"
     error when calling the Drive API.
     """
-    return get_api_key("google_drive_project_id", ("GOOGLE_DRIVE_PROJECT_ID",))
+    return get_api_key("google_drive_project_id", ("GOOGLE_DRIVE_PROJECT_ID",), env_first=False)
 
 
 def get_google_drive_refresh_token() -> str:
     """Stored OAuth refresh token from a previous successful Google sign-in."""
-    return get_api_key("google_drive_refresh_token", ("GOOGLE_DRIVE_REFRESH_TOKEN",))
+    return get_api_key("google_drive_refresh_token", ("GOOGLE_DRIVE_REFRESH_TOKEN",), env_first=False)

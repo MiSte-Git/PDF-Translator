@@ -53,6 +53,7 @@ fully unit-tested against a fake service object.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
@@ -66,6 +67,20 @@ from pipeline.credentials import (
     set_api_key,
     delete_api_key,
 )
+
+log = logging.getLogger(__name__)
+
+
+def _preview(value: str) -> str:
+    """First 8 chars + "…" for a log line - enough to eyeball "does this
+    look like a Project ID or like something else" (02.09.2026: Michael's
+    stored "Projekt-ID" turned out to be an API key, shape "AIza...") without
+    ever writing a complete credential value to the log file. Used only for
+    values that are not straightforwardly secret (project ID) - client
+    secrets and refresh tokens are never logged at all, not even a preview.
+    """
+    value = value.strip()
+    return f"{value[:8]}…" if len(value) > 8 else value
 
 SCOPES = ("https://www.googleapis.com/auth/drive.readonly",)
 
@@ -224,21 +239,29 @@ def connect_interactively() -> None:
             "redirect_uris": ["http://localhost"],
         }
     }
+    log.info(
+        "Starte Google-OAuth-Anmeldung (Client-ID endet auf …%s, Projekt-ID %s)",
+        get_google_drive_client_id()[-12:],
+        _preview(get_google_drive_project_id()),
+    )
     flow = InstalledAppFlow.from_client_config(client_config, list(SCOPES))
     try:
         credentials = flow.run_local_server(port=0, timeout_seconds=_OAUTH_CONSENT_TIMEOUT_SECONDS)
     except WSGITimeoutError as exc:
+        log.warning("Google-Anmeldung nicht innerhalb von %ss abgeschlossen (abgebrochen/nicht reagiert)", _OAUTH_CONSENT_TIMEOUT_SECONDS)
         raise DriveAuthError(
             "Die Google-Anmeldung wurde nicht innerhalb von 5 Minuten abgeschlossen. "
             "Bitte 'Mit Google verbinden' erneut klicken."
         ) from exc
     if not credentials.refresh_token:
+        log.warning("Google hat beim Anmelden keinen Refresh-Token zurückgegeben")
         raise DriveAuthError(
             "Google hat keinen Refresh-Token zurückgegeben. Bitte den Zugriff dieser "
             "App unter https://myaccount.google.com/permissions entfernen und erneut "
             "verbinden."
         )
     set_api_key("google_drive_refresh_token", credentials.refresh_token)
+    log.info("Google-Anmeldung erfolgreich, Refresh-Token gespeichert")
 
 
 def build_service():
@@ -262,6 +285,12 @@ def build_service():
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
 
+    # 02.09.2026 (Michael: "Haben wir kein Log für genau solche Fälle?") -
+    # genau diese eine Zeile hätte den "Project '...' not found or
+    # deleted."-Bug sofort sichtbar gemacht: eine echte Google-Cloud-
+    # Projekt-ID sieht nie wie "AIzaSy…" aus (das Präfix eines
+    # API-Schlüssels).
+    log.info("Baue Drive-Service auf (quota_project_id: %s)", _preview(get_google_drive_project_id()))
     credentials = Credentials(
         token=None,
         refresh_token=get_google_drive_refresh_token(),
@@ -279,6 +308,7 @@ def build_service():
     try:
         credentials.refresh(Request())
     except RefreshError as exc:
+        log.warning("Token-Refresh fehlgeschlagen (Zugriff vermutlich widerrufen): %s", exc)
         raise DriveAuthError(
             f"Google-Zugriff wurde offenbar widerrufen, bitte erneut verbinden ({exc})."
         ) from exc
@@ -304,7 +334,13 @@ def _execute_with_retry(request):
             status = getattr(exc.resp, "status", None)
             attempt += 1
             if status not in (403, 429, 500, 502, 503, 504) or attempt >= _MAX_RETRIES:
+                # 02.09.2026 (Michael: "Haben wir kein Log für genau solche
+                # Fälle?") - der vollständige HttpError-Text (Status, URL,
+                # Google-Fehlermeldung) ist kein Geheimnis, sondern genau
+                # das, was bisher nur per Screenshot den Weg hierher fand.
+                log.error("Drive-API-Aufruf endgültig fehlgeschlagen (Status %s): %s", status, exc)
                 raise
+            log.debug("Drive-API-Aufruf fehlgeschlagen (Status %s, Versuch %s/%s), erneuter Versuch folgt: %s", status, attempt, _MAX_RETRIES, exc)
             time.sleep(_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1)))
 
 

@@ -16,6 +16,7 @@ googleapiclient chained-call shape (.files().list()/.get()/.get_media(),
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -308,6 +309,35 @@ def test_build_service_sets_quota_project_id_from_stored_project_id(monkeypatch:
     assert captured["quota_project_id"] == "project-789"
 
 
+# --- Logging (02.09.2026, Michael: "Haben wir kein Log für genau solche ---
+# Fälle?", nachdem eine falsch gespeicherte Projekt-ID sich nur per
+# Screenshot mitteilen ließ) - build_service() loggt jetzt eine gekürzte
+# Vorschau der verwendeten Projekt-ID, damit genau dieser Fehlertyp (ein
+# API-Schlüssel statt einer echten Projekt-ID) sofort im Log auffällt.
+
+
+def test_preview_masks_a_long_value_but_never_logs_it_in_full() -> None:
+    assert drive_auth._preview("AIzaSyCrGVds-v8eQQiHwncxVHqnySUkhNdsQ0A") == "AIzaSyCr…"
+    assert "AIzaSyCrGVds-v8eQQiHwncxVHqnySUkhNdsQ0A" not in drive_auth._preview(
+        "AIzaSyCrGVds-v8eQQiHwncxVHqnySUkhNdsQ0A"
+    )
+
+
+def test_build_service_logs_a_masked_project_id_preview(monkeypatch: pytest.MonkeyPatch, caplog) -> None:
+    monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_ID", "id-123")
+    monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_SECRET", "secret-456")
+    monkeypatch.setenv("GOOGLE_DRIVE_PROJECT_ID", "AIzaSyCrGVds-v8eQQiHwncxVHqnySUkhNdsQ0A")
+    monkeypatch.setenv("GOOGLE_DRIVE_REFRESH_TOKEN", "refresh-abc")
+
+    import google.oauth2.credentials as credentials_module
+
+    monkeypatch.setattr(credentials_module.Credentials, "refresh", lambda self, request: None)
+    with caplog.at_level(logging.INFO, logger="pipeline.drive_auth"):
+        drive_auth.build_service()
+    assert "AIzaSyCr…" in caplog.text
+    assert "AIzaSyCrGVds-v8eQQiHwncxVHqnySUkhNdsQ0A" not in caplog.text
+
+
 # --- _execute_with_retry() ---------------------------------------------
 
 
@@ -359,6 +389,21 @@ def test_execute_with_retry_gives_up_after_max_attempts(monkeypatch: pytest.Monk
     with pytest.raises(Exception):
         _execute_with_retry(request)
     assert request.calls == drive_auth._MAX_RETRIES
+
+
+def test_execute_with_retry_logs_the_final_httperror(caplog) -> None:
+    """02.09.2026 (Michael: "Haben wir kein Log für genau solche Fälle?")
+    - a non-transient HttpError (like the 400 "Project ... not found or
+    deleted" Michael hit) is logged at error level with its full text on
+    the very call that raises it, so it lands in app.log without anyone
+    needing to screenshot the on-screen error message.
+    """
+    request = _FlakyRequest(fail_times=1, status=400, result={"ok": True})
+    with caplog.at_level(logging.ERROR, logger="pipeline.drive_auth"):
+        with pytest.raises(Exception):
+            _execute_with_retry(request)
+    assert "endgültig fehlgeschlagen" in caplog.text
+    assert "400" in caplog.text
 
 
 # --- DriveClient against a fake service ------------------------------------

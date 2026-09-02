@@ -8287,3 +8287,127 @@ Bugreport wie diesen hier).
 prüft `textInteractionFlags()` auf allen fünf Labels, die Drive-Labels
 parametrisiert über beide Dialoge). Alle 496 Tests des gesamten Projekts
 grün (1 Skip, unverändert; 491 → 496 durch die neuen Tests).
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung 5) - Anwendungs-Log eingeführt, nachdem "Aus JSON-Datei laden" den Projekt-ID-Fehler nicht behoben hat
+
+Michael, nach erneutem "Aus JSON-Datei laden …": "Ich habe jetzt noch mal
+die json Datei neu geladen und es kommt immer noch der gleiche Fehler
+[...] Sind nicht alle Felder durch die json ausgefüllt? Oder liegt es an
+etwas anderem. [...] Haben wir kein Log für genau solche Fälle?"
+
+**Warum das Neuladen allein den Fehler nicht behebt:** "Aus JSON-Datei
+laden …" (Fortsetzung 3) füllt nur die drei Textfelder im Dialog - es
+speichert nichts von selbst (siehe `_load_drive_credentials_from_file()`s
+eigener Docstring). Erst ein Klick auf "Zugangsdaten speichern" schreibt
+die Werte in den OS-Schlüsselbund. Zusätzlich - und das war bisher nicht
+dokumentiert, weil `pipeline/credentials.py::get_api_key()` es nirgends
+sichtbar machte - hat eine gleichnamige **Umgebungsvariable immer Vorrang
+vor dem Schlüsselbund** (siehe das Docstring dort: "Environment variables
+are checked first"). Falls in der Shell, aus der Michael die App mit
+`python -m ui.app` startet, `GOOGLE_DRIVE_PROJECT_ID` gesetzt ist (z. B.
+aus einem früheren Debug-Versuch in `.bashrc`/`.profile`), gewinnt dieser
+Wert IMMER gegen alles, was im Dialog gespeichert wird - egal wie oft neu
+geladen/gespeichert wird. Michael wurde gebeten, in genau der Shell, in
+der die App läuft, `env | grep GOOGLE_DRIVE` zu prüfen (und ggf. in
+`.bashrc`/`.profile`/`.bash_profile` nach einem `export GOOGLE_DRIVE_...`
+zu suchen) und einen gefundenen Eintrag zu entfernen.
+
+**"Haben wir kein Log für genau solche Fälle?"** - ehrliche Antwort: nein,
+bisher nicht wirklich. `ui/app.py` hatte zwar schon `log =
+logging.getLogger(__name__)` und zwei vereinzelte `log.*`-Aufrufe, aber
+ohne dass irgendwo `logging.basicConfig()`/ein Handler gesetzt wurde -
+Pythons Root-Logger ohne Handler verschluckt alles unter WARNING
+lautlos. Neu:
+
+- `pipeline/app_logging.py::configure_logging()` - ein rotierender
+  Datei-Handler (`~/.pdf-translator/logs/app.log`, 3x 2 MB), einmalig aus
+  `ui/app.py::main()` aufgerufen, idempotent. Bewusst kein zusätzlicher
+  Konsolen-Handler (Michael sieht in der Shell ohnehin schon
+  Drittausgaben wie die OAuth-URL oder die google.api_core-Warnung).
+- `pipeline/credentials.py::get_api_key()` loggt jetzt bei jedem Aufruf,
+  **woher** ein Wert kam - Umgebungsvariable (mit Namen) oder
+  Schlüsselbund -, NIE den Wert selbst. Das hätte den obigen Fall sofort
+  sichtbar gemacht.
+- `pipeline/drive_auth.py::build_service()` loggt eine gekürzte Vorschau
+  der tatsächlich verwendeten Projekt-ID (`_preview()`, erste 8 Zeichen +
+  "…" - z. B. "AIzaSyCr…" statt der vollen Zeichenkette, damit auch ein
+  versehentlich dort stehendes echtes Geheimnis nie komplett im Log
+  landet). `connect_interactively()` loggt Start/Erfolg/Timeout der
+  Anmeldung. `_execute_with_retry()` loggt jeden endgültig fehlgeschlagenen
+  Drive-API-Aufruf mit vollem HttpError-Text auf Error-Level (das ist
+  genau das, was Michael bisher nur per Screenshot durchgeben konnte) und
+  jeden Wiederholungsversuch auf Debug-Level.
+- `SettingsDialog` (ui/app.py) hat einen neuen Knopf "Log-Datei öffnen …",
+  der die Datei direkt im Standard-Programm öffnet (wie die bestehenden
+  "Ausgabeordner öffnen"/"QA-Bericht öffnen"-Knöpfe).
+
+**Tests:** `tests/test_credentials.py` +2 (Quelle wird geloggt, Wert
+selbst nie), `tests/test_drive_auth.py` +3 (`_preview()`-Kürzung,
+Projekt-ID-Vorschau beim Service-Aufbau, HttpError-Volltext beim
+endgültigen Fehlschlag), neue Datei `tests/test_app_logging.py` +3
+(Log-Datei wird angelegt, mehrfacher Aufruf hängt keinen zweiten Handler
+an, der neue Knopf öffnet die richtige Datei). i18n: neuer Schlüssel
+`settings.open_log` (DE/EN, 340/340 weiterhin gleich), `webapp/static/i18n/
+{de,en}.json` neu exportiert. Alle 504 Tests des gesamten Projekts grün
+(1 Skip, unverändert; 496 → 504 durch die neuen Tests).
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung 6) - Env-Variablen haben bei Google-Drive-Zugangsdaten keinen Vorrang mehr vor dem Schlüsselbund
+
+Michael beschrieb den vollständigen OAuth-Ablauf: Browser öffnet sich,
+Google-Konto bestätigen, App vertrauen, "Fenster kann geschlossen werden" -
+alles erfolgreich. Erst beim anschließenden "Prüfen" (Ordner auflösen)
+kommt der aus Fortsetzung 4/5 bekannte Fehler wieder. Seine Frage: liegt es
+eher an einer falschen "Google ID" (Ordner-Link/-ID) oder daran, dass "wir
+die Google ID nicht mit meinem Google Konto verknüpfen"? Und sein
+Vorschlag: die Prioritätsreihenfolge in `pipeline/credentials.py` umkehren
+- erst Schlüsselbund, dann Umgebungsvariable als Fallback.
+
+**Einordnung:** Ein erfolgreicher Anmeldevorgang beweist, dass Client-ID/
+Client-Secret stimmen - das ist nicht die Fehlerquelle. Der Fehler tritt
+erst beim eigentlichen Drive-API-Aufruf auf, der die Projekt-ID als
+`quota_project_id` mitschickt (siehe Fortsetzung 4). Eine falsche
+Ordner-ID/ein falscher Link würde eine andere, eigene Meldung erzeugen
+("Datei/Ordner nicht gefunden", mit der Ordner-ID im Text) - nicht "Project
+'...' not found or deleted". Ein "Verknüpfen" der Projekt-ID mit dem
+eigenen Konto als separater Schritt existiert nicht: wer das Cloud-Projekt
+im eigenen Konto angelegt hat, hat automatisch Zugriff; eine fehlende
+Berechtigung sähe außerdem anders aus (403 "permission denied", nicht "not
+found or deleted"). Es bleibt also bei der Projekt-ID als Ursache.
+
+**Umsetzung von Michaels Vorschlag:** `get_api_key()` (`pipeline/
+credentials.py`) hat jetzt einen neuen Parameter `env_first: bool = True`.
+Nicht global auf `False` umgestellt, weil `image_translate_cli/CLI.md`
+("Zugangsdaten für den Provider") ein bewusstes, dokumentiertes
+Gegenbeispiel beschreibt: TME übergibt für einen einzelnen Aufruf
+`env={**os.environ, "DEEPL_API_KEY": tme_eigener_key}`, um testweise einen
+eigenen Key zu verwenden, ohne ihn in PDF-Translators Schlüsselbund zu
+duplizieren - das setzt env-first für die vier
+Übersetzungs-Provider-Getter (`get_deepl_api_key()` usw.) zwingend voraus
+und bliebe bei einer globalen Umkehr kaputt. Stattdessen bekommen genau die
+vier Google-Drive-OAuth-Getter (`get_google_drive_client_id/_client_secret/
+_project_id/_refresh_token`) `env_first=False`: für sie gibt es keinen
+vergleichbaren, legitimen Grund für eine Env-Var-Überschreibung - diese
+Werte kommen ausschließlich aus dem Dialog dieser App. `has_api_key()`
+reicht den Parameter nur der Vollständigkeit halber durch (das
+Vorhanden-Ergebnis selbst hängt nicht von der Reihenfolge ab).
+
+Damit gewinnt für die vier Drive-Werte ab sofort der Schlüsselbund (also
+das, was "Zugangsdaten speichern"/die Anmeldung im Dialog erzeugt); eine
+gleichnamige Umgebungsvariable wirkt nur noch, solange im Schlüsselbund
+noch gar nichts gespeichert ist. Falls Michaels Fehler tatsächlich durch
+eine übriggebliebene `GOOGLE_DRIVE_PROJECT_ID`-Variable verursacht wurde
+(siehe Fortsetzung 5), sollte er nach diesem Update - unabhängig davon, ob
+die Variable noch gesetzt ist - wieder den im Dialog gespeicherten Wert
+sehen; das neue Log (Fortsetzung 5) zeigt zusätzlich direkt an, welche
+Quelle jeweils gewonnen hat.
+
+`docs/google_drive_setup.md` um einen neuen Abschnitt "Fehlerbehebung"
+ergänzt (genau diese drei Punkte: Projekt-ID vs. Ordner-ID, wo das Log
+liegt, die neue Prioritätsreihenfolge).
+
+**Tests:** `tests/test_credentials.py` +4 (env_first=True/False mit beiden
+Quellen gleichzeitig vorhanden, env_first=False fällt weiterhin auf die
+Umgebungsvariable zurück wenn nichts im Schlüsselbund liegt, alle vier
+Drive-Getter rufen tatsächlich mit env_first=False auf). Alle 508 Tests des
+gesamten Projekts grün (1 Skip, unverändert; 504 → 508 durch die neuen
+Tests).
