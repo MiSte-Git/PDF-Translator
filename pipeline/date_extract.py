@@ -58,6 +58,12 @@ _EN_MONTH_NAMES = {
     "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
 }
 _EN_MONTH_PATTERN = "|".join(_EN_MONTH_NAMES.keys())
+# 02.09.2026 (Michael: "MMMM D, YYYY"/"MMMM DD, YYYY", see
+# compile_custom_date_pattern() below) - 3-letter abbreviations for the
+# MMM custom-format token, derived from the same names above rather than
+# a second hand-written dict.
+_EN_MONTH_ABBR = {name[:3]: num for name, num in _EN_MONTH_NAMES.items()}
+_EN_MONTH_ABBR_PATTERN = "|".join(_EN_MONTH_ABBR.keys())
 # Two orderings, both common in English documents: "September 1, 2026" and
 # "1 September 2026". Named groups per ordering so _find_en_month_dates()
 # knows which one matched without a second parse pass.
@@ -150,6 +156,142 @@ def _find_en_month_dates(text: str) -> list[date]:
     return dates
 
 
+# --- custom (free-text) date format (02.09.2026) ------------------------
+#
+# Michael, on the date-format checkboxes above: "Bei der Datumsuche
+# müssten noch das Format 'September 4, 2026' als Auswahl dabei sein" -
+# already covered by _EN_MONTH_RE above (its month1/day1/year1 branch
+# matches an optional comma and a 1-2 digit day, so "September 4, 2026"
+# already matched before this change too - the day/checkbox tooltip just
+# didn't say so, see ui/i18n_data.py's comment on
+# merge_search.date_format_en_month) - "Plus Freitext Eintrag. Also 'MMMM
+# D, YYYY' und 'MMMM DD, YYYY'. Und für den Freitext sollten eben alle
+# gültigen Formate eingebar sein, mit Beispielen." is the actual new
+# feature: a free-text field (see date_custom_format_edit in both search
+# dialogs) where the user types their OWN pattern using these tokens -
+# literal characters (spaces, commas, dots, slashes, ...) elsewhere in
+# the pattern are matched literally.
+#
+#   YYYY  4-digit year (2026)       YY   2-digit year (26)
+#   MMMM  full month name (September)    MMM  abbreviated (Sep)
+#   MM    2-digit month (09)        M    1-2-digit month (9)
+#   DD    2-digit day (04)          D    1-2-digit day (4)
+#
+# Tried longest-token-first at every position (_CUSTOM_FORMAT_TOKENS'
+# order) so e.g. "MMMM" is never accidentally read as "MM" + "MM", and
+# "YYYY" never as "YY" + "YY". Third element is the field KIND
+# (year/month/day) - compile_custom_date_pattern() rejects a pattern that
+# uses more than one token of the same kind (e.g. "MM...M" or
+# "YYYY...YY"), even via different tokens, since a real date has exactly
+# one year/month/day.
+_CUSTOM_FORMAT_TOKENS: tuple[tuple[str, str, str], ...] = (
+    ("YYYY", "year", "year"),
+    ("MMMM", "month_name", "month"),
+    ("MMM", "month_abbr", "month"),
+    ("YY", "year2", "year"),
+    ("MM", "month", "month"),
+    ("DD", "day", "day"),
+    ("M", "month_short", "month"),
+    ("D", "day_short", "day"),
+)
+_CUSTOM_FORMAT_GROUP_PATTERNS = {
+    "year": r"\d{4}",
+    "year2": r"\d{2}",
+    "month_name": _EN_MONTH_PATTERN,
+    "month_abbr": _EN_MONTH_ABBR_PATTERN,
+    "month": r"\d{2}",
+    "month_short": r"\d{1,2}",
+    "day": r"\d{2}",
+    "day_short": r"\d{1,2}",
+}
+
+
+def compile_custom_date_pattern(pattern: str) -> re.Pattern[str] | None:
+    """Compiles a user-typed token pattern (see the module comment above
+    _CUSTOM_FORMAT_TOKENS for the recognized tokens) into a regex with
+    one named group per token found - or None if `pattern` contains no
+    recognized token at all (nothing to search for - e.g. empty, or pure
+    literal text with no year/month/day placeholder), or if it uses more
+    than one token of the same field kind (invalid - a document date has
+    exactly one year/month/day; "YYYY...YYYY" or even "MM...M" could
+    never match a single real date consistently).
+
+    `re.IGNORECASE` throughout - month names/abbreviations are matched
+    the same case-insensitive way _EN_MONTH_RE already is above.
+    """
+    parts: list[str] = []
+    seen_kinds: set[str] = set()
+    i = 0
+    while i < len(pattern):
+        matched = None
+        for token, group, kind in _CUSTOM_FORMAT_TOKENS:
+            if pattern.startswith(token, i):
+                matched = (token, group, kind)
+                break
+        if matched is None:
+            parts.append(re.escape(pattern[i]))
+            i += 1
+            continue
+        token, group, kind = matched
+        if kind in seen_kinds:
+            return None  # e.g. "YYYY...YYYY" - not a valid single-date pattern
+        seen_kinds.add(kind)
+        parts.append(f"(?P<{group}>{_CUSTOM_FORMAT_GROUP_PATTERNS[group]})")
+        i += len(token)
+    if not seen_kinds:
+        return None  # no recognized token at all - nothing to search for
+    try:
+        return re.compile(rf"\b{''.join(parts)}\b", re.IGNORECASE)
+    except re.error:
+        return None
+
+
+def _date_from_custom_match(match: re.Match[str]) -> date | None:
+    groups = match.groupdict()
+    year = groups.get("year") or groups.get("year2")
+    if year is None:
+        return None
+    year_value = int(year)
+    if groups.get("year2") is not None and groups.get("year") is None:
+        year_value = _normalize_two_digit_year(year_value)
+
+    if groups.get("month") is not None:
+        month_value = int(groups["month"])
+    elif groups.get("month_short") is not None:
+        month_value = int(groups["month_short"])
+    elif groups.get("month_name") is not None:
+        month_value = _EN_MONTH_NAMES[groups["month_name"].lower()]
+    elif groups.get("month_abbr") is not None:
+        month_value = _EN_MONTH_ABBR[groups["month_abbr"].lower()]
+    else:
+        return None  # pattern had no month token at all
+
+    day = groups.get("day") or groups.get("day_short")
+    if day is None:
+        return None
+    return _safe_date(year_value, month_value, int(day))
+
+
+def find_custom_format_dates(text: str, pattern: str) -> list[date]:
+    """Every date in `text` matching the user's own `pattern` (see
+    compile_custom_date_pattern()) - [] (not an error) both when `pattern`
+    doesn't compile to anything useful and when it simply has no matches,
+    same "nothing found is not a crash" contract as the preset finders
+    above. A pattern missing the day or month token entirely (e.g. just
+    "MMMM YYYY") never matches anything - _date_from_custom_match()
+    requires all three fields, a real calendar date needs a day.
+    """
+    compiled = compile_custom_date_pattern(pattern)
+    if compiled is None:
+        return []
+    dates: list[date] = []
+    for match in compiled.finditer(text):
+        parsed = _date_from_custom_match(match)
+        if parsed is not None:
+            dates.append(parsed)
+    return dates
+
+
 _FINDERS = {
     FORMAT_ISO: _find_iso_dates,
     FORMAT_DE: _find_de_dates,
@@ -158,17 +300,20 @@ _FINDERS = {
 }
 
 
-def find_dates(text: str, formats) -> list[date]:
+def find_dates(text: str, formats, custom_format: str | None = None) -> list[date]:
     """Every date found in `text`, across whichever of `formats` (see
-    FORMAT_*/ALL_DATE_FORMATS above) are given - order/duplicates not
-    meaningful, only used via "is ANY of these in range" (see
-    matches_document_date() below).
+    FORMAT_*/ALL_DATE_FORMATS above) are given, PLUS `custom_format` (the
+    free-text token pattern, see compile_custom_date_pattern() above) if
+    one is given - order/duplicates not meaningful, only used via "is ANY
+    of these in range" (see matches_document_date() below).
     """
     found: list[date] = []
     for fmt in formats:
         finder = _FINDERS.get(fmt)
         if finder is not None:
             found.extend(finder(text))
+    if custom_format:
+        found.extend(find_custom_format_dates(text, custom_format))
     return found
 
 
@@ -214,15 +359,25 @@ class DateSearchFilter:
     (ui/merge_search.py, ui/drive_search.py) - see this module's
     docstring for the "one source per search" contract.
 
-    `regions`/`formats` are only meaningful for source=SOURCE_DOCUMENT
-    (ignored for SOURCE_FILE, which needs neither a document open nor any
-    text parsing - see matches_file_date()).
+    `regions`/`formats`/`custom_format` are only meaningful for
+    source=SOURCE_DOCUMENT (ignored for SOURCE_FILE, which needs neither
+    a document open nor any text parsing - see matches_file_date()).
+
+    `custom_format` (02.09.2026, Michael: "Plus Freitext Eintrag [...]
+    für den Freitext sollten eben alle gültigen Formate eingebar sein") -
+    the free-text token pattern from the dialogs' own custom-format
+    field, or None if it was left empty - see
+    compile_custom_date_pattern() above for the token grammar. Searched
+    IN ADDITION to whichever `formats` checkboxes are also selected, not
+    instead of them - a user might want both a preset AND their own
+    pattern active at once.
     """
 
     source: str
     date_range: DateRange
     regions: frozenset[str] = frozenset()
     formats: frozenset[str] = DEFAULT_DATE_FORMATS
+    custom_format: str | None = None
 
 
 def matches_file_date(path: Path, date_range: DateRange) -> bool:
@@ -237,13 +392,16 @@ def matches_file_date(path: Path, date_range: DateRange) -> bool:
     return date_range.contains(mtime)
 
 
-def matches_document_date(text: str | None, formats, date_range: DateRange) -> bool:
-    """Whether ANY date found in `text` (per `formats`, see find_dates())
-    falls in `date_range`. `text=None` (nothing extractable for the
-    selected region(s), e.g. a document with no footer at all when only
-    "Footer" is selected) never matches - same "no text, no match"
-    convention as pipeline/search_query.py::matches_query().
+def matches_document_date(
+    text: str | None, formats, date_range: DateRange, custom_format: str | None = None
+) -> bool:
+    """Whether ANY date found in `text` (per `formats`/`custom_format`,
+    see find_dates()) falls in `date_range`. `text=None` (nothing
+    extractable for the selected region(s), e.g. a document with no
+    footer at all when only "Footer" is selected) never matches - same
+    "no text, no match" convention as pipeline/search_query.py::
+    matches_query().
     """
     if text is None:
         return False
-    return any(date_range.contains(found) for found in find_dates(text, formats))
+    return any(date_range.contains(found) for found in find_dates(text, formats, custom_format))

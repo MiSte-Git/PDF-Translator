@@ -84,6 +84,7 @@ from pipeline.date_extract import (
     SOURCE_FILE,
     DateRange,
     DateSearchFilter,
+    compile_custom_date_pattern,
 )
 from ui.drive_search import DriveSearchResult, extract_folder_id
 from ui.i18n import LanguageManager
@@ -143,6 +144,24 @@ def _configure_optional_date_edit(edit: QDateEdit) -> None:
     into ui/word_merge_search_dialog.py rather than duplicated, same as
     _DRIVE_CONNECTED_STYLE/_match_path above - purely format-agnostic Qt
     widget setup, nothing PDF- or DOCX-specific about it.
+
+    02.09.2026 (Michael: "Beim Datum Filter sollte nicht der 1.1.1900 drin
+    stehen eher das aktuelle Datum.") - the field's actual VALUE has to
+    stay pinned to _DATE_UNSET while unset (that's the entire blank-
+    display mechanism above: specialValueText is hard-tied to Qt's own
+    minimum(), not to any date of our own choosing, and _optional_date()
+    below reads the sentinel back as "nothing entered") - so defaulting
+    the value itself to today isn't an option, that would make an
+    untouched field silently filter by today's date. Only the CALENDAR
+    POPUP's displayed page is nudged to the current month instead.
+    Confirmed by hand (QTest.mouseClick on the dropdown arrow) that Qt
+    re-syncs the popup's page to the edit's actual value - still the 1900
+    sentinel - every single time it's opened, undoing a plain one-off
+    setCurrentPage() call made right after construction; _snap_calendar_
+    to_today_while_unset() below reapplies it via currentPageChanged
+    instead, but ONLY while the field is still unset AND the page is
+    exactly back at the 1900 sentinel - never fighting the user's own
+    navigation once they're actually browsing to some other month/year.
     """
     edit.setCalendarPopup(True)
     edit.setDisplayFormat("dd.MM.yyyy")
@@ -150,6 +169,16 @@ def _configure_optional_date_edit(edit: QDateEdit) -> None:
     edit.setMaximumDate(QDate(2999, 12, 31))
     edit.setSpecialValueText(" ")  # shown while the value == minimumDate ("not set")
     edit.setDate(_DATE_UNSET)
+
+    calendar = edit.calendarWidget()
+
+    def _snap_calendar_to_today_while_unset(year: int, month: int) -> None:
+        if edit.date() == _DATE_UNSET and (year, month) == (_DATE_UNSET.year(), _DATE_UNSET.month()):
+            today = QDate.currentDate()
+            calendar.setCurrentPage(today.year(), today.month())
+
+    calendar.currentPageChanged.connect(_snap_calendar_to_today_while_unset)
+    _snap_calendar_to_today_while_unset(_DATE_UNSET.year(), _DATE_UNSET.month())  # apply once immediately too
 
 
 def _optional_date(edit: QDateEdit) -> date | None:
@@ -644,11 +673,29 @@ class MergeSearchDialog(QDialog):
         date_format_row.addWidget(self.date_format_slash_checkbox)
         date_format_row.addStretch(1)
 
+        # 02.09.2026 (Michael: "Bei der Datumsuche müssten noch das Format
+        # 'September 4, 2026' als Auswahl dabei sein, Plus Freitext
+        # Eintrag. Also 'MMMM D, YYYY' und 'MMMM DD, YYYY'. Und für den
+        # Freitext sollten eben alle gültigen Formate eingebar sein, mit
+        # Beispielen.") - an optional, free-text field (empty = not used,
+        # same "opt-in by content" contract as query_edit above) where the
+        # user types their OWN pattern with the tokens explained in its
+        # tooltip - see pipeline/date_extract.py::compile_custom_date_pattern()
+        # for the token grammar this parses. Searched IN ADDITION to
+        # whichever preset checkboxes above are also checked, not instead
+        # of them (see DateSearchFilter.custom_format's docstring).
+        self.date_custom_format_label = QLabel()
+        self.date_custom_format_edit = QLineEdit()
+        custom_format_row = QHBoxLayout()
+        custom_format_row.addWidget(self.date_custom_format_label)
+        custom_format_row.addWidget(self.date_custom_format_edit, 1)
+
         self.date_document_options = QWidget()
         date_document_layout = QVBoxLayout(self.date_document_options)
         date_document_layout.setContentsMargins(0, 0, 0, 0)
         date_document_layout.addLayout(date_region_row)
         date_document_layout.addLayout(date_format_row)
+        date_document_layout.addLayout(custom_format_row)
         self.date_document_options.setVisible(False)  # source starts on "Dateidatum"
 
         self.date_exact_checkbox = QCheckBox()
@@ -735,9 +782,21 @@ class MergeSearchDialog(QDialog):
         self.date_region_header_checkbox.setText(t("merge_search.date_region_header"))
         self.date_region_footer_checkbox.setText(t("merge_search.date_region_footer"))
         self.date_format_iso_checkbox.setText(t("merge_search.date_format_iso"))
+        self.date_format_iso_checkbox.setToolTip(t("merge_search.date_format_iso_tooltip"))
         self.date_format_de_checkbox.setText(t("merge_search.date_format_de"))
+        self.date_format_de_checkbox.setToolTip(t("merge_search.date_format_de_tooltip"))
         self.date_format_en_month_checkbox.setText(t("merge_search.date_format_en_month"))
+        self.date_format_en_month_checkbox.setToolTip(t("merge_search.date_format_en_month_tooltip"))
         self.date_format_slash_checkbox.setText(t("merge_search.date_format_slash"))
+        self.date_format_slash_checkbox.setToolTip(t("merge_search.date_format_slash_tooltip"))
+        # 02.09.2026 (Michael: "Plus Freitext Eintrag [...] für den
+        # Freitext sollten eben alle gültigen Formate eingebar sein, mit
+        # Beispielen.") - see date_custom_format_edit's constructor
+        # comment above.
+        self.date_custom_format_label.setText(t("merge_search.date_custom_format_label"))
+        self.date_custom_format_edit.setPlaceholderText(t("merge_search.date_custom_format_placeholder"))
+        self.date_custom_format_edit.setToolTip(t("merge_search.date_custom_format_tooltip"))
+        self.date_custom_format_label.setToolTip(t("merge_search.date_custom_format_tooltip"))
         self.date_exact_checkbox.setText(t("merge_search.date_exact_checkbox"))
         self.date_from_label.setText(t("merge_search.date_from_label"))
         self.date_to_label.setText(t("merge_search.date_to_label"))
@@ -1032,10 +1091,24 @@ class MergeSearchDialog(QDialog):
         if not regions:
             return None, "merge_search.error_missing_date_region"
         formats = self._selected_date_formats()
-        if not formats:
+        # 02.09.2026 (Michael: "Plus Freitext Eintrag [...] für den
+        # Freitext sollten eben alle gültigen Formate eingebar sein.") -
+        # an optional, additional format on top of the preset checkboxes,
+        # not instead of them - see DateSearchFilter.custom_format's
+        # docstring.
+        custom_format = self.date_custom_format_edit.text().strip()
+        if not formats and not custom_format:
             return None, "merge_search.error_missing_date_format"
+        if custom_format and compile_custom_date_pattern(custom_format) is None:
+            return None, "merge_search.error_invalid_custom_date_format"
         return (
-            DateSearchFilter(source=SOURCE_DOCUMENT, date_range=date_range, regions=regions, formats=formats),
+            DateSearchFilter(
+                source=SOURCE_DOCUMENT,
+                date_range=date_range,
+                regions=regions,
+                formats=formats,
+                custom_format=custom_format or None,
+            ),
             None,
         )
 

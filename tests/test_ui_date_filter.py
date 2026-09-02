@@ -33,8 +33,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from datetime import date
 
 import pytest
-from PySide6.QtCore import QSettings, QThreadPool
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtCore import QDate, QSettings, Qt, QThreadPool
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QMessageBox, QStyle, QStyleOptionSpinBox
 
 from pipeline.date_extract import SOURCE_DOCUMENT, SOURCE_FILE, FORMAT_ISO
 from ui.search_scopes import DATE_REGION_FOOTER, DATE_REGION_ICO_FORMAT
@@ -258,6 +259,142 @@ def test_build_date_filter_document_source_without_format_is_an_error(qapp, modu
 
 
 @pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_custom_format_field_has_a_label_placeholder_and_tooltip(qapp, module_name, dialog_attr) -> None:
+    # 02.09.2026 (Michael: "Und für den Freitext sollten eben alle
+    # gültigen Formate eingebar sein, mit Beispielen.") - the field must
+    # actually explain its own token syntax, not just accept it.
+    dialog = _make_dialog(module_name, dialog_attr, "DateCustomFormatLabels")
+    try:
+        assert dialog.date_custom_format_label.text()
+        assert dialog.date_custom_format_edit.placeholderText()
+        assert dialog.date_custom_format_edit.toolTip()
+        assert "YYYY" in dialog.date_custom_format_edit.toolTip()
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_build_date_filter_custom_format_alone_is_enough_without_any_preset_checked(
+    qapp, module_name, dialog_attr
+) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, "DateBuildCustomAlone")
+    try:
+        dialog.date_filter_group.setChecked(True)
+        dialog.date_source_document_radio.setChecked(True)
+        dialog.date_format_iso_checkbox.setChecked(False)  # the only default format
+        dialog.date_custom_format_edit.setText("MMMM D, YYYY")
+        dialog.date_from_edit.setDate(dialog.date_from_edit.date().fromString("2026-01-01", "yyyy-MM-dd"))
+
+        date_filter, error_key = dialog._build_date_filter()
+
+        assert error_key is None
+        assert date_filter is not None
+        assert date_filter.formats == frozenset()
+        assert date_filter.custom_format == "MMMM D, YYYY"
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_build_date_filter_custom_format_combines_with_a_preset(qapp, module_name, dialog_attr) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, "DateBuildCustomPlusPreset")
+    try:
+        dialog.date_filter_group.setChecked(True)
+        dialog.date_source_document_radio.setChecked(True)
+        dialog.date_custom_format_edit.setText("MMMM D, YYYY")
+        dialog.date_from_edit.setDate(dialog.date_from_edit.date().fromString("2026-01-01", "yyyy-MM-dd"))
+
+        date_filter, error_key = dialog._build_date_filter()
+
+        assert error_key is None
+        assert date_filter is not None
+        assert date_filter.formats == frozenset({FORMAT_ISO})
+        assert date_filter.custom_format == "MMMM D, YYYY"
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_build_date_filter_blank_custom_format_is_not_treated_as_set(qapp, module_name, dialog_attr) -> None:
+    # Whitespace-only input must fall back to None, not become a
+    # zero-token pattern the validator would have to reject instead.
+    dialog = _make_dialog(module_name, dialog_attr, "DateBuildCustomBlank")
+    try:
+        dialog.date_filter_group.setChecked(True)
+        dialog.date_source_document_radio.setChecked(True)
+        dialog.date_custom_format_edit.setText("   ")
+        dialog.date_from_edit.setDate(dialog.date_from_edit.date().fromString("2026-01-01", "yyyy-MM-dd"))
+
+        date_filter, error_key = dialog._build_date_filter()
+
+        assert error_key is None
+        assert date_filter is not None
+        assert date_filter.custom_format is None
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_build_date_filter_no_preset_and_no_custom_format_is_the_missing_format_error(
+    qapp, module_name, dialog_attr
+) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, "DateBuildNeitherFormat")
+    try:
+        dialog.date_filter_group.setChecked(True)
+        dialog.date_source_document_radio.setChecked(True)
+        dialog.date_format_iso_checkbox.setChecked(False)  # the only default format
+        dialog.date_from_edit.setDate(dialog.date_from_edit.date().fromString("2026-01-01", "yyyy-MM-dd"))
+
+        date_filter, error_key = dialog._build_date_filter()
+
+        assert date_filter is None
+        assert error_key == "merge_search.error_missing_date_format"
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_build_date_filter_invalid_custom_format_is_an_error_even_with_a_preset_checked(
+    qapp, module_name, dialog_attr
+) -> None:
+    # A preset being checked must not silently hide a typo in the custom
+    # field - Michael typed it on purpose, so an unusable pattern there
+    # should always be flagged rather than quietly ignored.
+    dialog = _make_dialog(module_name, dialog_attr, "DateBuildCustomInvalid")
+    try:
+        dialog.date_filter_group.setChecked(True)
+        dialog.date_source_document_radio.setChecked(True)
+        dialog.date_custom_format_edit.setText("YYYY-YYYY")
+        dialog.date_from_edit.setDate(dialog.date_from_edit.date().fromString("2026-01-01", "yyyy-MM-dd"))
+
+        date_filter, error_key = dialog._build_date_filter()
+
+        assert date_filter is None
+        assert error_key == "merge_search.error_invalid_custom_date_format"
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_build_date_filter_plain_text_with_no_tokens_is_an_invalid_custom_format(
+    qapp, module_name, dialog_attr
+) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, "DateBuildCustomNoTokens")
+    try:
+        dialog.date_filter_group.setChecked(True)
+        dialog.date_source_document_radio.setChecked(True)
+        dialog.date_custom_format_edit.setText("kein Platzhalter hier")
+        dialog.date_from_edit.setDate(dialog.date_from_edit.date().fromString("2026-01-01", "yyyy-MM-dd"))
+
+        date_filter, error_key = dialog._build_date_filter()
+
+        assert date_filter is None
+        assert error_key == "merge_search.error_invalid_custom_date_format"
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
 def test_start_search_warns_and_does_not_start_a_worker_on_reversed_range(
     qapp, monkeypatch: pytest.MonkeyPatch, no_run_thread_pool: list[object], module_name, dialog_attr, tmp_path
 ) -> None:
@@ -313,5 +450,73 @@ def test_start_search_passes_none_date_filter_when_group_unchecked(
         assert len(no_run_thread_pool) == 1
         worker = no_run_thread_pool[0]
         assert worker.date_filter is None
+    finally:
+        dialog.close()
+
+
+# --- calendar popup opens on today, not the 1900 "unset" sentinel --------
+# Michael, after trying the date filter out: "Beim Datum Filter sollte
+# nicht der 1.1.1900 drin stehen eher das aktuelle Datum."
+
+
+def _open_calendar_popup(edit) -> None:
+    """Clicks the QDateEdit's own dropdown arrow, the same way a user
+    would - NOT edit.calendarWidget().show() directly, since that
+    bypasses the exact internal re-sync (QDateTimeEdit resetting the
+    popup's page back to the edit's current value on every open) this
+    test exists to guard against. Confirmed by hand that this actually
+    reproduces the real symptom before the fix (calendar page snapping
+    back to January 1900) and the fix (page staying on the current
+    month).
+    """
+    opt = QStyleOptionSpinBox()
+    opt.initFrom(edit)
+    rect = edit.style().subControlRect(QStyle.CC_SpinBox, opt, QStyle.SC_SpinBoxDown, edit)
+    QTest.mouseClick(edit, Qt.LeftButton, Qt.NoModifier, rect.center())
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+@pytest.mark.parametrize("edit_attr", ["date_from_edit", "date_to_edit", "date_exact_edit"])
+def test_calendar_popup_opens_on_the_current_month_while_the_field_is_unset(
+    qapp, module_name, dialog_attr, edit_attr
+) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, f"CalendarToday{edit_attr}")
+    try:
+        dialog.date_filter_group.setChecked(True)
+        dialog.date_exact_checkbox.setChecked(edit_attr == "date_exact_edit")
+        edit = getattr(dialog, edit_attr)
+        today = QDate.currentDate()
+
+        _open_calendar_popup(edit)
+
+        calendar = edit.calendarWidget()
+        assert (calendar.yearShown(), calendar.monthShown()) == (today.year(), today.month())
+        # Still genuinely unset - only the popup's displayed page moved,
+        # not the field's own value (which would silently start filtering
+        # by today's date if it had).
+        assert edit.date() == QDate(1900, 1, 1)
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_picking_a_date_from_the_calendar_still_works_normally(qapp, module_name, dialog_attr) -> None:
+    # Regression guard: the currentPageChanged snap-back-to-today guard
+    # must not interfere once the user actually navigates or picks a date.
+    dialog = _make_dialog(module_name, dialog_attr, "CalendarPickStillWorks")
+    try:
+        dialog.date_filter_group.setChecked(True)
+        edit = dialog.date_from_edit
+
+        _open_calendar_popup(edit)
+        edit.calendarWidget().setSelectedDate(QDate(2019, 6, 15))
+        assert edit.date() == QDate(2019, 6, 15)
+
+        # Reopening the popup afterwards must show June 2019 (the field's
+        # real value now), NOT jump back to today - the guard only ever
+        # applies while the field is still the 1900 sentinel.
+        _open_calendar_popup(edit)
+        calendar = edit.calendarWidget()
+        assert (calendar.yearShown(), calendar.monthShown()) == (2019, 6)
     finally:
         dialog.close()

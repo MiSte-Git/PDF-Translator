@@ -423,16 +423,64 @@ DE = {
     "merge_search.date_region_header": "Header (alle Seiten)",
     "merge_search.date_region_footer": "Footer (alle Seiten)",
     "merge_search.date_format_iso": "ISO (JJJJ-MM-TT)",
+    "merge_search.date_format_iso_tooltip": "Erkennt z. B. „2026-09-04“.",
     "merge_search.date_format_de": "Deutsch (TT.MM.JJJJ)",
-    "merge_search.date_format_en_month": "Englisch (Monatsname)",
+    "merge_search.date_format_de_tooltip": "Erkennt z. B. „04.09.2026“ (auch zweistellige Jahre wie „04.09.26“).",
+    # 02.09.2026 (Michael: "Bei der Datumsuche müssten noch das Format
+    # 'September 4, 2026' als Auswahl dabei sein [...]") - dieses Format
+    # wurde technisch bereits VOR dieser Änderung erkannt (_EN_MONTH_RE in
+    # pipeline/date_extract.py deckt sowohl "September 4, 2026" als auch
+    # "4. September 2026" ab, Komma optional, Tag ein- oder zweistellig) -
+    # nur die Beschriftung zeigte bislang kein konkretes Beispiel dafür,
+    # anders als die drei anderen Formate oben mit ihrem TT.MM.JJJJ-Muster
+    # in Klammern. Jetzt mit Beispiel direkt in der Beschriftung (nicht
+    # nur im Tooltip) - genau das war der eigentliche Stolperstein.
+    "merge_search.date_format_en_month": "Englisch (Monatsname, z. B. September 4, 2026)",
+    "merge_search.date_format_en_month_tooltip": (
+        "Erkennt sowohl „September 4, 2026“ als auch „4. September 2026“ "
+        "(Komma optional, Tag ein- oder zweistellig)."
+    ),
     "merge_search.date_format_slash": "Schrägstrich (TT/MM/JJJJ)",
+    "merge_search.date_format_slash_tooltip": "Erkennt z. B. „04/09/2026“.",
     "merge_search.date_exact_checkbox": "Exaktes Datum",
     "merge_search.date_from_label": "Von",
     "merge_search.date_to_label": "Bis",
     "merge_search.date_exact_label": "Datum",
     "merge_search.error_date_range_reversed": "„Von“ darf nicht nach „Bis“ liegen.",
     "merge_search.error_missing_date_region": "Bitte mindestens einen Bereich für die Datumssuche auswählen.",
-    "merge_search.error_missing_date_format": "Bitte mindestens ein Datumsformat auswählen.",
+    "merge_search.error_missing_date_format": (
+        "Bitte mindestens ein Datumsformat auswählen oder ein eigenes Format eingeben."
+    ),
+    # 02.09.2026 (Michael: "Plus Freitext Eintrag. Also 'MMMM D, YYYY' und
+    # 'MMMM DD, YYYY'. Und für den Freitext sollten eben alle gültigen
+    # Formate eingebar sein, mit Beispielen.") - ein optionales Freitext-
+    # Feld für ein selbst eingegebenes Format, ZUSÄTZLICH zu den festen
+    # Formaten oben (nicht statt ihnen) - siehe
+    # pipeline/date_extract.py::compile_custom_date_pattern() für die
+    # unterstützten Platzhalter.
+    "merge_search.date_custom_format_label": "Eigenes Format",
+    "merge_search.date_custom_format_placeholder": "z. B. MMMM D, YYYY",
+    "merge_search.date_custom_format_tooltip": (
+        "Eigenes Datumsformat mit diesen Platzhaltern (immer in Englisch "
+        "eingeben, auch in diesem deutschen Dialog) - alle anderen "
+        "Zeichen wie Leerzeichen, Kommas, Punkte oder Schrägstriche "
+        "werden wörtlich gesucht:\n\n"
+        "YYYY – Jahr, 4-stellig, z. B. 2026\n"
+        "YY – Jahr, 2-stellig, z. B. 26\n"
+        "MMMM – Monatsname, z. B. September\n"
+        "MMM – Monatsname abgekürzt, z. B. Sep\n"
+        "MM – Monat, 2-stellig, z. B. 09\n"
+        "M – Monat, 1- oder 2-stellig, z. B. 9\n"
+        "DD – Tag, 2-stellig, z. B. 04\n"
+        "D – Tag, 1- oder 2-stellig, z. B. 4\n\n"
+        "Beispiele:\n"
+        "„MMMM D, YYYY“ findet „September 4, 2026“\n"
+        "„MMMM DD, YYYY“ findet „September 04, 2026“\n"
+        "„YYYY/MM/DD“ findet „2026/09/04“"
+    ),
+    "merge_search.error_invalid_custom_date_format": (
+        "Das eigene Datumsformat ist ungültig - bitte die Platzhalter aus dem Tooltip verwenden."
+    ),
     # 02.09.2026 (Michael: "wird in der Überschrift über dem Suchfeld nicht
     # die Operatoren mit angezeigt. Die Aussage 'leer = alle Dateien' ist
     # eher verwirrend und sollte dort raus.") - "leer = alle Dateien"
@@ -1010,16 +1058,55 @@ EN = {
     "merge_search.date_region_header": "Header (all pages)",
     "merge_search.date_region_footer": "Footer (all pages)",
     "merge_search.date_format_iso": "ISO (YYYY-MM-DD)",
+    "merge_search.date_format_iso_tooltip": "Matches e.g. “2026-09-04”.",
     "merge_search.date_format_de": "German (DD.MM.YYYY)",
-    "merge_search.date_format_en_month": "English (month name)",
+    "merge_search.date_format_de_tooltip": "Matches e.g. “04.09.2026” (also 2-digit years like “04.09.26”).",
+    # 02.09.2026 - see the German string's comment: this format already
+    # matched "September 4, 2026" before this change too (_EN_MONTH_RE in
+    # pipeline/date_extract.py covers both orderings, comma optional,
+    # 1- or 2-digit day) - just the label gave no concrete example, unlike
+    # the other three formats' bracketed pattern above.
+    "merge_search.date_format_en_month": "English (month name, e.g. September 4, 2026)",
+    "merge_search.date_format_en_month_tooltip": (
+        "Matches both “September 4, 2026” and “4 September 2026” "
+        "(comma optional, day with or without a leading zero)."
+    ),
     "merge_search.date_format_slash": "Slash (DD/MM/YYYY)",
+    "merge_search.date_format_slash_tooltip": "Matches e.g. “04/09/2026”.",
     "merge_search.date_exact_checkbox": "Exact date",
     "merge_search.date_from_label": "From",
     "merge_search.date_to_label": "To",
     "merge_search.date_exact_label": "Date",
     "merge_search.error_date_range_reversed": "“From” must not be after “To”.",
     "merge_search.error_missing_date_region": "Please select at least one region for the date search.",
-    "merge_search.error_missing_date_format": "Please select at least one date format.",
+    "merge_search.error_missing_date_format": "Please select at least one date format, or enter your own format.",
+    # 02.09.2026 (Michael: "Plus Freitext Eintrag [...] für den Freitext
+    # sollten eben alle gültigen Formate eingebar sein, mit Beispielen.")
+    # - an optional free-text field for a user-typed format, IN ADDITION
+    # to the presets above (not instead of them) - see
+    # pipeline/date_extract.py::compile_custom_date_pattern() for the
+    # supported placeholders.
+    "merge_search.date_custom_format_label": "Custom format",
+    "merge_search.date_custom_format_placeholder": "e.g. MMMM D, YYYY",
+    "merge_search.date_custom_format_tooltip": (
+        "Custom date format using these placeholders (everything else - "
+        "spaces, commas, dots, slashes, ... - is matched literally):\n\n"
+        "YYYY – year, 4 digits, e.g. 2026\n"
+        "YY – year, 2 digits, e.g. 26\n"
+        "MMMM – month name, e.g. September\n"
+        "MMM – month name, abbreviated, e.g. Sep\n"
+        "MM – month, 2 digits, e.g. 09\n"
+        "M – month, 1 or 2 digits, e.g. 9\n"
+        "DD – day, 2 digits, e.g. 04\n"
+        "D – day, 1 or 2 digits, e.g. 4\n\n"
+        "Examples:\n"
+        "“MMMM D, YYYY” matches “September 4, 2026”\n"
+        "“MMMM DD, YYYY” matches “September 04, 2026”\n"
+        "“YYYY/MM/DD” matches “2026/09/04”"
+    ),
+    "merge_search.error_invalid_custom_date_format": (
+        "The custom date format is invalid - please use the placeholders shown in the tooltip."
+    ),
     # 02.09.2026 - see the German string's comment: "empty = every file"
     # dropped (already covered, more clearly, by query_placeholder), &&/||
     # added alongside AND/OR.

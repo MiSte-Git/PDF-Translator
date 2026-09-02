@@ -141,7 +141,7 @@ def _passes_date_filter(
     if date_filter.source == SOURCE_FILE:
         return matches_file_date(path, date_filter.date_range)
     text = date_region_extractor(str(path)) if date_region_extractor is not None else None
-    return matches_document_date(text, date_filter.formats, date_filter.date_range)
+    return matches_document_date(text, date_filter.formats, date_filter.date_range, date_filter.custom_format)
 
 
 def find_matching(

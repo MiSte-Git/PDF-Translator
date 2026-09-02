@@ -15,10 +15,14 @@ from pathlib import Path
 
 from pipeline.date_extract import (
     DateRange,
+    DateSearchFilter,
     FORMAT_DE,
     FORMAT_EN_MONTH,
     FORMAT_ISO,
     FORMAT_SLASH,
+    SOURCE_DOCUMENT,
+    compile_custom_date_pattern,
+    find_custom_format_dates,
     find_dates,
     matches_document_date,
     matches_file_date,
@@ -92,6 +96,15 @@ def test_find_en_month_dates_both_orderings() -> None:
     assert find_dates("Issued: September 1 2026", {FORMAT_EN_MONTH}) == [date(2026, 9, 1)]  # no comma
 
 
+def test_find_en_month_dates_matches_michaels_own_example() -> None:
+    # 02.09.2026 (Michael: "Bei der Datumsuche müssten noch das Format
+    # 'September 4, 2026' als Auswahl dabei sein [...]") - already worked
+    # before that change (see ui/i18n_data.py's comment on
+    # merge_search.date_format_en_month for what actually changed: only
+    # the checkbox's LABEL, not this matching logic).
+    assert find_dates("September 4, 2026", {FORMAT_EN_MONTH}) == [date(2026, 9, 4)]
+
+
 def test_find_dates_only_uses_selected_formats() -> None:
     text = "ISO: 2026-09-01, DE: 02.09.2026"
     assert find_dates(text, {FORMAT_ISO}) == [date(2026, 9, 1)]
@@ -124,3 +137,92 @@ def test_matches_file_date_uses_the_files_modification_date(tmp_path: Path) -> N
 
     assert matches_file_date(target, DateRange(start=date(2026, 6, 1), end=date(2026, 6, 30))) is True
     assert matches_file_date(target, DateRange(start=date(2026, 7, 1))) is False
+
+
+# --- custom (free-text) date format (02.09.2026) --------------------------
+# Michael: "Bei der Datumsuche müssten noch das Format 'September 4, 2026'
+# als Auswahl dabei sein, Plus Freitext Eintrag. Also 'MMMM D, YYYY' und
+# 'MMMM DD, YYYY'. Und für den Freitext sollten eben alle gültigen
+# Formate eingebar sein, mit Beispielen."
+
+
+def test_custom_pattern_matches_michaels_own_two_examples() -> None:
+    assert find_custom_format_dates("Filed September 4, 2026.", "MMMM D, YYYY") == [date(2026, 9, 4)]
+    assert find_custom_format_dates("Filed September 04, 2026.", "MMMM DD, YYYY") == [date(2026, 9, 4)]
+
+
+def test_custom_pattern_d_token_also_matches_a_zero_padded_day() -> None:
+    # \d{1,2} doesn't care about padding either way - D is the more
+    # permissive of the two, not the stricter one.
+    assert find_custom_format_dates("September 04, 2026", "MMMM D, YYYY") == [date(2026, 9, 4)]
+
+
+def test_custom_pattern_dd_token_requires_two_digits() -> None:
+    assert find_custom_format_dates("September 4, 2026", "MMMM DD, YYYY") == []
+
+
+def test_custom_pattern_supports_abbreviated_month_and_two_digit_year() -> None:
+    assert find_custom_format_dates("Filed Sep 4, 26.", "MMM D, YY") == [date(2026, 9, 4)]
+
+
+def test_custom_pattern_supports_numeric_month_orderings() -> None:
+    assert find_custom_format_dates("2026/09/04", "YYYY/MM/DD") == [date(2026, 9, 4)]
+    assert find_custom_format_dates("04-09-2026", "DD-MM-YYYY") == [date(2026, 9, 4)]
+
+
+def test_custom_pattern_literal_characters_are_matched_literally() -> None:
+    # "2026-09-04" (dashes) must NOT match a pattern that expects slashes.
+    assert find_custom_format_dates("2026-09-04", "YYYY/MM/DD") == []
+
+
+def test_custom_pattern_is_case_insensitive_for_month_names() -> None:
+    assert find_custom_format_dates("september 4, 2026", "MMMM D, YYYY") == [date(2026, 9, 4)]
+
+
+def test_compile_custom_date_pattern_rejects_empty_or_no_tokens() -> None:
+    assert compile_custom_date_pattern("") is None
+    assert compile_custom_date_pattern("no placeholders here") is None
+
+
+def test_compile_custom_date_pattern_rejects_a_repeated_field_kind() -> None:
+    # A real date has exactly one year/month/day - "YYYY...YYYY" or mixing
+    # MM with M for the SAME field can never represent one real date.
+    assert compile_custom_date_pattern("YYYY-YYYY") is None
+    assert compile_custom_date_pattern("MM/M") is None
+    assert compile_custom_date_pattern("DD.D") is None
+
+
+def test_compile_custom_date_pattern_accepts_a_pattern_missing_a_field() -> None:
+    # Missing a token isn't itself invalid (still compiles) - it simply
+    # never matches a real date, see the next test.
+    assert compile_custom_date_pattern("MMMM YYYY") is not None
+
+
+def test_find_custom_format_dates_never_matches_with_a_missing_field() -> None:
+    assert find_custom_format_dates("September 2026", "MMMM YYYY") == []
+
+
+def test_find_custom_format_dates_returns_empty_for_an_invalid_pattern_rather_than_raising() -> None:
+    assert find_custom_format_dates("anything", "") == []
+    assert find_custom_format_dates("anything", "YYYY-YYYY") == []
+
+
+def test_find_dates_includes_custom_format_alongside_presets() -> None:
+    text = "ISO: 2026-01-15. Custom: September 4, 2026."
+    found = find_dates(text, {FORMAT_ISO}, custom_format="MMMM D, YYYY")
+    assert set(found) == {date(2026, 1, 15), date(2026, 9, 4)}
+
+    # Presets alone (no custom_format) still work unchanged.
+    assert find_dates(text, {FORMAT_ISO}) == [date(2026, 1, 15)]
+
+
+def test_matches_document_date_uses_custom_format_too() -> None:
+    date_range = DateRange(start=date(2026, 1, 1), end=date(2026, 12, 31))
+    text = "Filed: September 4, 2026."
+    assert matches_document_date(text, set(), date_range, custom_format="MMMM D, YYYY") is True
+    assert matches_document_date(text, set(), date_range) is False  # no format at all selected
+
+
+def test_date_search_filter_custom_format_defaults_to_none() -> None:
+    filter_ = DateSearchFilter(source=SOURCE_DOCUMENT, date_range=DateRange())
+    assert filter_.custom_format is None

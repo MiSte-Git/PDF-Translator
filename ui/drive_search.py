@@ -185,7 +185,7 @@ def _passes_drive_date_filter(
     if date_filter.source == SOURCE_FILE:
         return entry.modified_time is not None and date_filter.date_range.contains(entry.modified_time)
     text = date_region_extractor(str(tmp_path)) if date_region_extractor is not None else None
-    return matches_document_date(text, date_filter.formats, date_filter.date_range)
+    return matches_document_date(text, date_filter.formats, date_filter.date_range, date_filter.custom_format)
 
 
 def find_drive_matching(

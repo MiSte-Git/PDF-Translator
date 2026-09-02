@@ -57,6 +57,7 @@ from pipeline.date_extract import (
     SOURCE_FILE,
     DateRange,
     DateSearchFilter,
+    compile_custom_date_pattern,
 )
 from ui.drive_search import DriveSearchResult, extract_folder_id
 from ui.i18n import LanguageManager
@@ -400,11 +401,20 @@ class WordMergeSearchDialog(QDialog):
         date_format_row.addWidget(self.date_format_slash_checkbox)
         date_format_row.addStretch(1)
 
+        # 02.09.2026 - see MergeSearchDialog's identical block (this
+        # dialog duplicates that one's custom date-format field).
+        self.date_custom_format_label = QLabel()
+        self.date_custom_format_edit = QLineEdit()
+        custom_format_row = QHBoxLayout()
+        custom_format_row.addWidget(self.date_custom_format_label)
+        custom_format_row.addWidget(self.date_custom_format_edit, 1)
+
         self.date_document_options = QWidget()
         date_document_layout = QVBoxLayout(self.date_document_options)
         date_document_layout.setContentsMargins(0, 0, 0, 0)
         date_document_layout.addLayout(date_region_row)
         date_document_layout.addLayout(date_format_row)
+        date_document_layout.addLayout(custom_format_row)
         self.date_document_options.setVisible(False)  # source starts on "Dateidatum"
 
         self.date_exact_checkbox = QCheckBox()
@@ -485,9 +495,19 @@ class WordMergeSearchDialog(QDialog):
         self.date_region_header_checkbox.setText(t("merge_search.date_region_header"))
         self.date_region_footer_checkbox.setText(t("merge_search.date_region_footer"))
         self.date_format_iso_checkbox.setText(t("merge_search.date_format_iso"))
+        self.date_format_iso_checkbox.setToolTip(t("merge_search.date_format_iso_tooltip"))
         self.date_format_de_checkbox.setText(t("merge_search.date_format_de"))
+        self.date_format_de_checkbox.setToolTip(t("merge_search.date_format_de_tooltip"))
         self.date_format_en_month_checkbox.setText(t("merge_search.date_format_en_month"))
+        self.date_format_en_month_checkbox.setToolTip(t("merge_search.date_format_en_month_tooltip"))
         self.date_format_slash_checkbox.setText(t("merge_search.date_format_slash"))
+        self.date_format_slash_checkbox.setToolTip(t("merge_search.date_format_slash_tooltip"))
+        # See MergeSearchDialog's identical block (this dialog duplicates
+        # that one's custom date-format field).
+        self.date_custom_format_label.setText(t("merge_search.date_custom_format_label"))
+        self.date_custom_format_edit.setPlaceholderText(t("merge_search.date_custom_format_placeholder"))
+        self.date_custom_format_edit.setToolTip(t("merge_search.date_custom_format_tooltip"))
+        self.date_custom_format_label.setToolTip(t("merge_search.date_custom_format_tooltip"))
         self.date_exact_checkbox.setText(t("merge_search.date_exact_checkbox"))
         self.date_from_label.setText(t("merge_search.date_from_label"))
         self.date_to_label.setText(t("merge_search.date_to_label"))
@@ -763,10 +783,21 @@ class WordMergeSearchDialog(QDialog):
         if not regions:
             return None, "merge_search.error_missing_date_region"
         formats = self._selected_date_formats()
-        if not formats:
+        # See MergeSearchDialog._build_date_filter()'s identical comment
+        # (this dialog duplicates that one's custom date-format field).
+        custom_format = self.date_custom_format_edit.text().strip()
+        if not formats and not custom_format:
             return None, "merge_search.error_missing_date_format"
+        if custom_format and compile_custom_date_pattern(custom_format) is None:
+            return None, "merge_search.error_invalid_custom_date_format"
         return (
-            DateSearchFilter(source=SOURCE_DOCUMENT, date_range=date_range, regions=regions, formats=formats),
+            DateSearchFilter(
+                source=SOURCE_DOCUMENT,
+                date_range=date_range,
+                regions=regions,
+                formats=formats,
+                custom_format=custom_format or None,
+            ),
             None,
         )
 

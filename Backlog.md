@@ -9143,3 +9143,123 @@ Developer-Treffer, Sortier-Knöpfe wandern beim Herausnehmen ins Fenster
 (`parent() is window`) und funktionieren dort weiterhin, und landen beim
 Andocken wieder an ihrer ursprünglichen Stelle in `select_row`. Komplette
 Testsuite (715 Tests) läuft grün.
+
+### Dritter Nachtrag (selbe Sitzung): Kalender-Popup startet nicht mehr bei 1.1.1900
+
+Michael, während des Ausprobierens: "Beim Datum Filter sollte nicht der
+1.1.1900 drin stehen eher das aktuelle Datum."
+
+Von Hand nachgestellt (per `QTest.mouseClick` auf den Dropdown-Pfeil
+eines Von/Bis/Exakt-Feldes): Qt synchronisiert die im Kalender-Popup
+angezeigte Seite bei JEDEM Öffnen auf den tatsächlichen Wert des Feldes -
+und dieser Wert bleibt (solange nichts eingegeben wurde) absichtlich auf
+dem `_DATE_UNSET`-Sentinel (1900-01-01) stehen, über den das Feld
+überhaupt erst per `setSpecialValueText()` leer angezeigt wird (siehe
+`_DATE_UNSET`s Kommentar in `ui/merge_search_dialog.py`). Ein einmaliges
+`calendarWidget().setCurrentPage()` direkt nach dem Aufbau des Feldes
+wurde von diesem Resync beim ersten Klick auf den Dropdown-Pfeil also
+wieder überschrieben - das Popup sprang wieder auf Januar 1900.
+
+Der Sentinel-Wert selbst kann nicht auf "heute" verschoben werden:
+`specialValueText` ist in Qt fest an `minimum()` gekoppelt, und
+`minimumDate` muss weiterhin weit in der Vergangenheit liegen, damit
+sich überhaupt ältere Dokumentdaten auswählen lassen. Stattdessen wird
+nur die im Popup angezeigte SEITE per `calendarWidget().currentPageChanged`
+zurück auf den aktuellen Monat "gefedert" - aber ausschließlich solange
+das Feld noch unverändert (leer) UND die Seite exakt beim 1900er-Sentinel
+ist. Sobald ein echtes Datum gewählt oder manuell zu einem anderen
+Monat/Jahr navigiert wurde, greift dieser Mechanismus nicht mehr ein
+(von Hand mit `calendarWidget().setSelectedDate()` bestätigt: erneutes
+Öffnen zeigt danach korrekt den Monat des gewählten Datums, nicht mehr
+den heutigen). Einzige Änderung in `_configure_optional_date_edit()`
+(`ui/merge_search_dialog.py`) - gilt dadurch automatisch für alle drei
+Felder (Von/Bis/Exakt) in beiden Such-Dialogen, da diese Funktion dort
+bereits geteilt genutzt wird.
+
+Neue Tests in `tests/test_ui_date_filter.py`: Popup zeigt beim ersten
+Öffnen den aktuellen Monat (parametrisiert über alle drei Felder UND
+beide Dialoge), Feldwert bleibt dabei unverändert auf dem Sentinel
+(keine versehentliche "heute"-Filterung), und ein tatsächlich gewähltes
+Datum übersteht ein erneutes Öffnen unverändert (kein "Zurückfedern").
+Komplette Testsuite (723 Tests) läuft grün.
+
+### Vierter Nachtrag (selbe Sitzung): Format "September 4, 2026" + eigenes Freitext-Format
+
+Michael: "Bei der Datumsuche müssten noch das Format 'September 4, 2026'
+als Auswahl dabei sein, Plus Freitext Eintrag. Also 'MMMM D, YYYY' und
+'MMMM DD, YYYY'. Und für den Freitext sollten eben alle gültigen
+Formate eingebar sein, mit Beispielen."
+
+Erster Teil war beim Nachprüfen kein fehlendes Feature, sondern eine
+unklare Beschriftung: die Checkbox "Englisch (Monatsname)" erkennt
+"September 4, 2026" bereits über `_EN_MONTH_PATTERN`
+(`pipeline/date_extract.py`) - bestätigt per gezieltem
+`find_dates()`-Aufruf VOR jeder Änderung. Behoben durch Umbenennung des
+Labels auf "Englisch (Monatsname, z. B. September 4, 2026)" und einen
+passenden Tooltip (DE/EN), damit das konkrete Beispiel sichtbar ist,
+ohne die Erkennungslogik selbst anzufassen. Aus Konsistenzgründen haben
+jetzt auch die drei anderen Format-Checkboxen (ISO, Deutsch, Schrägstrich)
+einen Tooltip mit Beispiel bekommen.
+
+Zweiter Teil ("Plus Freitext Eintrag [...] alle gültigen Formate
+eingebar, mit Beispielen") ist ein neues Feld "Eigenes Format" unter
+den vier Format-Checkboxen (beide Such-Dialoge). Der Nutzer tippt ein
+Muster aus Platzhaltern, kein Datum: `YYYY`/`YY` (Jahr, 4-/2-stellig),
+`MMMM`/`MMM` (Monatsname ausgeschrieben/abgekürzt, `_EN_MONTH_ABBR` aus
+denselben Namen wie `_EN_MONTH_NAMES` abgeleitet statt eines zweiten
+Wörterbuchs von Hand), `MM`/`M` (Monat numerisch, mit/ohne führende
+Null), `DD`/`D` (Tag numerisch, mit/ohne führende Null) - alle übrigen
+Zeichen (Leerzeichen, Kommas, Punkte, Schrägstriche) werden wörtlich per
+`re.escape()` verglichen. Neue Funktion `compile_custom_date_pattern()`
+(`pipeline/date_extract.py`) baut daraus einen regulären Ausdruck: die
+Token werden an jeder Position längster-zuerst geprüft (sonst würde
+"MMMM" versehentlich als zwei "MM" gelesen), und jedes doppelte Feld
+DERSELBEN Art (Jahr/Monat/Tag) macht das Muster ungültig (`None`) - also
+nicht nur exakt wiederholte Token wie "YYYY-YYYY", sondern auch
+gemischte wie "MM/M" (beides "Monat", nur unterschiedlich streng), von
+Hand nachgeprüft. Ein Muster ganz ohne erkannten Platzhalter ist
+ebenfalls ungültig. `find_custom_format_dates()` nutzt das kompilierte
+Muster, um Treffer im Text in echte `date`-Objekte umzurechnen (inkl.
+zweistelliger Jahre über die bestehende `_normalize_two_digit_year()`).
+
+`DateSearchFilter` bekommt ein neues, unabhängiges Feld
+`custom_format: str | None` - ZUSÄTZLICH zu den vorhandenen
+`formats`-Checkboxen, nicht als Ersatz: ein Treffer zählt, wenn IRGEND-
+EINES der ausgewählten Formate (Checkbox ODER Freitext) ein Datum im
+Bereich findet. `find_dates()`, `matches_document_date()` sowie beide
+Aufrufer (`ui/merge_search.py`, `ui/drive_search.py`) geben
+`custom_format` entsprechend durch.
+
+UI: neues Zeilenpaar (Label + `QLineEdit` mit Platzhaltertext
+"z. B. MMMM D, YYYY" und ausführlichem Tooltip mit allen Token und
+Beispielen) unter den Format-Checkboxen in `ui/merge_search_dialog.py`
+und `ui/word_merge_search_dialog.py` (übliche Dopplung dieses Projekts
+statt Parametrisierung). `_build_date_filter()`: ein leeres/nur-
+Leerzeichen-Feld zählt als "nicht gesetzt" (`custom_format=None`, kein
+Fehler); fehlt sowohl mindestens eine Checkbox als auch ein Freitext-
+Muster, erscheint weiterhin `error_missing_date_format` (Text jetzt um
+den Hinweis auf das Freitext-Feld ergänzt); ein vorhandenes, aber
+syntaktisch ungültiges Freitext-Muster erzeugt den neuen Fehler
+`error_invalid_custom_date_format` - unabhängig davon, ob daneben schon
+eine Checkbox aktiv ist, damit ein Tippfehler im Freitext nicht still
+ignoriert wird.
+
+Acht neue i18n-Schlüssel (DE/EN, Parität 379/379 bestätigt):
+`date_format_iso_tooltip`, `date_format_de_tooltip`,
+`date_format_en_month_tooltip`, `date_format_slash_tooltip`,
+`date_custom_format_label`, `date_custom_format_placeholder`,
+`date_custom_format_tooltip`, `error_invalid_custom_date_format`;
+`webapp/static/i18n/de.json`/`en.json` neu exportiert.
+
+Neue Tests: `tests/test_date_extract.py` (16 neue Fälle für
+`compile_custom_date_pattern()`, `find_custom_format_dates()`,
+`find_dates()`/`matches_document_date()` mit `custom_format`, sowie den
+`None`-Default von `DateSearchFilter.custom_format`) und
+`tests/test_ui_date_filter.py` (8 neue Fälle, parametrisiert über beide
+Dialoge: Feld hat Label/Platzhalter/Tooltip, Freitext allein reicht ohne
+jede Checkbox, Freitext kombiniert sich mit einer Checkbox, ein nur aus
+Leerzeichen bestehendes Feld zählt als leer, fehlendes Format ohne
+Freitext bleibt der bestehende Fehler, ein ungültiges Freitext-Muster
+ist ein Fehler auch bei aktiver Checkbox, und reiner Text ohne
+Platzhalter ist ebenfalls ungültig). Komplette Testsuite (753 Tests,
+1 übersprungen) läuft grün.
