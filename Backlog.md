@@ -8411,3 +8411,72 @@ Umgebungsvariable zurück wenn nichts im Schlüsselbund liegt, alle vier
 Drive-Getter rufen tatsächlich mit env_first=False auf). Alle 508 Tests des
 gesamten Projekts grün (1 Skip, unverändert; 504 → 508 durch die neuen
 Tests).
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung 7) - Eigener Logging-Bug gefunden (DEBUG-Zeilen fehlten), Drive-Ordnerlink/Cache-Ordner werden jetzt zwischen Sitzungen gemerkt
+
+Michael schickte den ersten echten Log-Ausschnitt aus `app.log` mit: der
+komplette OAuth-Ablauf lief sichtbar sauber durch (Anmeldung erfolgreich,
+Refresh-Token gespeichert), aber `Baue Drive-Service auf (quota_project_id:
+AIzaSyCr…)` zeigt schwarz auf weiß: es wird beim eigentlichen API-Aufruf
+weiterhin exakt derselbe falsche, API-Schlüssel-förmige Wert verwendet -
+der "Project '...' not found or deleted"-Fehler tritt entsprechend
+unverändert wieder auf. Dazu: "Die App sollte sich die Google Drive ID von
+der letzten Session merken. Auch den Cache Ordner und die Anmelde Daten.
+Das alles bleibt bis jetzt leer."
+
+**Eigener Bug im Logging-Feature selbst gefunden:** `configure_logging()`
+(Fortsetzung 5) setzte den Root-Logger-Level auf INFO. Genau die Zeilen,
+die zeigen SOLLTEN, ob die Projekt-ID aus einer Umgebungsvariable oder aus
+dem Schlüsselbund kam (`pipeline/credentials.py::get_api_key()`s
+"geladen aus ..."-Meldungen, Fortsetzung 5), loggen auf DEBUG-Level - und
+tauchten deshalb in Michaels erstem echten Log gar nicht erst auf. Das war
+ausgerechnet die eine Information, für die dieses Feature gebaut wurde.
+Behoben: `configure_logging()`s Default ist jetzt DEBUG statt INFO (siehe
+`pipeline/app_logging.py`s Docstring für die volle Begründung) - der
+nächste Verbindungsversuch zeigt jetzt eindeutig, welche Quelle jeweils
+gewonnen hat.
+
+**Einordnung des weiterhin bestehenden Fehlers:** Mit dem
+Schlüsselbund-Vorrang (Fortsetzung 6) UND jetzt sichtbarer Quellenangabe
+lässt sich der Fall beim nächsten Versuch klären. Bis dahin/unabhängig
+davon der zuverlässigste Weg, ihn direkt zu beheben: die echte Projekt-ID
+in der Google Cloud Console nachschlagen (oben links in der
+Projektauswahl, oder auf der "Zugangsdaten"-Seite unter
+"Projektinformationen" - NICHT aus der heruntergeladenen JSON-Datei erneut
+laden, um jede Verwechslung auszuschließen), NUR das Feld "Projekt-ID" von
+Hand damit überschreiben, "Zugangsdaten speichern" klicken und das
+Bestätigungsfenster "Zugangsdaten gespeichert" abwarten, dann erneut
+verbinden/prüfen.
+
+**Drive-Ordnerlink/Cache-Ordner nicht gemerkt:** Zwei getrennte,
+unabhängig vom obigen Fehler bestehende Lücken in `ui/merge_search_dialog.py`
+und `ui/word_merge_search_dialog.py` (beide duplizieren denselben
+Drive-Bereich): der Cache-Ordner-Pfad wurde von `_choose_drive_cache()`
+zwar schon nach QSettings geschrieben, aber beim nächsten Öffnen des
+Dialogs nie wieder eingelesen (nur als Startordner für den nächsten
+Ordner-Auswahldialog benutzt) - `drive_cache_edit` blieb also leer. Für
+den Drive-Ordnerlink/die -ID gab es überhaupt keine Persistenz. Neu:
+`_restore_drive_state()` (aus `__init__()` aufgerufen, nach
+`_refresh_drive_status()`) liest beide Werte beim Öffnen zurück; eine neue
+`done()`-Überschreibung (deckt "Ausgewählte übernehmen", "Schließen" UND
+das Fenster-X ab - alle drei laufen über `done()`) speichert den
+aktuellen Ordnerlink-Text bei jedem Schließen. Bewusst OHNE den Ordner
+beim Wiederöffnen automatisch neu aufzulösen (kein Netzwerkaufruf beim
+Dialogstart) - der zurückgeholte Link steht wieder im Feld, ein Klick auf
+"Prüfen" bleibt aber nötig.
+
+**Zu "Anmeldedaten bleiben leer":** Das ist kein Bug - die drei
+Zugangsdaten-Textfelder (Client-ID/-Secret/Projekt-ID) werden nach
+erfolgreichem Speichern absichtlich geleert (Fortsetzung 2:
+`_save_drive_credentials()`), damit kein Geheimnis im Klartextfeld
+stehenbleibt. Der eigentliche Verbindungsstatus (Zeile über den Feldern)
+wird unabhängig davon bei jedem Öffnen live aus dem Schlüsselbund gelesen
+(`_refresh_drive_status()`, schon vorhanden) und war nie das Problem.
+
+**Tests:** `tests/test_app_logging.py` +1 (DEBUG-Zeile landet jetzt in der
+Datei - Regressionsschutz für den Logging-Bug selbst), neue Datei
+`tests/test_ui_drive_state_persistence.py` +6 (Cache-Ordner und
+Ordnerlink werden beim Wiederöffnen zurückgeholt, ein zurückgeholter Link
+zählt nicht schon als geprüft, erstes Öffnen bleibt leer - parametrisiert
+über beide Dialoge). Alle 515 Tests des gesamten Projekts grün (1 Skip,
+unverändert; 508 → 515 durch die neuen Tests).

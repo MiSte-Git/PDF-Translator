@@ -49,6 +49,19 @@ def test_configure_logging_creates_the_log_file() -> None:
     assert "Testeintrag" in log_file.read_text(encoding="utf-8")
 
 
+def test_configure_logging_defaults_to_debug_so_credential_source_lines_appear() -> None:
+    """02.09.2026, Fortsetzung 7 - regression guard for the bug in the
+    logging feature itself: it originally defaulted to INFO, which meant
+    pipeline/credentials.py::get_api_key()'s DEBUG-level "geladen aus
+    Umgebungsvariable/Schlüsselbund"-lines never reached app.log at all -
+    exactly the one thing this feature was built to surface, silently
+    missing from Michael's very first real log capture.
+    """
+    log_file = app_logging.configure_logging()
+    logging.getLogger("pipeline.credentials").debug("geladen aus dem OS-Schlüsselbund (Testeintrag)")
+    assert "geladen aus dem OS-Schlüsselbund" in log_file.read_text(encoding="utf-8")
+
+
 def test_configure_logging_is_idempotent() -> None:
     """A second call (e.g. if some future code path invoked it twice) must
     not register a second handler - otherwise every line would be written

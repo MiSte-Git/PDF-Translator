@@ -25,6 +25,18 @@ google.api_core-FutureWarning) - eine zweite Kopie auf stderr würde das
 nur verdoppeln, während die Datei tatsächlich über einen einzelnen
 Programmlauf hinaus erhalten bleibt und sich als Ganzes anhängen/teilen
 lässt (z. B. hier in den Chat einfügen, statt einen Screenshot zu machen).
+
+**Default-Level DEBUG, nicht INFO (korrigiert 02.09.2026, Fortsetzung 7):**
+Der erste Wurf dieser Datei setzte hier INFO - genau dadurch tauchten die
+`pipeline/credentials.py::get_api_key()`-Zeilen ("geladen aus
+Umgebungsvariable ..."/"geladen aus dem OS-Schlüsselbund"), die als DEBUG
+geloggt werden, in Michaels erstem echten app.log gar nicht erst auf. Das
+war der eine Fall, für den dieses ganze Feature gebaut wurde - eine
+Fehlkonfiguration bei der Suche nach der wahren Ursache sofort auffindbar
+zu machen -, und ausgerechnet der wurde durch das eigene Default
+verschluckt. Bei diesem Programm gibt es keine heiße Schleife, die DEBUG
+zu einer echten Log-Flut machen würde, also überwiegt der Diagnosewert
+klar.
 """
 from __future__ import annotations
 
@@ -43,13 +55,19 @@ LOG_FILE = LOG_DIR / "app.log"
 _configured = False
 
 
-def configure_logging(level: int = logging.INFO) -> Path:
+def configure_logging(level: int = logging.DEBUG) -> Path:
     """Hängt einen rotierenden Datei-Handler an den Root-Logger (max. 3x
     2 MB, danach werden die ältesten Einträge verworfen) und gibt den Pfad
     der Log-Datei zurück - z. B. für den "Log-Datei öffnen"-Knopf im
     Einstellungen-Dialog. Wiederholte Aufrufe sind ein No-Op (idempotent),
     damit z. B. Tests, die main() mehrfach indirekt anstoßen, nicht
     mehrfach denselben Handler registrieren.
+
+    Default DEBUG (nicht INFO) - siehe dieses Moduls Docstring, Abschnitt
+    "Default-Level DEBUG, nicht INFO": genau auf DEBUG-Level loggt
+    pipeline/credentials.py::get_api_key(), woher (Umgebungsvariable vs.
+    Schlüsselbund) jeder einzelne Zugangsdaten-Wert kam - ohne DEBUG bleibt
+    diese für die Fehlersuche zentrale Information unsichtbar.
     """
     global _configured
     if _configured:

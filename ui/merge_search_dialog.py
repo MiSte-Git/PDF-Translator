@@ -174,6 +174,46 @@ class MergeSearchDialog(QDialog):
         self.language.changed.connect(self.retranslate)
         self.retranslate()
         self._refresh_drive_status()
+        self._restore_drive_state()
+
+    def _restore_drive_state(self) -> None:
+        """02.09.2026 (Michael: "Die App sollte sich die Google Drive ID
+        von der letzten Session merken. Auch den Cache Ordner...") - the
+        cache-folder value was already written to QSettings by
+        _choose_drive_cache() but never read back into the UI on the next
+        open (only used as getExistingDirectory()'s start_dir); the Drive
+        folder link/ID had no persistence at all. Both are restored here,
+        deliberately without re-resolving the folder against the Drive API
+        (that needs a live, authorized connection and would either block
+        dialog startup on a network call or need its own async worker) -
+        the user still clicks "Prüfen" once, but no longer has to go find
+        and re-paste the link every time. The connection/credentials
+        status itself needs no restoring here - _refresh_drive_status()
+        above already reads it straight from the keyring on every open.
+        """
+        cache_dir = str(self.settings.value("merge_search_drive_cache_dir", "", type=str))
+        if cache_dir:
+            self._drive_cache_dir = Path(cache_dir)
+            self.drive_cache_edit.setText(cache_dir)
+        folder_link = str(self.settings.value("merge_search_drive_folder_link", "", type=str))
+        if folder_link:
+            # Setting the text fires _on_drive_folder_text_changed(), which
+            # (correctly) resets _drive_folder_id to None and the status
+            # label to "unresolved" - exactly the state a not-yet-verified
+            # restored link should start in.
+            self.drive_folder_edit.setText(folder_link)
+        self._update_search_enabled()
+
+    def done(self, result: int) -> None:
+        # Persists whatever is currently in the Drive-folder field - not
+        # only a successfully resolved one - on every way this dialog can
+        # close (accept/"Ausgewählte übernehmen", reject/"Schließen", or
+        # the window's own close button, which QDialog routes through
+        # reject() -> done() same as the others).
+        text = self.drive_folder_edit.text().strip()
+        if text:
+            self.settings.setValue("merge_search_drive_folder_link", text)
+        super().done(result)
 
     # --- panel construction ------------------------------------------------
 

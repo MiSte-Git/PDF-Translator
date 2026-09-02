@@ -139,6 +139,26 @@ class WordMergeSearchDialog(QDialog):
         self.language.changed.connect(self.retranslate)
         self.retranslate()
         self._refresh_drive_status()
+        self._restore_drive_state()
+
+    def _restore_drive_state(self) -> None:
+        """02.09.2026 - see MergeSearchDialog's identical method (this
+        dialog duplicates the same Drive panel) for the full reasoning."""
+        cache_dir = str(self.settings.value("word_merge_search_drive_cache_dir", "", type=str))
+        if cache_dir:
+            self._drive_cache_dir = Path(cache_dir)
+            self.drive_cache_edit.setText(cache_dir)
+        folder_link = str(self.settings.value("word_merge_search_drive_folder_link", "", type=str))
+        if folder_link:
+            self.drive_folder_edit.setText(folder_link)
+        self._update_search_enabled()
+
+    def done(self, result: int) -> None:
+        # See MergeSearchDialog.done() - identical reasoning.
+        text = self.drive_folder_edit.text().strip()
+        if text:
+            self.settings.setValue("word_merge_search_drive_folder_link", text)
+        super().done(result)
 
     # --- panel construction ------------------------------------------------
 
