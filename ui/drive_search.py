@@ -58,11 +58,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Protocol
 
-from pipeline.drive_auth import DOCX_MIME_TYPE, PDF_MIME_TYPE
+from pipeline.date_extract import DateSearchFilter, SOURCE_FILE, matches_document_date
+from pipeline.drive_auth import DOCX_MIME_TYPE, PDF_MIME_TYPE, DriveEntry
 from pipeline.pdf.pymupdf_engine import extract_ico_header_text
 from pipeline.search_query import matches_query
 from pipeline.word.docx_engine import extract_docx_ico_header_text
-from ui.search_scopes import DOCX_SCOPE_EXTRACTORS, PDF_SCOPE_EXTRACTORS, combined_extractor
+from ui.search_scopes import (
+    DOCX_DATE_REGION_EXTRACTORS,
+    DOCX_SCOPE_EXTRACTORS,
+    PDF_DATE_REGION_EXTRACTORS,
+    PDF_SCOPE_EXTRACTORS,
+    combined_extractor,
+)
 
 _FOLDER_URL_RE = re.compile(r"/folders/([A-Za-z0-9_-]+)")
 _ID_QUERY_RE = re.compile(r"[?&]id=([A-Za-z0-9_-]+)")
@@ -160,6 +167,27 @@ def _iter_drive_files(client: DriveClientProtocol, root_folder_id: str, file_mim
             yield entry
 
 
+def _passes_drive_date_filter(
+    entry: DriveEntry,
+    tmp_path: Path,
+    date_filter: DateSearchFilter,
+    date_region_extractor: Callable[[str], str | None] | None,
+) -> bool:
+    """Drive counterpart of ui/merge_search.py::_passes_date_filter() -
+    SOURCE_FILE uses `entry.modified_time` (Drive's own metadata, see
+    DriveEntry.modified_time's docstring in pipeline/drive_auth.py) rather
+    than tmp_path's local filesystem mtime, which would only ever reflect
+    "when this scan happened to download it", not the file's real,
+    Drive-side modification date. SOURCE_DOCUMENT reads `tmp_path` (the
+    already-downloaded temp copy) exactly like the text-query extractor
+    already does.
+    """
+    if date_filter.source == SOURCE_FILE:
+        return entry.modified_time is not None and date_filter.date_range.contains(entry.modified_time)
+    text = date_region_extractor(str(tmp_path)) if date_region_extractor is not None else None
+    return matches_document_date(text, date_filter.formats, date_filter.date_range)
+
+
 def find_drive_matching(
     client: DriveClientProtocol,
     root_folder_id: str,
@@ -171,6 +199,8 @@ def find_drive_matching(
     cache_dir: Path,
     progress: Callable[[int, int, str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
+    date_filter: DateSearchFilter | None = None,
+    date_region_extractor: Callable[[str], str | None] | None = None,
 ) -> DriveSearchResult:
     """Scan a Drive folder (optionally recursive) for `file_mime_type`
     files matching query, using `extractor` for the per-file ICO-header
@@ -197,6 +227,14 @@ def find_drive_matching(
     step afterwards that is slow), so `progress`'s `total` argument is a
     real, stable count from the very first call, exactly like the local
     scan's deterministic progress bar.
+
+    `date_filter` (02.09.2026, see pipeline/date_extract.py and
+    ui/merge_search.py::find_matching()'s identical parameter for the
+    full contract) is an ADDITIONAL, independent condition alongside the
+    text query. SOURCE_FILE reads the file's date from Drive's own
+    metadata (entry.modified_time), never from the downloaded temp
+    copy's local mtime - see _passes_drive_date_filter()'s docstring for
+    why that distinction matters here specifically.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     result = DriveSearchResult()
@@ -226,6 +264,7 @@ def find_drive_matching(
                 result.scanned += 1
                 continue
 
+            header_text = None
             if query_normalized:
                 try:
                     header_text = extractor(str(tmp_path))
@@ -233,13 +272,23 @@ def find_drive_matching(
                     result.errors.append(f"{entry.name}: {exc}")
                     result.scanned += 1
                     continue
-                result.scanned += 1
                 if not matches_query(header_text, query):
+                    result.scanned += 1
                     continue
-                snippet = header_text
-            else:
-                result.scanned += 1
-                snippet = ""
+
+            if date_filter is not None:
+                try:
+                    date_ok = _passes_drive_date_filter(entry, tmp_path, date_filter, date_region_extractor)
+                except Exception as exc:
+                    result.errors.append(f"{entry.name}: {exc}")
+                    result.scanned += 1
+                    continue
+                if not date_ok:
+                    result.scanned += 1
+                    continue
+
+            result.scanned += 1
+            snippet = header_text or ""
 
             destination = _unique_destination(cache_dir, entry.name, default_extension)
             tmp_path.replace(destination)
@@ -259,6 +308,7 @@ def find_drive_pdfs_matching(
     progress: Callable[[int, int, str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     scopes: Iterable[str] | None = None,
+    date_filter: DateSearchFilter | None = None,
 ) -> DriveSearchResult:
     """PDF wrapper over find_drive_matching() - unchanged behavior for
     every caller/test that predates the `scopes` parameter (02.09.2026,
@@ -267,10 +317,18 @@ def find_drive_pdfs_matching(
     None (the default) keeps this function's exact original, "ICO
     Format"-only behavior (tests/test_ui_drive_search.py covers it
     unchanged).
+
+    `date_filter` (02.09.2026, see find_pdfs_matching()'s identical
+    parameter in ui/merge_search.py for the full contract): None (the
+    default) means no date filtering, same as before this feature.
     """
     extractor = extract_ico_header_text if scopes is None else combined_extractor(PDF_SCOPE_EXTRACTORS, scopes)
+    date_region_extractor = (
+        combined_extractor(PDF_DATE_REGION_EXTRACTORS, date_filter.regions) if date_filter is not None else None
+    )
     return find_drive_matching(
-        client, root_folder_id, PDF_MIME_TYPE, extractor, ".pdf", query, recursive, cache_dir, progress, is_cancelled
+        client, root_folder_id, PDF_MIME_TYPE, extractor, ".pdf", query, recursive, cache_dir, progress, is_cancelled,
+        date_filter=date_filter, date_region_extractor=date_region_extractor,
     )
 
 
@@ -283,15 +341,21 @@ def find_drive_docx_matching(
     progress: Callable[[int, int, str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     scopes: Iterable[str] | None = None,
+    date_filter: DateSearchFilter | None = None,
 ) -> DriveSearchResult:
     """DOCX wrapper over find_drive_matching() (01.09.2026, Michael:
     "Jetzt noch das ganze für *.docx.") - the Drive counterpart of
     find_docx_files_matching() (ui/merge_search.py), mirroring
     find_drive_pdfs_matching() exactly with the DOCX mime type and
-    extractor(s) swapped in - see that function's docstring for the
-    `scopes` parameter (02.09.2026).
+    extractor(s)/date-region-extractor(s) swapped in - see that
+    function's docstring for the `scopes` (02.09.2026) and `date_filter`
+    (02.09.2026) parameters.
     """
     extractor = extract_docx_ico_header_text if scopes is None else combined_extractor(DOCX_SCOPE_EXTRACTORS, scopes)
+    date_region_extractor = (
+        combined_extractor(DOCX_DATE_REGION_EXTRACTORS, date_filter.regions) if date_filter is not None else None
+    )
     return find_drive_matching(
-        client, root_folder_id, DOCX_MIME_TYPE, extractor, ".docx", query, recursive, cache_dir, progress, is_cancelled
+        client, root_folder_id, DOCX_MIME_TYPE, extractor, ".docx", query, recursive, cache_dir, progress, is_cancelled,
+        date_filter=date_filter, date_region_extractor=date_region_extractor,
     )

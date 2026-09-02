@@ -55,6 +55,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Iterator
 
@@ -113,6 +114,36 @@ class DriveEntry:
     id: str
     name: str
     is_folder: bool
+    modified_time: date | None = None
+    """Drive's own `modifiedTime` for this file (02.09.2026, the date-
+    range/exact-date search filter - see pipeline/date_extract.py), NOT
+    the local temp-download copy's filesystem mtime: find_drive_matching()
+    (ui/drive_search.py) downloads every scanned file into a throwaway
+    temp directory before it's even known whether the file is a match, so
+    a LOCAL Path.stat().st_mtime there would just be "whenever this scan
+    happened to download it" - useless for filtering by the file's real,
+    Drive-side modification date. Only set by list_children() below
+    (resolve_folder() has no use for it and doesn't request the field);
+    defaults to None so every existing construction of a DriveEntry
+    (tests included) keeps working unchanged.
+    """
+
+
+def _parse_drive_timestamp(value: str | None) -> date | None:
+    """Parse Drive's `modifiedTime` (RFC3339, e.g.
+    "2026-08-15T10:23:00.000Z") into a plain date - see DriveEntry.
+    modified_time's docstring. Returns None for a missing/malformed value
+    rather than raising - a file the date filter can't read a date for
+    simply never matches a document-date/file-date filter (see
+    pipeline/date_extract.py), same "don't abort the scan over one odd
+    file" policy as everywhere else in this feature.
+    """
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
 
 
 def is_configured() -> bool:
@@ -396,7 +427,7 @@ class DriveClient:
         while True:
             request = self._service.files().list(
                 q=query,
-                fields="nextPageToken, files(id, name, mimeType)",
+                fields="nextPageToken, files(id, name, mimeType, modifiedTime)",
                 pageSize=1000,
                 pageToken=page_token,
                 supportsAllDrives=True,
@@ -408,6 +439,7 @@ class DriveClient:
                     id=entry["id"],
                     name=entry["name"],
                     is_folder=entry.get("mimeType") == _FOLDER_MIME_TYPE,
+                    modified_time=_parse_drive_timestamp(entry.get("modifiedTime")),
                 )
             page_token = data.get("nextPageToken")
             if not page_token:

@@ -32,10 +32,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
 
+from pipeline.date_extract import DateSearchFilter, SOURCE_FILE, matches_document_date, matches_file_date
 from pipeline.pdf.pymupdf_engine import extract_ico_header_text
 from pipeline.search_query import matches_query
 from pipeline.word.docx_engine import extract_docx_ico_header_text
-from ui.search_scopes import DOCX_SCOPE_EXTRACTORS, PDF_SCOPE_EXTRACTORS, combined_extractor
+from ui.search_scopes import (
+    DOCX_DATE_REGION_EXTRACTORS,
+    DOCX_SCOPE_EXTRACTORS,
+    PDF_DATE_REGION_EXTRACTORS,
+    PDF_SCOPE_EXTRACTORS,
+    combined_extractor,
+)
 
 
 @dataclass
@@ -78,6 +85,25 @@ def find_files_by_extension(folder: Path, extension: str, recursive: bool = True
     return sorted(path for path in entries if path.is_file() and path.suffix.lower() == extension.lower())
 
 
+def _passes_date_filter(
+    path: Path,
+    date_filter: DateSearchFilter,
+    date_region_extractor: Callable[[str], str | None] | None,
+) -> bool:
+    """Whether `path` passes `date_filter` - SOURCE_FILE never opens the
+    file at all (just Path.stat(), see matches_file_date()); SOURCE_DOCUMENT
+    calls `date_region_extractor` (built by find_pdfs_matching()/
+    find_docx_files_matching() from the caller's selected regions) to get
+    the text to search for a date in. May raise ValueError (a bad-document
+    error from the region extractor), same as the text-query `extractor` -
+    the caller catches it the same way.
+    """
+    if date_filter.source == SOURCE_FILE:
+        return matches_file_date(path, date_filter.date_range)
+    text = date_region_extractor(str(path)) if date_region_extractor is not None else None
+    return matches_document_date(text, date_filter.formats, date_filter.date_range)
+
+
 def find_matching(
     folder: Path,
     extension: str,
@@ -86,6 +112,8 @@ def find_matching(
     recursive: bool = True,
     progress_callback: Callable[[int, int, str], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    date_filter: DateSearchFilter | None = None,
+    date_region_extractor: Callable[[str], str | None] | None = None,
 ) -> IcoSearchResult:
     """Scan every `extension` file under `folder` and keep those matching
     `query`, per `extractor`'s per-file ICO-header text (or None if that
@@ -122,6 +150,19 @@ def find_matching(
     like merge_pdfs()'s between-source polling - whatever was already
     found stays in the result (IcoSearchResult.matches), it is never
     discarded on cancel.
+
+    `date_filter` (02.09.2026, the "Datumsbereich"/"Von"/"Bis"/"Exakt"
+    filter - see pipeline/date_extract.py and find_pdfs_matching()'s
+    `date_filter` parameter) is an ADDITIONAL, independent condition: a
+    file must match both the text query above AND the date filter (if
+    either is given) to end up in the result. A file whose date can't be
+    determined at all (SOURCE_FILE: unreadable stat - practically never
+    happens; SOURCE_DOCUMENT: extractor found no text/no date in the
+    selected region(s)) never matches, same "no data, no match"
+    convention as the text query's `text=None` case. Opening the document
+    is skipped entirely when neither the query nor a SOURCE_DOCUMENT date
+    filter needs it - a SOURCE_FILE filter alone only ever calls
+    Path.stat(), never `extractor`/`date_region_extractor`.
     """
     paths = find_files_by_extension(folder, extension, recursive=recursive)
     query = (query or "").strip()
@@ -138,17 +179,29 @@ def find_matching(
         if progress_callback is not None:
             progress_callback(scanned, total, path.name)
 
-        if not query:
-            matches.append(IcoSearchMatch(path, ""))
-        else:
+        header: str | None = None
+        if query:
             try:
                 header = extractor(str(path))
             except ValueError as exc:
                 errors.append(str(exc))
                 scanned += 1
                 continue
-            if matches_query(header, query):
-                matches.append(IcoSearchMatch(path, header))
+            if not matches_query(header, query):
+                scanned += 1
+                continue
+
+        if date_filter is not None:
+            try:
+                if not _passes_date_filter(path, date_filter, date_region_extractor):
+                    scanned += 1
+                    continue
+            except ValueError as exc:
+                errors.append(str(exc))
+                scanned += 1
+                continue
+
+        matches.append(IcoSearchMatch(path, header or ""))
         scanned += 1
 
     return IcoSearchResult(matches=matches, scanned=scanned, errors=errors, cancelled=cancelled)
@@ -166,6 +219,7 @@ def find_pdfs_matching(
     progress_callback: Callable[[int, int, str], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
     scopes: Iterable[str] | None = None,
+    date_filter: DateSearchFilter | None = None,
 ) -> IcoSearchResult:
     """PDF wrapper over find_matching() - see that function's docstring
     for the full contract.
@@ -175,9 +229,22 @@ def find_pdfs_matching(
     None (the default) preserves this function's exact original
     behavior - "ICO Format" only - unchanged for every caller/test that
     predates this feature and doesn't pass it (tests/test_ui_merge_search.py).
+
+    `date_filter` (02.09.2026, "Datumsbereich"/"Von"/"Bis"/"Exakt" - see
+    pipeline/date_extract.py): None (the default) means no date filtering
+    at all, same as before this feature. A SOURCE_DOCUMENT filter's
+    region(s) are looked up in PDF_DATE_REGION_EXTRACTORS (ICO Format/
+    Header/Footer - a separate, smaller set from `scopes` above, since
+    "Footer" isn't a general text-search scope).
     """
     extractor = extract_ico_header_text if scopes is None else combined_extractor(PDF_SCOPE_EXTRACTORS, scopes)
-    return find_matching(folder, ".pdf", extractor, query, recursive, progress_callback, should_cancel)
+    date_region_extractor = (
+        combined_extractor(PDF_DATE_REGION_EXTRACTORS, date_filter.regions) if date_filter is not None else None
+    )
+    return find_matching(
+        folder, ".pdf", extractor, query, recursive, progress_callback, should_cancel,
+        date_filter=date_filter, date_region_extractor=date_region_extractor,
+    )
 
 
 def find_docx_files(folder: Path, recursive: bool = True) -> list[Path]:
@@ -192,6 +259,7 @@ def find_docx_files_matching(
     progress_callback: Callable[[int, int, str], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
     scopes: Iterable[str] | None = None,
+    date_filter: DateSearchFilter | None = None,
 ) -> IcoSearchResult:
     """DOCX wrapper over find_matching() (01.09.2026, Michael: "Jetzt noch
     das ganze für *.docx.") - see that function's docstring for the full
@@ -199,7 +267,16 @@ def find_docx_files_matching(
     mirrors exactly, extractor swapped for
     pipeline.word.docx_engine.extract_docx_ico_header_text() (or a
     `scopes`-combined extractor, see find_pdfs_matching()'s docstring for
-    that parameter - identical contract here).
+    that parameter - identical contract here), and `date_filter`'s
+    regions looked up in DOCX_DATE_REGION_EXTRACTORS instead of the PDF
+    registry (also identical contract, see find_pdfs_matching()'s
+    docstring for `date_filter`).
     """
     extractor = extract_docx_ico_header_text if scopes is None else combined_extractor(DOCX_SCOPE_EXTRACTORS, scopes)
-    return find_matching(folder, ".docx", extractor, query, recursive, progress_callback, should_cancel)
+    date_region_extractor = (
+        combined_extractor(DOCX_DATE_REGION_EXTRACTORS, date_filter.regions) if date_filter is not None else None
+    )
+    return find_matching(
+        folder, ".docx", extractor, query, recursive, progress_callback, should_cancel,
+        date_filter=date_filter, date_region_extractor=date_region_extractor,
+    )

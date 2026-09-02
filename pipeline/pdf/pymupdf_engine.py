@@ -2392,6 +2392,53 @@ def extract_pdf_header_text(path: str) -> str | None:
     return None
 
 
+# --- "Footer" (02.09.2026, Datumsfilter) ------------------------------------
+#
+# Michael, beim Einbauen des Datumsbereich-Filters: "Das aber nur entweder
+# im Header, im Footer oder im ICO Feld auf der ersten Seite, also für
+# diese Option." - der Footer war bisher keine eigene Suchoption (nur
+# "Header"/"ICO Format"/"Volltext"), wird hier aber für den Datumsfilter
+# gebraucht: ein Ausstellungs-/Stand-Datum sitzt in den gesehenen ICO-
+# Dokumenten oft im wiederkehrenden Footer, nicht im Header oder im
+# ICO-Kopfbereich.
+
+
+def extract_pdf_footer_text(path: str) -> str | None:
+    """Footer text extraction (02.09.2026) - the exact mirror of
+    extract_pdf_header_text() above, just for `footer_bbox` instead of
+    `header_bbox`. Used by the date-filter's "Datum im Dokument" source
+    (see pipeline/date_extract.py), not by the general free-text search
+    scopes (ui/search_scopes.py's SCOPE_* still stop at ICO Format/Header/
+    Volltext - Michael never asked for a general "Footer" text-search
+    scope, only for the date filter to be able to look there).
+
+    Returns None if no confident recurring footer is detected at all -
+    same detect_header_footer_zones() confidence threshold as the header
+    case.
+
+    Raises ValueError (never a raw PyMuPDF exception) if `path` can't be
+    opened as a PDF at all - same contract as extract_ico_header_text().
+    """
+    engine = PyMuPdfEngine()
+    try:
+        engine.open(path)
+    except Exception as exc:  # noqa: BLE001 - re-raised as a clear, file-named ValueError below
+        raise ValueError(f'"{Path(path).name}" konnte nicht geöffnet werden: {exc}') from exc
+
+    _header_bbox, footer_bbox = detect_header_footer_zones(engine)
+    if footer_bbox is None:
+        return None
+    for page in engine.get_pages():
+        texts = [
+            block.text.strip()
+            for block in engine.extract_blocks(page.index)
+            if block.text.strip() and block_overlaps(block.bbox, footer_bbox)
+        ]
+        if texts:
+            return "\n".join(texts)
+    return None
+
+
 def extract_pdf_full_text(path: str) -> str | None:
     """"Volltext" search scope (02.09.2026) - every page's text, in
     reading order. Confirmed as the deliberate superset (Michael: "Wenn

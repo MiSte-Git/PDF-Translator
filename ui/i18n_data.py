@@ -381,17 +381,43 @@ DE = {
     "merge_search.scope_header": "Header (alle Seiten)",
     "merge_search.scope_full_text": "Volltext",
     "merge_search.error_missing_scope": "Bitte mindestens einen Suchbereich auswählen.",
+    # Datumsfilter (02.09.2026, Michael: "Können wir noch eine nach
+    # Datumsbereich, von, bis, exakt einbauen.") - siehe
+    # pipeline/date_extract.py und ui/merge_search_dialog.py::
+    # _build_date_filter_group() für die Details. Shared von beiden
+    # Such-Dialogen (PDF und Word), da die Formulierungen format-
+    # unabhängig sind.
+    "merge_search.date_filter_group": "Nach Datum filtern",
+    "merge_search.date_source_file": "Dateidatum",
+    "merge_search.date_source_document": "Datum im Dokument",
+    "merge_search.date_region_ico_format": "ICO Feld (Seite 1)",
+    "merge_search.date_region_header": "Header (alle Seiten)",
+    "merge_search.date_region_footer": "Footer (alle Seiten)",
+    "merge_search.date_format_iso": "ISO (JJJJ-MM-TT)",
+    "merge_search.date_format_de": "Deutsch (TT.MM.JJJJ)",
+    "merge_search.date_format_en_month": "Englisch (Monatsname)",
+    "merge_search.date_format_slash": "Schrägstrich (TT/MM/JJJJ)",
+    "merge_search.date_exact_checkbox": "Exaktes Datum",
+    "merge_search.date_from_label": "Von",
+    "merge_search.date_to_label": "Bis",
+    "merge_search.date_exact_label": "Datum",
+    "merge_search.error_date_range_reversed": "„Von“ darf nicht nach „Bis“ liegen.",
+    "merge_search.error_missing_date_region": "Bitte mindestens einen Bereich für die Datumssuche auswählen.",
+    "merge_search.error_missing_date_format": "Bitte mindestens ein Datumsformat auswählen.",
     "merge_search.query_label": "Suchtext (leer = alle Dateien; UND/ODER zum Verknüpfen mehrerer Begriffe)",
     "merge_search.query_placeholder": (
         "z. B. Firmenname des Developers, oder Begriff1 UND Begriff2 – leer lassen für alle Dateien im Ordner"
     ),
     "merge_search.query_tooltip": (
-        "Mehrere Suchbegriffe lassen sich wahlweise mit UND oder ODER verknüpfen "
-        "(nicht gemischt in derselben Suche).\n\n"
+        "Mehrere Suchbegriffe lassen sich mit UND und ODER verknüpfen - auch "
+        "gemischt. Mit Klammern legst du fest, was zusammengehört.\n\n"
         "Beispiel: „Acme UND Vertrag“ findet nur Dateien, die BEIDE Begriffe "
         "enthalten.\n"
         "„Acme ODER Zenith“ findet Dateien mit MINDESTENS EINEM der beiden "
         "Begriffe.\n\n"
+        "Gemischt mit Klammern: „StellarRussia ODER (The UND Korolev UND "
+        "Directive)“ findet Dateien mit „StellarRussia“ ODER Dateien, die ALLE "
+        "DREI Begriffe „The“, „Korolev“ und „Directive“ enthalten.\n\n"
         "Ohne UND/ODER wird der gesamte Text als ein einzelner Suchbegriff "
         "behandelt (wie bisher). Groß-/Kleinschreibung spielt keine Rolle."
     ),
@@ -906,17 +932,37 @@ EN = {
     "merge_search.scope_header": "Header (all pages)",
     "merge_search.scope_full_text": "Full text",
     "merge_search.error_missing_scope": "Please select at least one search scope.",
+    "merge_search.date_filter_group": "Filter by date",
+    "merge_search.date_source_file": "File date",
+    "merge_search.date_source_document": "Date in document",
+    "merge_search.date_region_ico_format": "ICO field (page 1)",
+    "merge_search.date_region_header": "Header (all pages)",
+    "merge_search.date_region_footer": "Footer (all pages)",
+    "merge_search.date_format_iso": "ISO (YYYY-MM-DD)",
+    "merge_search.date_format_de": "German (DD.MM.YYYY)",
+    "merge_search.date_format_en_month": "English (month name)",
+    "merge_search.date_format_slash": "Slash (DD/MM/YYYY)",
+    "merge_search.date_exact_checkbox": "Exact date",
+    "merge_search.date_from_label": "From",
+    "merge_search.date_to_label": "To",
+    "merge_search.date_exact_label": "Date",
+    "merge_search.error_date_range_reversed": "“From” must not be after “To”.",
+    "merge_search.error_missing_date_region": "Please select at least one region for the date search.",
+    "merge_search.error_missing_date_format": "Please select at least one date format.",
     "merge_search.query_label": "Search text (empty = every file; combine terms with AND/OR)",
     "merge_search.query_placeholder": (
         "e.g. the developer's company name, or term1 AND term2 – leave empty for every file in the folder"
     ),
     "merge_search.query_tooltip": (
-        "Combine multiple search terms with either AND or OR "
-        "(not mixed within the same search).\n\n"
+        "Combine multiple search terms with AND and OR - even mixed. Use "
+        "parentheses to group what belongs together.\n\n"
         "Example: “Acme AND contract” only finds files containing BOTH "
         "terms.\n"
         "“Acme OR Zenith” finds files containing AT LEAST ONE of the two "
         "terms.\n\n"
+        "Mixed with parentheses: “StellarRussia OR (The AND Korolev AND "
+        "Directive)” finds files containing “StellarRussia” OR files "
+        "containing ALL THREE of “The”, “Korolev” and “Directive”.\n\n"
         "Without AND/OR, the whole text is treated as a single search term "
         "(as before). Not case-sensitive."
     ),

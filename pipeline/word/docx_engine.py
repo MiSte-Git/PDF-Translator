@@ -519,6 +519,22 @@ class DocxEngine:
             for p in self._header_paragraph_elements
         ]
 
+    def get_footer_paragraphs(self) -> list[WordParagraph]:
+        """Just the footer half of get_header_footer_paragraphs() below -
+        the exact mirror of get_header_paragraphs() above, added
+        02.09.2026 for the date filter's "Datum im Dokument" source (see
+        pipeline/date_extract.py): Michael, on that feature: "Das aber nur
+        entweder im Header, im Footer oder im ICO Feld auf der ersten
+        Seite." Kept as its own method for the same reason
+        get_header_paragraphs() is - reading self._footer_paragraph_elements
+        directly rather than re-deriving the header/footer split from
+        get_header_footer_paragraphs()'s combined, untagged result.
+        """
+        return [
+            _build_paragraph(p, self._footer_rels, translatable=False)
+            for p in self._footer_paragraph_elements
+        ]
+
     def get_header_footer_paragraphs(self) -> list[WordParagraph]:
         """Return every paragraph from the active default header
         (word/header2.xml) followed by every paragraph from the active
@@ -532,11 +548,7 @@ class DocxEngine:
         planted error to check for during implementation - corrected to
         False here, which is the actually-required behavior.)
         """
-        footer_paragraphs = [
-            _build_paragraph(p, self._footer_rels, translatable=False)
-            for p in self._footer_paragraph_elements
-        ]
-        return self.get_header_paragraphs() + footer_paragraphs
+        return self.get_header_paragraphs() + self.get_footer_paragraphs()
 
     def replace_paragraph_runs(self, paragraph_index: int, new_runs: list[WordRun]) -> None:
         """Replace the paragraph_index-th <w:p>'s runs (same indexing as
@@ -752,6 +764,37 @@ def extract_docx_header_text(path: str) -> str | None:
     lines = [
         "".join(run.text for run in paragraph.runs).replace(BREAK_MARKER, " ").strip()
         for paragraph in engine.get_header_paragraphs()
+    ]
+    lines = [line for line in lines if line]
+    return "\n".join(lines) if lines else None
+
+
+def extract_docx_footer_text(path: str) -> str | None:
+    """Footer text extraction (02.09.2026, Datumsfilter) - the exact
+    mirror of extract_docx_header_text() above, just for
+    get_footer_paragraphs() (word/footer1.xml) instead of
+    get_header_paragraphs(). Used by the date filter's "Datum im
+    Dokument" source (see pipeline/date_extract.py), not by the general
+    free-text search scopes - Michael never asked for a general "Footer"
+    text-search scope, only for the date filter to be able to look there
+    (see pipeline/pdf/pymupdf_engine.py::extract_pdf_footer_text()'s
+    identical comment).
+
+    Returns None if the document has no footer part at all, or an empty
+    one - most .docx files legitimately don't use a Word footer.
+
+    Raises ValueError (never a raw exception) if `path` can't be opened
+    as a .docx at all - same contract as extract_docx_ico_header_text().
+    """
+    engine = DocxEngine()
+    try:
+        engine.open(path)
+    except Exception as exc:  # noqa: BLE001 - re-raised as a clear, file-named ValueError below
+        raise ValueError(f'"{Path(path).name}" konnte nicht geöffnet werden: {exc}') from exc
+
+    lines = [
+        "".join(run.text for run in paragraph.runs).replace(BREAK_MARKER, " ").strip()
+        for paragraph in engine.get_footer_paragraphs()
     ]
     lines = [line for line in lines if line]
     return "\n".join(lines) if lines else None

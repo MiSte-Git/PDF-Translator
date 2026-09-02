@@ -28,8 +28,10 @@ from pathlib import Path
 from PySide6.QtCore import QSettings, Qt, QThreadPool
 from PySide6.QtWidgets import (
     QCheckBox,
+    QDateEdit,
     QDialog,
     QFileDialog,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -45,11 +47,30 @@ from PySide6.QtWidgets import (
 )
 
 from pipeline import drive_auth
+from pipeline.date_extract import (
+    DEFAULT_DATE_FORMATS,
+    FORMAT_DE,
+    FORMAT_EN_MONTH,
+    FORMAT_ISO,
+    FORMAT_SLASH,
+    SOURCE_DOCUMENT,
+    SOURCE_FILE,
+    DateRange,
+    DateSearchFilter,
+)
 from ui.drive_search import DriveSearchResult, extract_folder_id
 from ui.i18n import LanguageManager
 from ui.merge_search import IcoSearchResult
-from ui.merge_search_dialog import _DRIVE_CONNECTED_STYLE, _match_path
-from ui.search_scopes import DEFAULT_SCOPES, SCOPE_FULL_TEXT, SCOPE_HEADER, SCOPE_ICO_FORMAT
+from ui.merge_search_dialog import _DRIVE_CONNECTED_STYLE, _configure_optional_date_edit, _match_path, _optional_date
+from ui.search_scopes import (
+    DATE_REGION_FOOTER,
+    DATE_REGION_HEADER,
+    DATE_REGION_ICO_FORMAT,
+    DEFAULT_SCOPES,
+    SCOPE_FULL_TEXT,
+    SCOPE_HEADER,
+    SCOPE_ICO_FORMAT,
+)
 from ui.workers import DriveConnectWorker, WordDriveSearchWorker, WordIcoSearchWorker
 
 _SNIPPET_PREVIEW_LENGTH = 120
@@ -81,8 +102,11 @@ class WordMergeSearchDialog(QDialog):
         self.source_stack.addWidget(self._build_drive_panel())
 
         # --- shared: recursive/scope/query/search/progress/results -----
+        # 02.09.2026 - see MergeSearchDialog's identical block (this
+        # dialog duplicates that one's recursive checkbox) for Michael's
+        # request behind the change of default + the restore/persist below.
         self.recursive_checkbox = QCheckBox()
-        self.recursive_checkbox.setChecked(True)
+        self.recursive_checkbox.setChecked(False)
 
         # 02.09.2026 - see MergeSearchDialog's identical block (this
         # dialog duplicates that one's search-scope checkboxes; see
@@ -98,6 +122,8 @@ class WordMergeSearchDialog(QDialog):
         scope_row.addWidget(self.scope_header_checkbox)
         scope_row.addWidget(self.scope_full_text_checkbox)
         scope_row.addStretch(1)
+
+        self.date_filter_group = self._build_date_filter_group()
 
         self.query_label = QLabel()
         self.query_edit = QLineEdit()
@@ -143,6 +169,7 @@ class WordMergeSearchDialog(QDialog):
         layout.addWidget(self.source_stack)
         layout.addWidget(self.recursive_checkbox)
         layout.addLayout(scope_row)
+        layout.addWidget(self.date_filter_group)
         layout.addWidget(self.query_label)
         layout.addWidget(self.query_edit)
         layout.addLayout(search_row)
@@ -157,6 +184,20 @@ class WordMergeSearchDialog(QDialog):
         self.retranslate()
         self._refresh_drive_status()
         self._restore_drive_state()
+        self._restore_local_folder_state()
+
+    def _restore_local_folder_state(self) -> None:
+        """02.09.2026 - see MergeSearchDialog's identical method (this
+        dialog duplicates the same local-folder field/recursive checkbox)
+        for the full reasoning."""
+        folder = str(self.settings.value("word_merge_search_last_folder", "", type=str))
+        if folder:
+            self._folder = Path(folder)
+            self.folder_edit.setText(folder)
+        self.recursive_checkbox.setChecked(
+            bool(self.settings.value("word_merge_search_recursive", False, type=bool))
+        )
+        self._update_search_enabled()
 
     def _restore_drive_state(self) -> None:
         """02.09.2026 - see MergeSearchDialog's identical method (this
@@ -175,6 +216,7 @@ class WordMergeSearchDialog(QDialog):
         text = self.drive_folder_edit.text().strip()
         if text:
             self.settings.setValue("word_merge_search_drive_folder_link", text)
+        self.settings.setValue("word_merge_search_recursive", self.recursive_checkbox.isChecked())
         super().done(result)
 
     # --- panel construction ------------------------------------------------
@@ -273,6 +315,94 @@ class WordMergeSearchDialog(QDialog):
         layout.addLayout(connect_row)
         return panel
 
+    def _build_date_filter_group(self) -> QGroupBox:
+        """02.09.2026 - see MergeSearchDialog._build_date_filter_group()'s
+        identical method (this dialog duplicates that one's date-filter
+        panel) for the full reasoning behind the design."""
+        group = QGroupBox()
+        group.setCheckable(True)
+        group.setChecked(False)
+
+        self.date_source_file_radio = QRadioButton()
+        self.date_source_file_radio.setChecked(True)
+        self.date_source_document_radio = QRadioButton()
+        self.date_source_file_radio.toggled.connect(self._on_date_source_changed)
+        date_source_row = QHBoxLayout()
+        date_source_row.addWidget(self.date_source_file_radio)
+        date_source_row.addWidget(self.date_source_document_radio)
+        date_source_row.addStretch(1)
+
+        self.date_region_ico_format_checkbox = QCheckBox()
+        self.date_region_ico_format_checkbox.setChecked(True)
+        self.date_region_header_checkbox = QCheckBox()
+        self.date_region_footer_checkbox = QCheckBox()
+        date_region_row = QHBoxLayout()
+        date_region_row.addWidget(self.date_region_ico_format_checkbox)
+        date_region_row.addWidget(self.date_region_header_checkbox)
+        date_region_row.addWidget(self.date_region_footer_checkbox)
+        date_region_row.addStretch(1)
+
+        self.date_format_iso_checkbox = QCheckBox()
+        self.date_format_iso_checkbox.setChecked(FORMAT_ISO in DEFAULT_DATE_FORMATS)
+        self.date_format_de_checkbox = QCheckBox()
+        self.date_format_de_checkbox.setChecked(FORMAT_DE in DEFAULT_DATE_FORMATS)
+        self.date_format_en_month_checkbox = QCheckBox()
+        self.date_format_en_month_checkbox.setChecked(FORMAT_EN_MONTH in DEFAULT_DATE_FORMATS)
+        self.date_format_slash_checkbox = QCheckBox()
+        self.date_format_slash_checkbox.setChecked(FORMAT_SLASH in DEFAULT_DATE_FORMATS)
+        date_format_row = QHBoxLayout()
+        date_format_row.addWidget(self.date_format_iso_checkbox)
+        date_format_row.addWidget(self.date_format_de_checkbox)
+        date_format_row.addWidget(self.date_format_en_month_checkbox)
+        date_format_row.addWidget(self.date_format_slash_checkbox)
+        date_format_row.addStretch(1)
+
+        self.date_document_options = QWidget()
+        date_document_layout = QVBoxLayout(self.date_document_options)
+        date_document_layout.setContentsMargins(0, 0, 0, 0)
+        date_document_layout.addLayout(date_region_row)
+        date_document_layout.addLayout(date_format_row)
+        self.date_document_options.setVisible(False)  # source starts on "Dateidatum"
+
+        self.date_exact_checkbox = QCheckBox()
+        self.date_exact_checkbox.toggled.connect(self._on_date_exact_toggled)
+
+        self.date_from_label = QLabel()
+        self.date_from_edit = QDateEdit()
+        _configure_optional_date_edit(self.date_from_edit)
+        self.date_to_label = QLabel()
+        self.date_to_edit = QDateEdit()
+        _configure_optional_date_edit(self.date_to_edit)
+        range_panel = QWidget()
+        range_layout = QHBoxLayout(range_panel)
+        range_layout.setContentsMargins(0, 0, 0, 0)
+        range_layout.addWidget(self.date_from_label)
+        range_layout.addWidget(self.date_from_edit)
+        range_layout.addWidget(self.date_to_label)
+        range_layout.addWidget(self.date_to_edit)
+        range_layout.addStretch(1)
+
+        self.date_exact_label = QLabel()
+        self.date_exact_edit = QDateEdit()
+        _configure_optional_date_edit(self.date_exact_edit)
+        exact_panel = QWidget()
+        exact_layout = QHBoxLayout(exact_panel)
+        exact_layout.setContentsMargins(0, 0, 0, 0)
+        exact_layout.addWidget(self.date_exact_label)
+        exact_layout.addWidget(self.date_exact_edit)
+        exact_layout.addStretch(1)
+
+        self.date_range_stack = QStackedWidget()
+        self.date_range_stack.addWidget(range_panel)  # index 0: Von/Bis
+        self.date_range_stack.addWidget(exact_panel)  # index 1: Exaktes Datum
+
+        layout = QVBoxLayout(group)
+        layout.addLayout(date_source_row)
+        layout.addWidget(self.date_document_options)
+        layout.addWidget(self.date_exact_checkbox)
+        layout.addWidget(self.date_range_stack)
+        return group
+
     # --- i18n ------------------------------------------------------------
     # Every key below is either word_merge_search.* (wording genuinely
     # differs from the PDF dialog - see ui/i18n_data.py) or the shared,
@@ -291,6 +421,21 @@ class WordMergeSearchDialog(QDialog):
         self.scope_ico_format_checkbox.setText(t("merge_search.scope_ico_format"))
         self.scope_header_checkbox.setText(t("merge_search.scope_header"))
         self.scope_full_text_checkbox.setText(t("merge_search.scope_full_text"))
+
+        self.date_filter_group.setTitle(t("merge_search.date_filter_group"))
+        self.date_source_file_radio.setText(t("merge_search.date_source_file"))
+        self.date_source_document_radio.setText(t("merge_search.date_source_document"))
+        self.date_region_ico_format_checkbox.setText(t("merge_search.date_region_ico_format"))
+        self.date_region_header_checkbox.setText(t("merge_search.date_region_header"))
+        self.date_region_footer_checkbox.setText(t("merge_search.date_region_footer"))
+        self.date_format_iso_checkbox.setText(t("merge_search.date_format_iso"))
+        self.date_format_de_checkbox.setText(t("merge_search.date_format_de"))
+        self.date_format_en_month_checkbox.setText(t("merge_search.date_format_en_month"))
+        self.date_format_slash_checkbox.setText(t("merge_search.date_format_slash"))
+        self.date_exact_checkbox.setText(t("merge_search.date_exact_checkbox"))
+        self.date_from_label.setText(t("merge_search.date_from_label"))
+        self.date_to_label.setText(t("merge_search.date_to_label"))
+        self.date_exact_label.setText(t("merge_search.date_exact_label"))
         # 02.09.2026: query_label/query_placeholder used to be
         # word_merge_search.*-specific ("... am Dokumentanfang" vs. the
         # PDF dialog's "... auf Seite 1") back when the search scope was a
@@ -497,6 +642,70 @@ class WordMergeSearchDialog(QDialog):
             scopes.add(SCOPE_FULL_TEXT)
         return scopes
 
+    # --- date filter -----------------------------------------------------
+    # 02.09.2026 - see MergeSearchDialog's identical methods (this dialog
+    # duplicates that one's date-filter panel) for the full reasoning.
+
+    def _on_date_source_changed(self, file_checked: bool) -> None:
+        self.date_document_options.setVisible(not file_checked)
+
+    def _on_date_exact_toggled(self, checked: bool) -> None:
+        self.date_range_stack.setCurrentIndex(1 if checked else 0)
+
+    def _selected_date_regions(self) -> frozenset[str]:
+        regions: set[str] = set()
+        if self.date_region_ico_format_checkbox.isChecked():
+            regions.add(DATE_REGION_ICO_FORMAT)
+        if self.date_region_header_checkbox.isChecked():
+            regions.add(DATE_REGION_HEADER)
+        if self.date_region_footer_checkbox.isChecked():
+            regions.add(DATE_REGION_FOOTER)
+        return frozenset(regions)
+
+    def _selected_date_formats(self) -> frozenset[str]:
+        formats: set[str] = set()
+        if self.date_format_iso_checkbox.isChecked():
+            formats.add(FORMAT_ISO)
+        if self.date_format_de_checkbox.isChecked():
+            formats.add(FORMAT_DE)
+        if self.date_format_en_month_checkbox.isChecked():
+            formats.add(FORMAT_EN_MONTH)
+        if self.date_format_slash_checkbox.isChecked():
+            formats.add(FORMAT_SLASH)
+        return frozenset(formats)
+
+    def _build_date_filter(self) -> tuple[DateSearchFilter | None, str | None]:
+        """See MergeSearchDialog._build_date_filter() - identical logic."""
+        if not self.date_filter_group.isChecked():
+            return None, None
+
+        if self.date_exact_checkbox.isChecked():
+            exact = _optional_date(self.date_exact_edit)
+            date_range = DateRange(start=exact, end=exact)
+        else:
+            start = _optional_date(self.date_from_edit)
+            end = _optional_date(self.date_to_edit)
+            if start is not None and end is not None and start > end:
+                return None, "merge_search.error_date_range_reversed"
+            date_range = DateRange(start=start, end=end)
+
+        if date_range.is_unbounded:
+            return None, None
+
+        if self.date_source_file_radio.isChecked():
+            return DateSearchFilter(source=SOURCE_FILE, date_range=date_range), None
+
+        regions = self._selected_date_regions()
+        if not regions:
+            return None, "merge_search.error_missing_date_region"
+        formats = self._selected_date_formats()
+        if not formats:
+            return None, "merge_search.error_missing_date_format"
+        return (
+            DateSearchFilter(source=SOURCE_DOCUMENT, date_range=date_range, regions=regions, formats=formats),
+            None,
+        )
+
     def _update_search_enabled(self) -> None:
         if self._worker is not None:
             return
@@ -516,6 +725,11 @@ class WordMergeSearchDialog(QDialog):
             QMessageBox.warning(self, self.windowTitle(), self.language.text("merge_search.error_missing_scope"))
             return
 
+        date_filter, date_error_key = self._build_date_filter()
+        if date_error_key is not None:
+            QMessageBox.warning(self, self.windowTitle(), self.language.text(date_error_key))
+            return
+
         if self._is_drive_source():
             if self._drive_folder_id is None:
                 QMessageBox.warning(self, self.windowTitle(), self.language.text("merge_search.drive_error_missing_folder"))
@@ -529,13 +743,16 @@ class WordMergeSearchDialog(QDialog):
                 QMessageBox.critical(self, self.language.text("merge_search.failed_title"), str(exc))
                 return
             self._worker = WordDriveSearchWorker(
-                client, self._drive_folder_id, self.query_edit.text(), self.recursive_checkbox.isChecked(), self._drive_cache_dir, scopes
+                client, self._drive_folder_id, self.query_edit.text(), self.recursive_checkbox.isChecked(),
+                self._drive_cache_dir, scopes, date_filter,
             )
         else:
             if self._folder is None:
                 QMessageBox.warning(self, self.windowTitle(), self.language.text("merge_search.error_missing_folder"))
                 return
-            self._worker = WordIcoSearchWorker(self._folder, self.query_edit.text(), self.recursive_checkbox.isChecked(), scopes)
+            self._worker = WordIcoSearchWorker(
+                self._folder, self.query_edit.text(), self.recursive_checkbox.isChecked(), scopes, date_filter
+            )
 
         self.progress.setRange(0, 0)
         self.progress.setVisible(True)

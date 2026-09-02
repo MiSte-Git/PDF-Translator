@@ -32,10 +32,12 @@ from typing import Callable
 
 from pipeline.pdf.pymupdf_engine import (
     extract_ico_header_text,
+    extract_pdf_footer_text,
     extract_pdf_full_text,
     extract_pdf_header_text,
 )
 from pipeline.word.docx_engine import (
+    extract_docx_footer_text,
     extract_docx_full_text,
     extract_docx_header_text,
     extract_docx_ico_header_text,
@@ -66,6 +68,40 @@ DOCX_SCOPE_EXTRACTORS: dict[str, Callable[[str], str | None]] = {
     SCOPE_ICO_FORMAT: extract_docx_ico_header_text,
     SCOPE_HEADER: extract_docx_header_text,
     SCOPE_FULL_TEXT: extract_docx_full_text,
+}
+
+
+# --- Date-filter regions (02.09.2026) ---------------------------------
+#
+# Michael, on the date-range filter: "Können wir noch eine nach
+# Datumsbereich, von, bis, exakt einbauen." / on where in the document it
+# should look: "Das aber nur entweder im Header, im Footer oder im ICO
+# Feld auf der ersten Seite, also für diese Option." - a SEPARATE,
+# smaller region set from the SCOPE_* text-search scopes above (which
+# have no "Footer" option at all, only ICO Format/Header/Volltext):
+# DATE_REGION_FOOTER uses the footer extractors added alongside this
+# feature (extract_pdf_footer_text()/extract_docx_footer_text()), while
+# DATE_REGION_ICO_FORMAT/DATE_REGION_HEADER reuse the exact same
+# extractors as SCOPE_ICO_FORMAT/SCOPE_HEADER above - same text, just
+# consumed by the date parser (pipeline/date_extract.py) instead of
+# matches_query(). combined_extractor() below is format-agnostic (just a
+# dict + a set of keys), so it's reused as-is for these regions too - no
+# separate combinator needed.
+DATE_REGION_ICO_FORMAT = SCOPE_ICO_FORMAT
+DATE_REGION_HEADER = SCOPE_HEADER
+DATE_REGION_FOOTER = "footer"
+ALL_DATE_REGIONS = (DATE_REGION_ICO_FORMAT, DATE_REGION_HEADER, DATE_REGION_FOOTER)
+
+PDF_DATE_REGION_EXTRACTORS: dict[str, Callable[[str], str | None]] = {
+    DATE_REGION_ICO_FORMAT: extract_ico_header_text,
+    DATE_REGION_HEADER: extract_pdf_header_text,
+    DATE_REGION_FOOTER: extract_pdf_footer_text,
+}
+
+DOCX_DATE_REGION_EXTRACTORS: dict[str, Callable[[str], str | None]] = {
+    DATE_REGION_ICO_FORMAT: extract_docx_ico_header_text,
+    DATE_REGION_HEADER: extract_docx_header_text,
+    DATE_REGION_FOOTER: extract_docx_footer_text,
 }
 
 

@@ -8703,3 +8703,144 @@ Richtung pro Button unabhängig, Deaktivierung bei <2 Zeilen, Seiten-Feld
 wandert mit), `tests/test_ui_search_query_tooltip.py` (4 Fälle: Tooltip-
 Inhalt DE/EN, Feld und Label zeigen denselben Text). Komplette
 Testsuite (587 Tests) läuft grün.
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung 13) - Kombinierte UND/ODER-Suche mit Klammern, Unterordner-Option merkt sich Wert, letzter Suchordner wird angezeigt
+
+Michael meldete direkt im Anschluss an Fortsetzung 12 drei zusammenhängende
+Probleme in der Dokumentensuche.
+
+**Kombinierte Suche mit Klammern:** "Ich habe jetzt gerade doch den Fall
+von einer Kombinierten Suche die so aussehen würde 'StellarRussia ODER
+(The UND Korolev UND Directive)'. Aktuell werden nur die 'StellarRussia'
+PDFs gefunden." Der bisherige Parser (Fortsetzung 11, bewusst auf "genau
+EIN Operator pro Suche" beschränkt und per AskUserQuestion so bestätigt)
+degradierte eine Suche mit BEIDEN Operatoren stillschweigend zu einer
+reinen ODER-Verknüpfung und ignorierte den UND-Teil komplett - genau der
+gemeldete Bug. `pipeline/search_query.py` komplett neu geschrieben: echter
+rekursiver Parser für verschachtelte UND/ODER/Klammer-Ausdrücke
+(`parse_query()` liefert einen Baum aus `("term", …)`/`("and", […])`/
+`("or", […])`-Knoten, `matches_query()` wertet ihn aus). Klammern
+gruppieren wie erwartet; ohne Klammern gilt die übliche Boole'sche
+Vorrangregel UND-vor-ODER (z. B. "A UND B ODER C" == "(A UND B) ODER C") -
+eine echte Verbesserung gegenüber dem bisherigen Verhalten, kein reiner
+Zusatz. Eine fehlerhafte Klammerung (z. B. unbalanciert) lässt die Suche
+nie abstürzen, sondern fällt auf den gesamten eingegebenen Text als EINEN
+literalen Suchbegriff zurück - wie eine Suche ganz ohne Operatoren schon
+immer behandelt wurde. `split_query_terms()` (alte, jetzt zu einfache
+Schnittstelle) entfernt, `parse_query()` tritt an ihre Stelle;
+`find_matching()`/`find_drive_matching()` und beide Such-Dialoge selbst
+sind unverändert, da sie ausschließlich über `matches_query()` gehen.
+Tooltip (`merge_search.query_tooltip`, DE/EN, in beiden Dialogen) um ein
+durchgerechnetes Klammer-Beispiel erweitert (Michaels eigene Suche als
+Beispieltext).
+
+**Unterordner-Option:** "Dann sollte die Unterordner Option nicht als
+Standard ausgewählt sein, zumindest nicht beim erneuten Suchen." Die
+Checkbox startete bisher immer als aktiviert, ohne sich den zuletzt
+verwendeten Wert zu merken. Standard jetzt deaktiviert; der zuletzt
+verwendete Wert wird beim Schließen des Dialogs (`done()`, also auch beim
+Schließen über das Fenster-X) gespeichert und beim nächsten Öffnen wieder
+eingesetzt - genau das bereits bestehende Muster für den Google-Drive-
+Ordner-Link.
+
+**Letzter Suchordner nicht im Textfeld sichtbar:** "Der letzte Suchordner
+wird auch nicht im Textfeld angezeigt, aber wenn man den Button klickt ist
+man direkt dort. Das sollte UI weit gleich gehandhabt werden." Ursache:
+`_choose_folder()` schrieb den gewählten Ordner zwar in die QSettings
+(genutzt als Startordner für den nächsten `getExistingDirectory()`-Dialog),
+aber nichts las diesen Wert beim Neuöffnen zurück in `folder_edit`/
+`self._folder` - exakt derselbe Fehler, der für den Google-Drive-Cache-
+Ordner bereits in Fortsetzung 9 behoben wurde, hier aber im lokalen
+Ordner-Feld übersehen. Neue Methode `_restore_local_folder_state()`
+(mirror von `_restore_drive_state()`) stellt sowohl den Ordner-Text als
+auch die Unterordner-Checkbox wieder her, direkt nach `_restore_drive_state()`
+aufgerufen - identisch in `ui/merge_search_dialog.py` und
+`ui/word_merge_search_dialog.py`, damit beide Dialoge sich beim Neuöffnen
+tatsächlich gleich verhalten.
+
+Neue Tests: `tests/test_search_query.py` komplett neu geschrieben (15
+Fälle: Klammer-Gruppen mit ODER/UND, verschachtelte Klammern, gemischte
+Vorrangregel ohne Klammern, unbalancierte Klammer/fehlender zweiter
+Operand fällt auf Literal-Suche zurück, plus alle bisherigen Fälle
+weiterhin grün), `tests/test_ui_local_search_state_persistence.py` (neu,
+8 Fälle über beide Dialoge: Unterordner-Checkbox startet deaktiviert,
+merkt sich Wert über Schließen/Neuöffnen hinweg inkl. Zurückschalten auf
+deaktiviert, letzter Ordner erscheint im Textfeld und aktiviert direkt den
+Suchen-Button, beide Dialoge verhalten sich identisch). Komplette
+Testsuite (600 Tests) läuft grün.
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung 14) - Datumsfilter (Von/Bis/Exakt) in der Dokumentensuche
+
+Michael, direkt im Anschluss an Fortsetzung 13: "Können wir noch eine nach
+Datumsbereich, von, bis, exakt einbauen." Über zwei Runden
+AskUserQuestion geklärt: UI als Von/Bis-Feldpaar mit Umschalter für ein
+exaktes Datum (statt z. B. eines reinen Dropdown-Vergleichsoperators);
+als Quelle sowohl das Dateidatum als auch ein im Dokumenttext gefundenes
+Datum möglich, letzteres aber nur beschränkt auf Header, Footer oder das
+ICO Feld auf Seite 1; Datei- und Dokument-Datum schließen sich pro Suche
+gegenseitig aus ("Eine Quelle pro Suche wählen"); erkannte Textformate im
+Dokument sind einzeln abwählbar, Standard ist ausschließlich ISO.
+
+**Neues Modul `pipeline/date_extract.py`:** reine Logik, keine UI-/
+Dateisystem-Abhängigkeit. Erkennt ISO (`JJJJ-MM-TT`), Deutsch
+(`TT.MM.JJJJ`, auch zweistelliges Jahr), Schrägstrich (`TT/MM/JJJJ`,
+Mehrdeutigkeit Tag/Monat wird zuerst als TT/MM/JJJJ versucht, nur bei
+Ungültigkeit auf MM/TT/JJJJ zurückgefallen) und englische Monatsnamen (in
+beiden Reihenfolgen, "1 September 2026" und "September 1, 2026"). Ein
+nicht interpretierbares Datum lässt den Ordner-Scan nie abstürzen,
+sondern wird einfach übersprungen. `DateRange` (Von/Bis, beide optional
+= offenes Ende; "exaktes Datum" ist bewusst kein eigener Modus, sondern
+schlicht `DateRange(start=Von, end=Von)`) und `DateSearchFilter`
+(Quelle Datei/Dokument, Bereich, bei Dokument-Quelle zusätzlich die
+gewählten Regionen und Formate).
+
+**Neue "Footer"-Textextraktion** für PDF (`extract_pdf_footer_text()`,
+`pipeline/pdf/pymupdf_engine.py`) und DOCX (`extract_docx_footer_text()`,
+`pipeline/word/docx_engine.py`) - spiegelbildlich zur bereits
+bestehenden "Header"-Extraktion, nur für den unteren statt oberen
+wiederkehrenden Seitenbereich. Bewusst eine eigene, kleinere
+Regionen-Liste in `ui/search_scopes.py` (`DATE_REGION_ICO_FORMAT`/
+`_HEADER`/`_FOOTER`) getrennt von den bestehenden allgemeinen
+Suchbereichen (`SCOPE_*`), da der Datumsfilter eine "Footer"-Option
+braucht, die die normale Volltextsuche nie hatte, und umgekehrt bewusst
+kein "Volltext"-Pendant für den Datumsfilter existiert (Michael wollte
+dort ausdrücklich nur Header/Footer/ICO Feld).
+
+**Google-Drive-Besonderheit:** `find_drive_matching()` lädt jede
+gescannte Datei erst in einen Wegwerf-Temp-Ordner herunter, bevor
+irgendetwas geprüft wird - ein lokales `Path.stat()`-Dateidatum auf der
+heruntergeladenen Kopie würde also immer nur "wann dieser Scan die Datei
+zufällig heruntergeladen hat" widerspiegeln, nicht das tatsächliche
+Änderungsdatum in Drive. Gelöst über ein neues Feld
+`DriveEntry.modified_time`, befüllt aus Drives eigenem `modifiedTime`-
+Metadatenfeld (`pipeline/drive_auth.py`), das für den Dateidatum-Filter
+verwendet wird statt der Temp-Kopie.
+
+**UI:** neue, mit einer Checkbox aktivierbare Gruppe "Nach Datum
+filtern" in beiden Such-Dialogen (`ui/merge_search_dialog.py`,
+`ui/word_merge_search_dialog.py`, identisch dupliziert nach dem
+etablierten Muster dieses Projekts) - per `QGroupBox.setCheckable()`
+deaktiviert (aber sichtbar) Qt automatisch alle enthaltenen Felder, wenn
+die Gruppe nicht angehakt ist, ganz ohne manuelle Enable/Disable-Logik.
+Innerhalb der Gruppe: Radio-Umschalter Dateidatum/Dokumentdatum (blendet
+bei Dokumentdatum zusätzlich Regionen- und Format-Checkboxen ein), ein
+`QStackedWidget` zwischen Von/Bis-Feldpaar und einem einzelnen
+Exakt-Feld (Umschalter "Exaktes Datum", gleiche `QStackedWidget`-Technik
+wie bereits beim Lokal/Drive-Quellenumschalter). Eine aktivierte, aber
+noch leer gelassene Gruppe wird wie ein leeres Suchfeld behandelt (kein
+Filter, keine Fehlermeldung) - erst ein vertauschtes Von/Bis oder eine
+Dokument-Quelle ganz ohne gewählte Region/Format lösen beim Klick auf
+"Suchen" eine Warnung aus.
+
+Neue Tests: `tests/test_date_extract.py` (14, reine Datumslogik),
+`tests/test_date_filter_regions.py` (10, Footer-Extraktion + Regionen-
+Registry), `tests/test_search_date_filter.py` (8, End-zu-Ende über
+lokale und Drive-Ordner-Scans), `tests/test_ui_date_filter.py` (neu, 26
+Fälle über beide Dialoge: Standardzustand deaktiviert, Quellen-/Exakt-
+Umschalter, `_build_date_filter()` für Datei-/Dokument-Quelle, exaktes
+Datum, vertauschten Bereich und fehlende Region/fehlendes Format, sowie
+dass "Suchen" den fertigen Filter tatsächlich an den Worker
+durchreicht bzw. bei Fehlern gar keinen Worker startet). i18n: 17 neue
+`merge_search.date_*`-Schlüssel (DE/EN, Parität geprüft, 363/363 Keys),
+von beiden Dialogen geteilt, da die Formulierungen formatunabhängig
+sind. Komplette Testsuite (658 Tests) läuft grün.
