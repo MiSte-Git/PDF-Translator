@@ -8157,3 +8157,57 @@ unverändert).
 **Noch offen:** ob bei Michael tatsächlich der OS-Schlüsselbund die
 Ursache war, zeigt sich erst beim nächsten Speicherversuch mit diesem
 Fix - die neue Fehlermeldung sagt jetzt konkret, woran es liegt.
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung 3) - Google-Zugangsdaten aus JSON-Datei laden + "Zugriff blockiert"-Fehler eingegrenzt
+
+Michael kam einen Schritt weiter, bekam dann "Zugriff blockiert: Die
+Überprüfung von Document Translator durch Google wurde nicht
+abgeschlossen" - ein harter Block (kein "trotzdem fortfahren"-Link,
+anders als die normale "nicht verifiziert"-Warnung), der bei einer App
+im Testmodus genau dann erscheint, wenn das gerade verwendete
+Google-Konto NICHT in der "Testnutzer"-Liste des OAuth-Zustimmungs-
+bildschirms steht (per Recherche bestätigt, siehe Quellen im Chat).
+Kein Bug in diesem Projekt - Fix ist, das exakt richtige Konto unter
+"Testnutzer" einzutragen; `docs/google_drive_setup.md` entsprechend
+präzisiert (Abschnitt 3.4: Unterscheidung harter Block vs. Warnung
+erklärt).
+
+Michael dabei: "Ich konnte eine json Datei mit den OAuth-Client Daten
+beim erstellen runterladen. Sollten wir das laden der json Datei beim
+anmelden unterstützen? Ist das eine common Praxis?" Antwort: ja - Google
+selbst bietet `InstalledAppFlow.from_client_secrets_file()` als
+Standardweg an (bestätigt per Blick in die installierte
+google-auth-oauthlib-Quelle), und die Datei bündelt Client-ID,
+Client-Secret UND Projekt-ID bereits korrekt - genau das manuelle
+Abtippen einzelner Werte war die Ursache der letzten zwei Bugs (API-
+Schlüssel statt Client-ID, Projekt-ID separat suchen müssen).
+
+**Umsetzung:**
+- `pipeline/drive_auth.py`: neue `parse_client_secrets_file(path) ->
+  tuple[client_id, client_secret, project_id]` - liest/validiert
+  Googles Standard-JSON-Format, unterscheidet dabei explizit den Fall
+  "web"- statt "installed"-Client (eigene, klare Fehlermeldung: falscher
+  Anwendungstyp) von fehlenden Feldern von kaputtem JSON, immer als
+  `DriveAuthError` mit nutzerfreundlichem Text. Speichert selbst NICHTS
+  - füllt nur dieselben drei Werte, die auch beim manuellen Eintippen
+  entstehen; der bestehende, gerade erst abgesicherte "speichern"-Weg
+  bleibt der einzige Speicherpfad.
+- `ui/merge_search_dialog.py` und `ui/word_merge_search_dialog.py`:
+  neuer Button "Aus JSON-Datei laden …" oberhalb der drei Felder, öffnet
+  einen Datei-Dialog, füllt bei Erfolg alle drei Felder, zeigt bei
+  Fehler `QMessageBox.warning` mit der konkreten Meldung. Manuelles
+  Eintragen bleibt als Alternative bestehen (z. B. falls die Datei nicht
+  mehr vorliegt).
+- `ui/i18n_data.py`: drei neue Schlüssel (DE/EN, 339/339 Parität),
+  `webapp/static/i18n/{de,en}.json` neu generiert.
+- `docs/google_drive_setup.md`: Schritt 4 empfiehlt jetzt explizit
+  "JSON HERUNTERLADEN" statt Werte einzeln abzutippen, Schritt 5 führt
+  den Datei-Import als empfohlenen Weg, manuelles Eintragen als
+  Alternative.
+- Tests: `tests/test_drive_auth.py` +5 (`parse_client_secrets_file()` -
+  gültige Datei, fehlende Datei, kaputtes JSON, "web"-Client-Typ,
+  fehlende Felder), `tests/test_ui_drive_credentials_save.py` +6 (Laden
+  füllt Felder, Laden zeigt Warnung bei kaputter Datei und lässt Felder
+  unverändert, Abbrechen des Datei-Dialogs tut nichts - alle
+  parametrisiert über beide Dialoge). Alle 491 Tests des gesamten
+  Projekts grün (1 Skip, unverändert).

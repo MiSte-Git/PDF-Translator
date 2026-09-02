@@ -52,6 +52,7 @@ fully unit-tested against a fake service object.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
@@ -117,6 +118,59 @@ def save_client_credentials(client_id: str, client_secret: str, project_id: str)
     set_api_key("google_drive_client_id", client_id)
     set_api_key("google_drive_client_secret", client_secret)
     set_api_key("google_drive_project_id", project_id)
+
+
+def parse_client_secrets_file(path: Path) -> tuple[str, str, str]:
+    """Read client_id/client_secret/project_id out of the JSON file Google
+    Cloud Console offers to download right after creating the OAuth
+    "Desktop app" client (02.09.2026, Michael: "Ich konnte eine json Datei
+    mit den OAuth-Client Daten beim erstellen runterladen. Sollten wir das
+    laden der json Datei beim anmelden unterstützen?").
+
+    Yes - this is the standard, Google-documented shape (the same one
+    google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file()
+    reads directly), and pasting all three values by hand is exactly what
+    caused both of the last two bugs Michael hit (an API key pasted into
+    the Client-ID field; hunting for the project ID separately) - the file
+    always has all three correct and bundled together. This function only
+    PARSES the file into the same three plain strings the manual fields
+    already produce; the caller (see both merge-search dialogs'
+    _load_drive_credentials_from_file()) still fills the three fields and
+    still goes through the existing save_client_credentials() + its
+    already-tested error handling, rather than this function saving
+    anything itself - one save path, one place that can fail.
+
+    Raises DriveAuthError with a message meant to be shown directly to the
+    user (not a Python-y KeyError/JSONDecodeError) if the file cannot be
+    read, is not valid JSON, or is missing any of the three fields this app
+    needs - e.g. a "web" application client (wrong type - the setup docs
+    say "Desktop-App") or a hand-edited/corrupted file.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise DriveAuthError(f"Datei konnte nicht gelesen werden: {exc}") from exc
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise DriveAuthError(f"Das ist keine gültige JSON-Datei: {exc}") from exc
+    # Google's own client-secrets format nests everything under "installed"
+    # for a Desktop-App client (or "web" for a web-app client, which this
+    # app does not support - see docs/google_drive_setup.md step 4.2, the
+    # setup explicitly says "Desktop-App").
+    config = data.get("installed")
+    if not isinstance(config, dict):
+        if "web" in data:
+            raise DriveAuthError(
+                "Diese Datei ist für einen 'Web-Anwendung'-Client, nicht für 'Desktop-App'. "
+                "Bitte in der Google Cloud Console einen Client vom Typ 'Desktop-App' anlegen "
+                "(siehe docs/google_drive_setup.md)."
+            )
+        raise DriveAuthError("Diese Datei enthält keine 'installed'-OAuth-Client-Konfiguration.")
+    missing = [key for key in ("client_id", "client_secret", "project_id") if not config.get(key)]
+    if missing:
+        raise DriveAuthError(f"In der Datei fehlen: {', '.join(missing)}.")
+    return str(config["client_id"]), str(config["client_secret"]), str(config["project_id"])
 
 
 def disconnect() -> None:

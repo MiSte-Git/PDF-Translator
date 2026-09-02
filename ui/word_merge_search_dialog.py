@@ -182,6 +182,14 @@ class WordMergeSearchDialog(QDialog):
         drive_cache_row.addWidget(self.drive_choose_cache_button)
 
         self.drive_credentials_label = QLabel()
+        # 02.09.2026 - see MergeSearchDialog's identical comment above its
+        # own drive_load_from_file_button (this dialog duplicates the same
+        # Drive panel).
+        self.drive_load_from_file_button = QPushButton()
+        self.drive_load_from_file_button.clicked.connect(self._load_drive_credentials_from_file)
+        load_from_file_row = QHBoxLayout()
+        load_from_file_row.addWidget(self.drive_load_from_file_button)
+        load_from_file_row.addStretch(1)
         self.drive_client_id_edit = QLineEdit()
         self.drive_client_secret_edit = QLineEdit()
         self.drive_client_secret_edit.setEchoMode(QLineEdit.Password)
@@ -212,6 +220,7 @@ class WordMergeSearchDialog(QDialog):
         layout.addWidget(self.drive_cache_label)
         layout.addLayout(drive_cache_row)
         layout.addWidget(self.drive_credentials_label)
+        layout.addLayout(load_from_file_row)
         layout.addLayout(credentials_row)
         layout.addWidget(self.drive_connection_status_label)
         layout.addLayout(connect_row)
@@ -249,6 +258,7 @@ class WordMergeSearchDialog(QDialog):
         self.drive_cache_label.setText(t("merge_search.drive_cache_label"))
         self.drive_choose_cache_button.setText(t("merge_search.drive_choose_cache"))
         self.drive_credentials_label.setText(t("merge_search.drive_credentials_label"))
+        self.drive_load_from_file_button.setText(t("merge_search.drive_load_from_file"))
         self.drive_client_id_edit.setPlaceholderText(t("merge_search.drive_client_id_placeholder"))
         self.drive_client_secret_edit.setPlaceholderText(t("merge_search.drive_client_secret_placeholder"))
         self.drive_project_id_edit.setPlaceholderText(t("merge_search.drive_project_id_placeholder"))
@@ -320,6 +330,28 @@ class WordMergeSearchDialog(QDialog):
         self.drive_cache_edit.setText(chosen)
         self.settings.setValue("word_merge_search_drive_cache_dir", chosen)
         self._update_search_enabled()
+
+    def _load_drive_credentials_from_file(self) -> None:
+        """See MergeSearchDialog's identical method - same behaviour,
+        shared Drive auth state (pipeline/drive_auth.py)."""
+        chosen, _filter = QFileDialog.getOpenFileName(
+            self,
+            self.language.text("merge_search.drive_load_from_file_dialog_title"),
+            "",
+            "JSON (*.json)",
+        )
+        if not chosen:
+            return
+        try:
+            client_id, client_secret, project_id = drive_auth.parse_client_secrets_file(Path(chosen))
+        except Exception as exc:
+            QMessageBox.warning(
+                self, self.windowTitle(), self.language.text("merge_search.drive_load_from_file_failed", error=str(exc))
+            )
+            return
+        self.drive_client_id_edit.setText(client_id)
+        self.drive_client_secret_edit.setText(client_secret)
+        self.drive_project_id_edit.setText(project_id)
 
     def _save_drive_credentials(self) -> None:
         client_id = self.drive_client_id_edit.text().strip()

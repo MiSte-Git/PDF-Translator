@@ -30,7 +30,15 @@ verbinden".
 4. Unter "Testnutzer" die eigene Google-Kontoadresse hinzufügen, solange
    die App im Testmodus bleibt (reicht für den persönlichen Gebrauch -
    eine Veröffentlichung/Google-Prüfung ist für die eigene Nutzung nicht
-   nötig).
+   nötig). **Wichtig:** genau die Adresse eintragen, mit der man sich
+   später beim "Mit Google verbinden" auch tatsächlich anmeldet - sonst
+   kommt beim Anmelden "Zugriff blockiert: Die Überprüfung von [App]
+   durch Google wurde nicht abgeschlossen" (ein harter Block OHNE
+   Umgehungsmöglichkeit). Das ist eine andere, striktere Meldung als die
+   Warnung "Diese App wurde nicht verifiziert" in Schritt 5.3 unten (die
+   hat einen "Erweitert"-Link zum Fortfahren) - der harte Block bedeutet
+   konkret: das gerade verwendete Google-Konto steht nicht in dieser
+   Testnutzer-Liste.
 5. Scope muss NICHT manuell hinzugefügt werden - der PDF-Translator fragt
    beim Verbinden selbst nach `drive.readonly` (nur Lesezugriff, siehe
    pipeline/drive_auth.py).
@@ -41,28 +49,37 @@ verbinden".
    "OAuth-Client-ID".
 2. Anwendungstyp: **Desktop-App** (wichtig - nicht "Web-Anwendung").
 3. Einen beliebigen Namen vergeben, erstellen.
-4. Es erscheinen eine **Client-ID** und ein **Client-Secret** - beide
-   werden im nächsten Schritt gebraucht.
-5. Zusätzlich die **Projekt-ID** notieren (nicht der Projekt*name*, den
-   man in Schritt 1 vergeben hat): oben links in der Projektauswahl neben
-   dem Projektnamen zu sehen, oder auf der "Dashboard"-Seite unter "APIs
-   & Dienste" -> "Übersicht". Ohne sie schlägt "Mit Google verbinden"
-   später fehl (Google kann die Anfragen sonst keinem Projekt zuordnen).
+4. Es erscheint ein Dialog mit **Client-ID** und **Client-Secret** -
+   direkt dort unten auf **"JSON HERUNTERLADEN"** klicken (empfohlen,
+   siehe Schritt 5 unten) statt beide Werte einzeln abzutippen. Die
+   Datei enthält Client-ID, Client-Secret UND die Projekt-ID bereits
+   korrekt gebündelt - manuelles Kopieren ist fehleranfällig (z. B.
+   versehentlich einen API-Schlüssel statt der Client-ID eingefügt, oder
+   die Projekt-ID separat suchen müssen).
 
 ## 5. Im PDF-Translator eintragen und verbinden
 
 1. Im Merge-Dialog auf "Ordner durchsuchen …" klicken, oben auf "Google
    Drive" umschalten.
-2. Client-ID, Client-Secret und Projekt-ID aus Schritt 4 in die drei
-   Felder einfügen, "Zugangsdaten speichern" klicken (landet im
-   OS-Schlüsselbund, siehe pipeline/credentials.py - genau wie die
-   Übersetzungs-Provider-Schlüssel).
-3. "Mit Google verbinden" klicken - es öffnet sich der Standard-
-   Google-Anmeldebildschirm im Browser. Zustimmen (bei "Diese App wurde
-   nicht verifiziert" - normal im Testmodus - auf "Erweitert" ->
-   "Zur App (unsicher) wechseln" klicken, es ist die eigene, selbst
-   angelegte App).
-4. Zurück im Programm: Status wechselt auf "Verbunden".
+2. **Empfohlen:** "Aus JSON-Datei laden …" klicken und die in Schritt 4.4
+   heruntergeladene Datei wählen - füllt Client-ID, Client-Secret und
+   Projekt-ID automatisch korrekt aus. Alternativ lassen sich alle drei
+   Werte auch von Hand eintragen (z. B. wenn die Datei nicht mehr
+   vorliegt); die Projekt-ID steht dann oben links in der Projektauswahl
+   neben dem Projektnamen, oder auf der "Zugangsdaten"-Seite oben im
+   Bereich "Projektinformationen".
+3. "Zugangsdaten speichern" klicken (landet im OS-Schlüsselbund, siehe
+   pipeline/credentials.py - genau wie die Übersetzungs-Provider-
+   Schlüssel). Schlägt das fehl (z. B. kein OS-Schlüsselbund verfügbar),
+   erscheint jetzt eine Fehlermeldung mit dem konkreten Grund, statt
+   stillschweigend nichts zu tun.
+4. "Mit Google verbinden" klicken - es öffnet sich der Standard-
+   Google-Anmeldebildschirm im Browser, mit genau dem Google-Konto
+   anmelden, das in Schritt 3.4 als Testnutzer eingetragen wurde.
+   Zustimmen (bei "Diese App wurde nicht verifiziert" - normal im
+   Testmodus - auf "Erweitert" -> "Zur App (unsicher) wechseln" klicken,
+   es ist die eigene, selbst angelegte App).
+5. Zurück im Programm: Status wechselt auf "Verbunden".
 
 ## Danach
 

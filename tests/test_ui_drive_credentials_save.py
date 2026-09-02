@@ -127,3 +127,127 @@ def _language():
     from ui.i18n import LanguageManager
 
     return LanguageManager("de")
+
+
+# --- "Aus JSON-Datei laden ..." (02.09.2026) --------------------------
+# Michael: "Ich konnte eine json Datei mit den OAuth-Client Daten beim
+# erstellen runterladen. Sollten wir das laden der json Datei beim
+# anmelden unterstützen?" - fills the three fields from a real Google
+# client-secrets JSON instead of the user copy-pasting each value.
+
+
+@pytest.mark.parametrize(
+    "module_name, dialog_attr",
+    [
+        ("ui.merge_search_dialog", "MergeSearchDialog"),
+        ("ui.word_merge_search_dialog", "WordMergeSearchDialog"),
+    ],
+)
+def test_load_from_file_fills_the_three_fields(
+    qapp, monkeypatch: pytest.MonkeyPatch, module_name, dialog_attr, tmp_path
+) -> None:
+    import importlib
+    import json
+
+    dialog_module = importlib.import_module(module_name)
+    DialogClass = getattr(dialog_module, dialog_attr)
+
+    json_path = tmp_path / "client_secret.json"
+    json_path.write_text(
+        json.dumps(
+            {
+                "installed": {
+                    "client_id": "id-from-file",
+                    "client_secret": "secret-from-file",
+                    "project_id": "project-from-file",
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": ["http://localhost"],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        dialog_module.QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(json_path), "JSON (*.json)"))
+    )
+
+    from PySide6.QtCore import QSettings
+
+    dialog = DialogClass(_language(), QSettings("PDF-Translator-Test", f"{dialog_attr}LoadFile"))
+    try:
+        dialog._load_drive_credentials_from_file()
+        assert dialog.drive_client_id_edit.text() == "id-from-file"
+        assert dialog.drive_client_secret_edit.text() == "secret-from-file"
+        assert dialog.drive_project_id_edit.text() == "project-from-file"
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize(
+    "module_name, dialog_attr",
+    [
+        ("ui.merge_search_dialog", "MergeSearchDialog"),
+        ("ui.word_merge_search_dialog", "WordMergeSearchDialog"),
+    ],
+)
+def test_load_from_file_shows_warning_on_a_broken_file_and_leaves_fields_untouched(
+    qapp, monkeypatch: pytest.MonkeyPatch, module_name, dialog_attr, tmp_path
+) -> None:
+    import importlib
+
+    dialog_module = importlib.import_module(module_name)
+    DialogClass = getattr(dialog_module, dialog_attr)
+
+    broken_path = tmp_path / "broken.json"
+    broken_path.write_text("not valid json{{{", encoding="utf-8")
+    monkeypatch.setattr(
+        dialog_module.QFileDialog,
+        "getOpenFileName",
+        staticmethod(lambda *a, **k: (str(broken_path), "JSON (*.json)")),
+    )
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        dialog_module.QMessageBox,
+        "warning",
+        staticmethod(lambda parent, title, text: captured.update(title=title, text=text)),
+    )
+
+    from PySide6.QtCore import QSettings
+
+    dialog = DialogClass(_language(), QSettings("PDF-Translator-Test", f"{dialog_attr}LoadFileBroken"))
+    try:
+        dialog._load_drive_credentials_from_file()
+        assert captured  # a warning was shown
+        assert dialog.drive_client_id_edit.text() == ""
+        assert dialog.drive_client_secret_edit.text() == ""
+        assert dialog.drive_project_id_edit.text() == ""
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize(
+    "module_name, dialog_attr",
+    [
+        ("ui.merge_search_dialog", "MergeSearchDialog"),
+        ("ui.word_merge_search_dialog", "WordMergeSearchDialog"),
+    ],
+)
+def test_load_from_file_does_nothing_when_dialog_is_cancelled(
+    qapp, monkeypatch: pytest.MonkeyPatch, module_name, dialog_attr
+) -> None:
+    import importlib
+
+    dialog_module = importlib.import_module(module_name)
+    DialogClass = getattr(dialog_module, dialog_attr)
+
+    monkeypatch.setattr(dialog_module.QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: ("", "")))
+
+    from PySide6.QtCore import QSettings
+
+    dialog = DialogClass(_language(), QSettings("PDF-Translator-Test", f"{dialog_attr}LoadFileCancel"))
+    try:
+        dialog._load_drive_credentials_from_file()
+        assert dialog.drive_client_id_edit.text() == ""
+    finally:
+        dialog.close()

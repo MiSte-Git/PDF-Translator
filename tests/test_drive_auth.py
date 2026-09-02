@@ -86,6 +86,68 @@ def test_disconnect_deletes_only_the_refresh_token(monkeypatch: pytest.MonkeyPat
     assert deleted == ["google_drive_refresh_token"]
 
 
+# --- parse_client_secrets_file() ---------------------------------------
+# 02.09.2026 (Michael: "Ich konnte eine json Datei mit den OAuth-Client
+# Daten beim erstellen runterladen. Sollten wir das laden der json Datei
+# beim anmelden unterstützen?") - see the function's own docstring for why
+# this is standard practice, not just a nice-to-have.
+
+import json as _json
+
+
+def _write_client_secrets(tmp_path: Path, payload: dict) -> Path:
+    path = tmp_path / "client_secret.json"
+    path.write_text(_json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_parse_client_secrets_file_reads_all_three_values(tmp_path: Path) -> None:
+    path = _write_client_secrets(
+        tmp_path,
+        {
+            "installed": {
+                "client_id": "id-from-file",
+                "project_id": "project-from-file",
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "client_secret": "secret-from-file",
+                "redirect_uris": ["http://localhost"],
+            }
+        },
+    )
+    client_id, client_secret, project_id = drive_auth.parse_client_secrets_file(path)
+    assert client_id == "id-from-file"
+    assert client_secret == "secret-from-file"
+    assert project_id == "project-from-file"
+
+
+def test_parse_client_secrets_file_missing_file_raises_drive_auth_error(tmp_path: Path) -> None:
+    with pytest.raises(DriveAuthError):
+        drive_auth.parse_client_secrets_file(tmp_path / "does_not_exist.json")
+
+
+def test_parse_client_secrets_file_invalid_json_raises_drive_auth_error(tmp_path: Path) -> None:
+    path = tmp_path / "broken.json"
+    path.write_text("not valid json{{{", encoding="utf-8")
+    with pytest.raises(DriveAuthError):
+        drive_auth.parse_client_secrets_file(path)
+
+
+def test_parse_client_secrets_file_web_client_type_gets_a_specific_message(tmp_path: Path) -> None:
+    path = _write_client_secrets(
+        tmp_path,
+        {"web": {"client_id": "id", "client_secret": "secret", "project_id": "proj"}},
+    )
+    with pytest.raises(DriveAuthError, match="Desktop-App"):
+        drive_auth.parse_client_secrets_file(path)
+
+
+def test_parse_client_secrets_file_missing_fields_raises_drive_auth_error(tmp_path: Path) -> None:
+    path = _write_client_secrets(tmp_path, {"installed": {"client_id": "id-only"}})
+    with pytest.raises(DriveAuthError, match="client_secret"):
+        drive_auth.parse_client_secrets_file(path)
+
+
 # --- connect_interactively() / build_service(): the configured/connected guards ---
 
 
