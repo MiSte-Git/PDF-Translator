@@ -8009,3 +8009,105 @@ konkreter:
   Start auf Windows/macOS zeigt SmartScreen-/Gatekeeper-Warnung, siehe
   README.
 - Kein Video-/GIF-Walkthrough des fertigen Assistenten erstellt.
+
+## 02.09.2026 (Cowork-Sitzung) - Google-Drive-Ordnersuche: fehlende Projekt-ID beim Verbinden behoben
+
+Michael: "Wenn ich mich mit Google über unseren 'Mit Google verbinden'
+Button verbinden möchte, schlägt es fehl weil die Google Projekt-ID
+fehlt. Das haben wir nicht berücksichtigt bei der Eingabe und
+wahrscheinlich auch nicht in der Anleitung, ReadMe usw."
+
+**Ursache:** `pipeline/drive_auth.py` fragte bisher nur Client-ID und
+Client-Secret ab und übergab sie unverändert an
+`google.oauth2.credentials.Credentials(...)` - ohne `quota_project_id`.
+Ohne eine Zuordnung zu einem Google-Cloud-Projekt kann Google
+API-Aufrufe keinem Projekt/Kontingent zuordnen, was sich dem Nutzer
+gegenüber als Fehler rund um eine fehlende Projekt-ID zeigt. Jeder
+OAuth-"Desktop-App"-Client gehört zu genau einem Google-Cloud-Projekt -
+diese Projekt-ID war bisher weder als drittes Eingabefeld noch in
+`docs/google_drive_setup.md` vorgesehen.
+
+**Fix:**
+- `pipeline/credentials.py`: neue `get_google_drive_project_id()`,
+  gleiches Muster wie Client-ID/-Secret (Env-Variable
+  `GOOGLE_DRIVE_PROJECT_ID` vor OS-Keyring).
+- `pipeline/drive_auth.py`: `is_configured()` prüft jetzt alle drei
+  Werte; `save_client_credentials()` nimmt ein drittes `project_id`-
+  Argument; `connect_interactively()`s `client_config["installed"]`
+  bekommt `"project_id"`; `build_service()` übergibt
+  `quota_project_id=get_google_drive_project_id()` an `Credentials(...)`
+  - das ist der eigentliche Fix, nicht nur Vollständigkeit des
+  Client-Config-Dicts.
+- `ui/merge_search_dialog.py` und `ui/word_merge_search_dialog.py`
+  (beide unabhängige Kopien derselben Drive-Zugangsdaten-UI): drittes
+  Eingabefeld "Projekt-ID" neben Client-ID/-Secret,
+  `_save_drive_credentials()` verlangt jetzt alle drei Felder.
+- `ui/i18n_data.py`: neuer Schlüssel `merge_search.drive_project_id_placeholder`
+  (DE/EN, 335/335 Parität), `merge_search.drive_not_configured` erwähnt
+  jetzt auch die Projekt-ID; `webapp/static/i18n/{de,en}.json` per
+  `python -m webapp.tools.export_i18n` neu generiert.
+- `docs/google_drive_setup.md`: neuer Teilschritt in Abschnitt 4 (wo die
+  Projekt-ID zu finden ist - Projektauswahl oben links oder
+  APIs-&-Dienste-Übersicht, nicht zu verwechseln mit dem in Schritt 1
+  frei vergebenen Projekt*namen*) und Anpassung von Abschnitt 5 auf drei
+  statt zwei Felder. README.md erwähnt Google Drive nicht, keine
+  Änderung dort nötig.
+- `tests/test_drive_auth.py`: bestehende Tests auf drei Werte erweitert,
+  neuer Regressionstest `test_build_service_sets_quota_project_id_from_stored_project_id`
+  (patcht `Credentials.__init__`, prüft `quota_project_id` direkt, ohne
+  einen echten Google-Account zu brauchen - siehe Moduldocstring von
+  `pipeline/drive_auth.py` für die generelle Grenze, was hier ohne
+  echtes Google-Konto testbar ist). Alle 24 Tests in
+  `test_drive_auth.py` grün, zusätzlich end-to-end per Smoke-Test gegen
+  eine echte `MergeSearchDialog`-Instanz geprüft (Feld befüllen,
+  speichern, Feld wird geleert, fehlende Projekt-ID verhindert das
+  Speichern).
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung) - Prozess beendete sich nach Fensterschliessen nicht sauber
+
+Michael: "Es scheint das die App nach Schliessen aller offener Fenster
+den Prozess in der Shell nicht sauber beendet. Ich habe die App in der
+Shell mit 'python -m ui.app' gestartet."
+
+**Ursache:** mehrere Stellen starten Hintergrund-Tasks über
+`QThreadPool.globalInstance().start(...)` (Übersetzungs-Job,
+Merge-Ordnersuche, Drive-Connect/-Suche, Update-Check/-Apply). Wenn beim
+Schliessen aller Fenster noch so ein Task läuft, wartet Qts globaler
+QThreadPool beim (impliziten) Prozessende darauf, dass er fertig wird -
+dokumentiertes Verhalten von `QThreadPool::~QThreadPool()`. Der
+konkrete, gerade erst gefundene Auslöser: `pipeline/drive_auth.py::
+connect_interactively()` rief `flow.run_local_server(port=0)` bisher
+OHNE Timeout auf - bricht der Nutzer die Google-Anmeldung ab (Browser-
+Tab schliessen, App schliessen, bevor die Anmeldung fertig ist), blieb
+der Hintergrund-Thread für immer in dieser blockierenden Funktion
+hängen, und der Prozess damit ebenfalls für immer. Per Smoke-Test
+bestätigt: mit einem absichtlich für immer blockierten Hintergrund-Task
+kehrt die Shell beim alten Verhalten (`raise SystemExit(...)`)
+tatsächlich nie zurück (mit `timeout 8` erzwungen beendet, Exit-Code
+124); mit dem Fix unten kehrt sie sofort zurück.
+
+**Fix (zwei Ebenen):**
+- **Konkreter Auslöser behoben:** `connect_interactively()` übergibt
+  jetzt `timeout_seconds=300` (5 Minuten, siehe neue Konstante
+  `_OAUTH_CONSENT_TIMEOUT_SECONDS`) an `run_local_server()` und fängt
+  `google_auth_oauthlib.flow.WSGITimeoutError` als sauberen
+  `DriveAuthError` ab ("Google-Anmeldung nicht innerhalb von 5 Minuten
+  abgeschlossen").
+- **Grundsätzlich abgesichert:** `ui/app.py`s `if __name__ ==
+  "__main__":`-Block beendet den Prozess nach `app.exec()` jetzt per
+  `os._exit(exit_code)` statt `raise SystemExit(...)` - beendet den
+  Prozess sofort auf Betriebssystemebene, ohne auf irgendeinen noch
+  laufenden Hintergrund-Thread zu warten. Sicher, weil nichts
+  Kritisches auf den Prozessendezeitpunkt verschoben wird: Formular-
+  Zustand wird in `MainWindow.closeEvent()` bereits synchron persistiert
+  (dort zusätzlich `self.settings.sync()` ergänzt, um jeden Zweifel an
+  der Schreibreihenfolge auszuräumen), Zugangsdaten werden beim Klick
+  auf "speichern" synchron in den OS-Schlüsselbund geschrieben (siehe
+  `pipeline/credentials.py::set_api_key()`). Deckt damit auch jeden
+  zukünftigen Worker ab, nicht nur den Drive-Connect-Fall.
+- `tests/test_drive_auth.py`: bestehende Fakes um `timeout_seconds`-
+  Parameter erweitert, neuer Regressionstest
+  `test_connect_interactively_bounds_the_wait_and_raises_a_clean_error_on_timeout`
+  (prüft, dass ein endlicher Wert statt `None` übergeben wird und
+  `WSGITimeoutError` sauber in `DriveAuthError` übersetzt wird). Alle
+  476 Tests des gesamten Projekts weiterhin grün (1 Skip, unverändert).

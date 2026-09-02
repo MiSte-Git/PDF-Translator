@@ -30,18 +30,21 @@ from pipeline.drive_auth import DriveAuthError, DriveClient, DriveEntry, _execut
 def test_not_configured_when_no_credentials_present(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GOOGLE_DRIVE_CLIENT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_DRIVE_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("GOOGLE_DRIVE_PROJECT_ID", raising=False)
     assert drive_auth.is_configured() is False
 
 
-def test_configured_once_both_client_id_and_secret_are_set(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_configured_once_client_id_secret_and_project_id_are_set(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_ID", "id-123")
     monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_SECRET", "secret-456")
+    monkeypatch.setenv("GOOGLE_DRIVE_PROJECT_ID", "project-789")
     assert drive_auth.is_configured() is True
 
 
-def test_not_configured_with_only_one_of_the_two_values(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_not_configured_with_only_some_of_the_three_values(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_ID", "id-123")
-    monkeypatch.delenv("GOOGLE_DRIVE_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_SECRET", "secret-456")
+    monkeypatch.delenv("GOOGLE_DRIVE_PROJECT_ID", raising=False)
     assert drive_auth.is_configured() is False
 
 
@@ -63,11 +66,17 @@ def test_connected_once_a_refresh_token_is_present(monkeypatch: pytest.MonkeyPat
 # monkeypatches ui.app.credential_status instead of a real provider.
 
 
-def test_save_client_credentials_stores_both_values_under_their_key_names(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_save_client_credentials_stores_all_three_values_under_their_key_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     stored: dict[str, str] = {}
     monkeypatch.setattr(drive_auth, "set_api_key", lambda name, value: stored.__setitem__(name, value))
-    drive_auth.save_client_credentials("my-id", "my-secret")
-    assert stored == {"google_drive_client_id": "my-id", "google_drive_client_secret": "my-secret"}
+    drive_auth.save_client_credentials("my-id", "my-secret", "my-project")
+    assert stored == {
+        "google_drive_client_id": "my-id",
+        "google_drive_client_secret": "my-secret",
+        "google_drive_project_id": "my-project",
+    }
 
 
 def test_disconnect_deletes_only_the_refresh_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -83,6 +92,7 @@ def test_disconnect_deletes_only_the_refresh_token(monkeypatch: pytest.MonkeyPat
 def test_connect_interactively_refuses_without_client_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GOOGLE_DRIVE_CLIENT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_DRIVE_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("GOOGLE_DRIVE_PROJECT_ID", raising=False)
     with pytest.raises(DriveAuthError):
         drive_auth.connect_interactively()
 
@@ -90,6 +100,7 @@ def test_connect_interactively_refuses_without_client_credentials(monkeypatch: p
 def test_connect_interactively_raises_if_google_returns_no_refresh_token(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_ID", "id-123")
     monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_SECRET", "secret-456")
+    monkeypatch.setenv("GOOGLE_DRIVE_PROJECT_ID", "project-789")
 
     class _FakeCredentials:
         refresh_token = None
@@ -98,9 +109,10 @@ def test_connect_interactively_raises_if_google_returns_no_refresh_token(monkeyp
         @classmethod
         def from_client_config(cls, config, scopes):
             assert config["installed"]["client_id"] == "id-123"
+            assert config["installed"]["project_id"] == "project-789"
             return cls()
 
-        def run_local_server(self, port):
+        def run_local_server(self, port, timeout_seconds=None):
             return _FakeCredentials()
 
     import google_auth_oauthlib.flow as flow_module
@@ -113,6 +125,7 @@ def test_connect_interactively_raises_if_google_returns_no_refresh_token(monkeyp
 def test_connect_interactively_stores_the_returned_refresh_token(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_ID", "id-123")
     monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_SECRET", "secret-456")
+    monkeypatch.setenv("GOOGLE_DRIVE_PROJECT_ID", "project-789")
 
     class _FakeCredentials:
         refresh_token = "brand-new-refresh-token"
@@ -122,7 +135,7 @@ def test_connect_interactively_stores_the_returned_refresh_token(monkeypatch: py
         def from_client_config(cls, config, scopes):
             return cls()
 
-        def run_local_server(self, port):
+        def run_local_server(self, port, timeout_seconds=None):
             return _FakeCredentials()
 
     import google_auth_oauthlib.flow as flow_module
@@ -134,9 +147,48 @@ def test_connect_interactively_stores_the_returned_refresh_token(monkeypatch: py
     assert stored["google_drive_refresh_token"] == "brand-new-refresh-token"
 
 
+def test_connect_interactively_bounds_the_wait_and_raises_a_clean_error_on_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """02.09.2026 regression test - Michael: the app's process didn't
+    terminate cleanly after closing all windows. Root cause: run_local_server()
+    blocks forever by default if the user abandons the browser consent
+    screen, which in turn blocks Qt's global QThreadPool (and therefore the
+    whole process) from ever shutting down. connect_interactively() must now
+    pass a bounded timeout_seconds and turn google_auth_oauthlib's own
+    WSGITimeoutError into a normal, catchable DriveAuthError - never let the
+    call hang indefinitely.
+    """
+    monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_ID", "id-123")
+    monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_SECRET", "secret-456")
+    monkeypatch.setenv("GOOGLE_DRIVE_PROJECT_ID", "project-789")
+
+    import google_auth_oauthlib.flow as flow_module
+
+    captured_timeout: dict[str, object] = {}
+
+    class _FakeFlow:
+        @classmethod
+        def from_client_config(cls, config, scopes):
+            return cls()
+
+        def run_local_server(self, port, timeout_seconds=None):
+            captured_timeout["value"] = timeout_seconds
+            raise flow_module.WSGITimeoutError("timed out waiting for the redirect")
+
+    monkeypatch.setattr(flow_module, "InstalledAppFlow", _FakeFlow)
+    with pytest.raises(DriveAuthError):
+        drive_auth.connect_interactively()
+    # A real, finite bound was actually passed through - not None (which
+    # google_auth_oauthlib treats as "wait forever", the original bug).
+    assert isinstance(captured_timeout["value"], (int, float))
+    assert captured_timeout["value"] == drive_auth._OAUTH_CONSENT_TIMEOUT_SECONDS
+
+
 def test_build_service_refuses_when_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GOOGLE_DRIVE_CLIENT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_DRIVE_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("GOOGLE_DRIVE_PROJECT_ID", raising=False)
     with pytest.raises(DriveAuthError):
         drive_auth.build_service()
 
@@ -144,6 +196,7 @@ def test_build_service_refuses_when_not_configured(monkeypatch: pytest.MonkeyPat
 def test_build_service_refuses_when_configured_but_not_connected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_ID", "id-123")
     monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_SECRET", "secret-456")
+    monkeypatch.setenv("GOOGLE_DRIVE_PROJECT_ID", "project-789")
     monkeypatch.delenv("GOOGLE_DRIVE_REFRESH_TOKEN", raising=False)
     with pytest.raises(DriveAuthError):
         drive_auth.build_service()
@@ -152,6 +205,7 @@ def test_build_service_refuses_when_configured_but_not_connected(monkeypatch: py
 def test_build_service_wraps_a_revoked_refresh_token_as_drive_auth_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_ID", "id-123")
     monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_SECRET", "secret-456")
+    monkeypatch.setenv("GOOGLE_DRIVE_PROJECT_ID", "project-789")
     monkeypatch.setenv("GOOGLE_DRIVE_REFRESH_TOKEN", "revoked-token")
 
     from google.auth.exceptions import RefreshError
@@ -164,6 +218,32 @@ def test_build_service_wraps_a_revoked_refresh_token_as_drive_auth_error(monkeyp
     monkeypatch.setattr(credentials_module.Credentials, "refresh", _raise_refresh_error)
     with pytest.raises(DriveAuthError):
         drive_auth.build_service()
+
+
+def test_build_service_sets_quota_project_id_from_stored_project_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """02.09.2026 regression test - Michael: "Mit Google verbinden" failed
+    because Google could not attribute the request to any project. The fix
+    is passing quota_project_id through to google.oauth2.credentials.Credentials;
+    this pins that down without needing a real Drive API call.
+    """
+    monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_ID", "id-123")
+    monkeypatch.setenv("GOOGLE_DRIVE_CLIENT_SECRET", "secret-456")
+    monkeypatch.setenv("GOOGLE_DRIVE_PROJECT_ID", "project-789")
+    monkeypatch.setenv("GOOGLE_DRIVE_REFRESH_TOKEN", "refresh-abc")
+
+    captured: dict[str, object] = {}
+    import google.oauth2.credentials as credentials_module
+
+    real_init = credentials_module.Credentials.__init__
+
+    def _capturing_init(self, *args, **kwargs):
+        captured.update(kwargs)
+        return real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(credentials_module.Credentials, "__init__", _capturing_init)
+    monkeypatch.setattr(credentials_module.Credentials, "refresh", lambda self, request: None)
+    drive_auth.build_service()
+    assert captured["quota_project_id"] == "project-789"
 
 
 # --- _execute_with_retry() ---------------------------------------------

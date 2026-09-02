@@ -185,11 +185,13 @@ class WordMergeSearchDialog(QDialog):
         self.drive_client_id_edit = QLineEdit()
         self.drive_client_secret_edit = QLineEdit()
         self.drive_client_secret_edit.setEchoMode(QLineEdit.Password)
+        self.drive_project_id_edit = QLineEdit()
         self.drive_save_credentials_button = QPushButton()
         self.drive_save_credentials_button.clicked.connect(self._save_drive_credentials)
         credentials_row = QHBoxLayout()
         credentials_row.addWidget(self.drive_client_id_edit)
         credentials_row.addWidget(self.drive_client_secret_edit)
+        credentials_row.addWidget(self.drive_project_id_edit)
         credentials_row.addWidget(self.drive_save_credentials_button)
 
         self.drive_connection_status_label = QLabel()
@@ -249,6 +251,7 @@ class WordMergeSearchDialog(QDialog):
         self.drive_credentials_label.setText(t("merge_search.drive_credentials_label"))
         self.drive_client_id_edit.setPlaceholderText(t("merge_search.drive_client_id_placeholder"))
         self.drive_client_secret_edit.setPlaceholderText(t("merge_search.drive_client_secret_placeholder"))
+        self.drive_project_id_edit.setPlaceholderText(t("merge_search.drive_project_id_placeholder"))
         self.drive_save_credentials_button.setText(t("merge_search.drive_save_credentials"))
         self.drive_connect_button.setText(t("merge_search.drive_connect_button"))
         self.drive_disconnect_button.setText(t("merge_search.drive_disconnect_button"))
@@ -321,12 +324,14 @@ class WordMergeSearchDialog(QDialog):
     def _save_drive_credentials(self) -> None:
         client_id = self.drive_client_id_edit.text().strip()
         client_secret = self.drive_client_secret_edit.text().strip()
-        if not client_id or not client_secret:
+        project_id = self.drive_project_id_edit.text().strip()
+        if not client_id or not client_secret or not project_id:
             QMessageBox.warning(self, self.windowTitle(), self.language.text("merge_search.drive_not_configured"))
             return
-        drive_auth.save_client_credentials(client_id, client_secret)
+        drive_auth.save_client_credentials(client_id, client_secret, project_id)
         self.drive_client_id_edit.clear()
         self.drive_client_secret_edit.clear()
+        self.drive_project_id_edit.clear()
         self._refresh_drive_status()
         QMessageBox.information(self, self.windowTitle(), self.language.text("merge_search.drive_credentials_saved"))
 

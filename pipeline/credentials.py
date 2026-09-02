@@ -150,6 +150,25 @@ def get_google_drive_client_secret() -> str:
     return get_api_key("google_drive_client_secret", ("GOOGLE_DRIVE_CLIENT_SECRET",))
 
 
+def get_google_drive_project_id() -> str:
+    """Google Cloud project ID the OAuth client belongs to, from the OS keyring.
+
+    Added 02.09.2026 (Michael: "Mit Google verbinden" failed - "die Google
+    Projekt-ID fehlt"). Every OAuth "Desktop app" client Google Cloud
+    Console lets you create belongs to exactly one project - the
+    `client_secret_....json` Google itself offers for download always
+    includes a "project_id" field alongside client_id/client_secret, but
+    the original docs/google_drive_setup.md only ever asked for the latter
+    two, and connect_interactively()/build_service() never passed one
+    along either. Without it, the OAuth credentials this app mints have no
+    associated quota project (see google.oauth2.credentials.Credentials'
+    `quota_project_id` - see pipeline/drive_auth.py::build_service()),
+    which is exactly what surfaces to the user as a Google-side "project"
+    error when calling the Drive API.
+    """
+    return get_api_key("google_drive_project_id", ("GOOGLE_DRIVE_PROJECT_ID",))
+
+
 def get_google_drive_refresh_token() -> str:
     """Stored OAuth refresh token from a previous successful Google sign-in."""
     return get_api_key("google_drive_refresh_token", ("GOOGLE_DRIVE_REFRESH_TOKEN",))

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -669,6 +670,13 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self._persist_form_state()
+        # 02.09.2026 (Michael: Prozess beendet sich nach Fensterschliessen
+        # nicht sauber) - explizit hier flushen statt uns auf Qt/QSettings'
+        # eigenen, unbestimmten Zeitpunkt fuers Schreiben auf die Platte zu
+        # verlassen: main() unten beendet den Prozess gleich per os._exit()
+        # (siehe dortiger Kommentar), das ueberspringt jede normale
+        # Python-/Qt-Aufraeumroutine.
+        self.settings.sync()
         super().closeEvent(event)
 
     def retranslate(self) -> None:
@@ -1664,4 +1672,28 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    _exit_code = main()
+    # 02.09.2026 (Michael: "Es scheint das die App nach Schliessen aller
+    # offener Fenster den Prozess in der Shell nicht sauber beendet.") -
+    # app.exec() above has already returned, meaning every window is closed
+    # and MainWindow.closeEvent() has already run (settings persisted,
+    # see there) - but a background QThreadPool task started earlier
+    # (translation job, Drive-Ordnersuche connect/search, update check/
+    # apply - see the various QThreadPool.globalInstance().start(...)
+    # call sites across ui/) can still be running or, worse, permanently
+    # blocked in a native call with no timeout (the "Mit Google
+    # verbinden" bug fixed the same day in pipeline/drive_auth.py -
+    # unbounded before that fix, still theoretically possible for a
+    # future worker). A normal `raise SystemExit(...)` waits for Qt's
+    # global QThreadPool to finish every such task before the process can
+    # actually exit (Qt's own documented QThreadPool destructor
+    # behaviour) - exactly the "process doesn't terminate cleanly"
+    # symptom. os._exit() terminates the process immediately at the OS
+    # level, without waiting for any thread - safe here because nothing
+    # this app cares about is deferred to normal interpreter shutdown:
+    # form state and every credential are already written synchronously
+    # at the moment they change (QSettings.setValue()/self.settings.sync()
+    # in closeEvent(), OS keyring writes in pipeline/credentials.py's
+    # set_api_key() at the moment "speichern" is clicked), not batched up
+    # for process exit.
+    os._exit(_exit_code)

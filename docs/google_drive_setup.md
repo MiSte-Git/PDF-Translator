@@ -43,15 +43,20 @@ verbinden".
 3. Einen beliebigen Namen vergeben, erstellen.
 4. Es erscheinen eine **Client-ID** und ein **Client-Secret** - beide
    werden im nächsten Schritt gebraucht.
+5. Zusätzlich die **Projekt-ID** notieren (nicht der Projekt*name*, den
+   man in Schritt 1 vergeben hat): oben links in der Projektauswahl neben
+   dem Projektnamen zu sehen, oder auf der "Dashboard"-Seite unter "APIs
+   & Dienste" -> "Übersicht". Ohne sie schlägt "Mit Google verbinden"
+   später fehl (Google kann die Anfragen sonst keinem Projekt zuordnen).
 
 ## 5. Im PDF-Translator eintragen und verbinden
 
 1. Im Merge-Dialog auf "Ordner durchsuchen …" klicken, oben auf "Google
    Drive" umschalten.
-2. Client-ID und Client-Secret aus Schritt 4 in die beiden Felder
-   einfügen, "Zugangsdaten speichern" klicken (landet im OS-Schlüsselbund,
-   siehe pipeline/credentials.py - genau wie die Übersetzungs-Provider-
-   Schlüssel).
+2. Client-ID, Client-Secret und Projekt-ID aus Schritt 4 in die drei
+   Felder einfügen, "Zugangsdaten speichern" klicken (landet im
+   OS-Schlüsselbund, siehe pipeline/credentials.py - genau wie die
+   Übersetzungs-Provider-Schlüssel).
 3. "Mit Google verbinden" klicken - es öffnet sich der Standard-
    Google-Anmeldebildschirm im Browser. Zustimmen (bei "Diese App wurde
    nicht verifiziert" - normal im Testmodus - auf "Erweitert" ->
