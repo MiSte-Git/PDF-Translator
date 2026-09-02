@@ -8524,3 +8524,54 @@ Log-Eintrag mit neuem Zeitstempel) und danach den NEUEN Teil von app.log
 zu schicken - insbesondere die jetzt sichtbaren
 "geladen aus Umgebungsvariable .../aus dem OS-Schlüsselbund"-Zeilen für
 `google_drive_project_id`.
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung 9) - Projekt-ID-Fehler endgültig behoben, neuer (und letzter?) Fehler: Drive API für das Projekt nicht aktiviert
+
+Michael hatte tatsächlich einen alten Log-Ausschnitt erneut eingefügt
+("Du hast recht, ich hatte vergessen zu aktuallisieren") - mit dem
+frischen Log nach echtem Neustart zeigt sich: **alle Fixes dieser Sitzung
+greifen.** `google_drive_project_id: geladen aus dem OS-Schlüsselbund`
+steht jetzt explizit im Log (DEBUG-Fix aus Fortsetzung 7 wirkt), die
+Projekt-ID selbst ist jetzt korrekt (`Baue Drive-Service auf
+(quota_project_id: silken-n…)` statt `AIzaSyCr…` - Schlüsselbund-Vorrang
+aus Fortsetzung 6 + die von Michael korrigierte Projekt-ID wirken
+zusammen), und Anmeldung/Refresh-Token laufen sauber durch.
+
+**Neuer, andersartiger Fehler beim Ordner-Prüfen:** Status 403,
+`reason: 'accessNotConfigured'` - "Google Drive API has not been used in
+project silken-network-502707-g1 before or it is disabled." Das ist kein
+Bug dieser App, sondern ein fehlender einmaliger Schritt in der Google
+Cloud Console: Schritt 2 der Anleitung ("Drive API aktivieren") wurde für
+GENAU dieses (neue/andere) Projekt noch nicht gemacht - die Google-Meldung
+selbst enthält bereits den direkten Aktivieren-Link
+(`.../apis/api/drive.googleapis.com/overview?project=silken-network-502707-g1`).
+Michael wurde angeleitet: Link öffnen, "Aktivieren" klicken, 1-2 Minuten
+warten (Google-seitige Propagierung), erneut prüfen.
+
+`docs/google_drive_setup.md`s "Fehlerbehebung"-Abschnitt um einen
+entsprechenden Punkt ergänzt (403/accessNotConfigured vs. das vorherige
+400/Projekt-ID-Problem klar unterschieden, inkl. wie man beides im Log
+auseinanderhält).
+
+Kein Code-Fix in dieser Runde nötig - das gesamte Logging-/Prioritäts-
+Fahrwerk aus Fortsetzung 4-8 hat den eigentlichen (Projekt-ID-)Fehler
+zweifelsfrei bestätigt und behoben; übrig bleibt ein reiner
+Cloud-Console-Einrichtungsschritt.
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung 10) - Verwechslungsgefahr in der Anleitung dokumentiert: Client-Status vs. API-Aktivierung
+
+Michael schickte einen Screenshot der OAuth-Client-Detailseite
+("Zugangsdaten" -> Client "Document Translate", Clientschlüssel-Status
+"Aktiviert" seit 09:34 Uhr) und fragte, ob das schon die richtige Stelle
+sei, um den 403-"accessNotConfigured"-Fehler aus Fortsetzung 9 zu prüfen.
+War es nicht - das ist der Status des Clientschlüssels selbst (gültig/
+nicht widerrufen), unabhängig davon, ob die Drive API für das Projekt
+freigeschaltet ist. Nach Hinweis auf die richtige Seite (direkter Link aus
+der Fehlermeldung bzw. "APIs & Dienste" -> "Bibliothek" -> "Google Drive
+API") bestätigte er die richtige Seite (Dienstname drive.googleapis.com,
+Status Aktiviert) und merkte an: "Das ist ganz schön kompliziert."
+
+`docs/google_drive_setup.md`s Schritt 2 ("Drive API aktivieren") um genau
+diese Verwechslungsgefahr ergänzt, damit sie beim nächsten Mal (oder für
+andere Nutzer) nicht erneut auftritt. Reine Doku-Änderung, kein Code
+betroffen.

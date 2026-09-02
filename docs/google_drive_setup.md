@@ -20,6 +20,13 @@ verbinden".
 1. Im Menü links: "APIs & Dienste" -> "Bibliothek".
 2. Nach "Google Drive API" suchen, öffnen, "Aktivieren" klicken.
 
+   **Nicht verwechseln (02.09.2026, Michael):** Das ist eine andere Seite
+   als "Zugangsdaten" -> dein OAuth-Client -> "Clientschlüssel"-Status
+   "Aktiviert". Letzteres sagt nur, dass der Clientschlüssel selbst
+   gültig/nicht widerrufen ist - nichts darüber, ob die Drive API für das
+   Projekt freigeschaltet ist. Die richtige Seite hier zeigt oben
+   "Dienstname: drive.googleapis.com" und "Status: Aktiviert".
+
 ## 3. OAuth-Zustimmungsbildschirm einrichten
 
 1. "APIs & Dienste" -> "OAuth-Zustimmungsbildschirm".
@@ -125,3 +132,17 @@ verbinden".
   auch vor einem frisch gespeicherten Wert - falls das Verhalten weiterhin
   seltsam wirkt, in der Shell, aus der die App gestartet wird, einmal
   `env | grep GOOGLE_DRIVE` prüfen.
+- **403 "accessNotConfigured" / "Google Drive API has not been used in
+  project ... before or it is disabled"** (02.09.2026, nachdem die
+  Projekt-ID korrigiert war): eine korrekte Projekt-ID allein reicht nicht
+  - Schritt 2 oben ("Drive API aktivieren") muss für GENAU dieses Projekt
+  einmalig gemacht worden sein. Die Meldung nennt bereits den direkten
+  Link (`https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=<Projekt-ID>`)
+  - öffnen, "Aktivieren" klicken, ein bis zwei Minuten warten (Google
+  braucht kurz, bis das propagiert), dann erneut "Prüfen"/die Suche
+  starten. Am einfachsten zu erkennen im Log
+  (`~/.pdf-translator/logs/app.log`, oder "Einstellungen" -> "Log-Datei
+  öffnen …") an `reason: 'accessNotConfigured'` bzw. Status 403 - anders
+  als die Projekt-ID-Fehler oben (Status 400) ist das kein
+  Konfigurationsfehler dieser App, sondern ein fehlender Schritt in der
+  Google Cloud Console für dieses eine Projekt.
