@@ -78,6 +78,21 @@ from ui.workers import DriveConnectWorker, DriveSearchWorker, IcoSearchWorker
 
 _SNIPPET_PREVIEW_LENGTH = 120
 
+# 02.09.2026 (Michael: "Das wir mit Google verbunden sind darf ruhig
+# prominenter dargestellt werden. Vielleicht mit einem grünem Rahmen um
+# die 'Verbunden' Meldung, oder grüner Hintergrund. Den sonst klickt man
+# versehentlich wieder auf Verbinden...") - a self-contained
+# background/text/border triple (not just a background color) so it reads
+# correctly regardless of the app's own light/dark palette (see
+# ui/theme.py's module docstring on why colors here are never left to
+# inherit from the surrounding theme). Shared between MergeSearchDialog
+# and WordMergeSearchDialog (imported there, see that module) rather than
+# duplicated, since both apply it to the exact same label/condition.
+_DRIVE_CONNECTED_STYLE = (
+    "background-color: #d4edda; color: #155724; border: 1px solid #28a745; "
+    "border-radius: 4px; padding: 6px;"
+)
+
 
 def _match_path(match) -> Path:
     """IcoSearchMatch calls its field `path`, DriveSearchMatch calls it
@@ -510,11 +525,19 @@ class MergeSearchDialog(QDialog):
         connected = drive_auth.is_connected()
         if connected:
             self.drive_connection_status_label.setText(t("merge_search.drive_connected", account=""))
+            self.drive_connection_status_label.setStyleSheet(_DRIVE_CONNECTED_STYLE)
         elif configured:
             self.drive_connection_status_label.setText(t("merge_search.drive_configured_not_connected"))
+            self.drive_connection_status_label.setStyleSheet("")
         else:
             self.drive_connection_status_label.setText(t("merge_search.drive_not_configured"))
-        self.drive_connect_button.setEnabled(configured and self._connect_worker is None)
+            self.drive_connection_status_label.setStyleSheet("")
+        # 02.09.2026 (Michael, s.o.) - previously enabled whenever
+        # `configured`, i.e. even while already connected, making it easy
+        # to click "Mit Google verbinden" again by accident (harmless, but
+        # confusing/unnecessary - it just re-runs the whole browser
+        # consent flow for a connection that already exists).
+        self.drive_connect_button.setEnabled(configured and not connected and self._connect_worker is None)
         self.drive_disconnect_button.setEnabled(connected)
         self._update_search_enabled()
 

@@ -8480,3 +8480,47 @@ Ordnerlink werden beim Wiederöffnen zurückgeholt, ein zurückgeholter Link
 zählt nicht schon als geprüft, erstes Öffnen bleibt leer - parametrisiert
 über beide Dialoge). Alle 515 Tests des gesamten Projekts grün (1 Skip,
 unverändert; 508 → 515 durch die neuen Tests).
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung 8) - "Verbunden"-Status grün hervorgehoben, "Mit Google verbinden" deaktiviert sich jetzt bei bestehender Verbindung
+
+Michael: "Das wir mit Google verbunden sind darf ruhig prominenter
+dargestellt werden. Vielleicht mit einem grünem Rahmen um die 'Verbunden'
+Meldung, oder grüner Hintergrund. Den sonst klickt man versehentlich
+wieder auf Verbinden, das der 'Verbinden' Button ja aktiv ist."
+
+Zwei Änderungen in `_refresh_drive_status()` (`ui/merge_search_dialog.py`
+und `ui/word_merge_search_dialog.py`, beide duplizieren denselben
+Drive-Bereich):
+
+- `drive_connection_status_label` bekommt bei bestehender Verbindung einen
+  grünen Hintergrund/Rahmen (`_DRIVE_CONNECTED_STYLE`, neu in
+  `merge_search_dialog.py`, von `word_merge_search_dialog.py` importiert -
+  ein einziger, in beiden Dateien geteilter Stil statt Duplikat). Bewusst
+  ein vollständiges Hintergrund-/Text-/Rahmen-Tripel statt nur eine
+  Hintergrundfarbe, damit es unabhängig vom hellen/dunklen Programm-Design
+  lesbar bleibt (siehe `ui/theme.py`s Docstring zur selben Begründung an
+  anderer Stelle im Projekt).
+- `drive_connect_button` war bisher aktiv, sobald Zugangsdaten konfiguriert
+  waren - UNABHÄNGIG davon, ob bereits verbunden. Jetzt zusätzlich an
+  `not connected` geknüpft, deaktiviert sich also automatisch, sobald eine
+  Verbindung besteht (genau der von Michael beschriebene
+  versehentliche-Klick-Fall).
+
+**Tests:** neue Datei `tests/test_ui_drive_connection_status.py` +6 (grüner
+Stil + deaktivierter Verbinden-Knopf bei bestehender Verbindung, kein Stil
++ aktiver Knopf bei konfiguriert-aber-nicht-verbunden, kein Stil +
+deaktivierter Knopf wenn gar nicht konfiguriert - parametrisiert über
+beide Dialoge). Alle 521 Tests des gesamten Projekts grün (1 Skip,
+unverändert; 515 → 521 durch die neuen Tests).
+
+**Offen:** Michaels zuletzt geschickter Log-Ausschnitt ("Die Project ID
+stimmt, aber es klappt immer noch nicht") ist zeilenidentisch mit dem
+bereits in Fortsetzung 7 besprochenen Ausschnitt (exakt dieselben
+Zeitstempel 11:48:57-11:51:51) - vermutlich ein erneut eingefügter, nicht
+mehr aktueller Log-Auszug, kein frischer Reproduktionsversuch nach der
+DEBUG-Level-Korrektur/dem Schlüsselbund-Vorrang. Michael wurde gebeten,
+die App neu zu starten (wichtig für den neuen Code UND einen frischen
+Log-Eintrag mit neuem Zeitstempel) und danach den NEUEN Teil von app.log
+zu schicken - insbesondere die jetzt sichtbaren
+"geladen aus Umgebungsvariable .../aus dem OS-Schlüsselbund"-Zeilen für
+`google_drive_project_id`.

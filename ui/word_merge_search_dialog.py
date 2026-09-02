@@ -48,7 +48,7 @@ from pipeline import drive_auth
 from ui.drive_search import DriveSearchResult, extract_folder_id
 from ui.i18n import LanguageManager
 from ui.merge_search import IcoSearchResult
-from ui.merge_search_dialog import _match_path
+from ui.merge_search_dialog import _DRIVE_CONNECTED_STYLE, _match_path
 from ui.workers import DriveConnectWorker, WordDriveSearchWorker, WordIcoSearchWorker
 
 _SNIPPET_PREVIEW_LENGTH = 120
@@ -439,11 +439,16 @@ class WordMergeSearchDialog(QDialog):
         connected = drive_auth.is_connected()
         if connected:
             self.drive_connection_status_label.setText(t("merge_search.drive_connected", account=""))
+            self.drive_connection_status_label.setStyleSheet(_DRIVE_CONNECTED_STYLE)
         elif configured:
             self.drive_connection_status_label.setText(t("merge_search.drive_configured_not_connected"))
+            self.drive_connection_status_label.setStyleSheet("")
         else:
             self.drive_connection_status_label.setText(t("merge_search.drive_not_configured"))
-        self.drive_connect_button.setEnabled(configured and self._connect_worker is None)
+            self.drive_connection_status_label.setStyleSheet("")
+        # 02.09.2026 - see MergeSearchDialog._refresh_drive_status()'s
+        # identical comment.
+        self.drive_connect_button.setEnabled(configured and not connected and self._connect_worker is None)
         self.drive_disconnect_button.setEnabled(connected)
         self._update_search_enabled()
 
