@@ -61,7 +61,15 @@ from pipeline.date_extract import (
 from ui.drive_search import DriveSearchResult, extract_folder_id
 from ui.i18n import LanguageManager
 from ui.merge_search import IcoSearchResult
-from ui.merge_search_dialog import _DRIVE_CONNECTED_STYLE, _configure_optional_date_edit, _match_path, _optional_date
+from ui.merge_search_dialog import (
+    _DRIVE_CONNECTED_STYLE,
+    _CurrentWidgetSizedStack,
+    _DetachedResultsWindow,
+    _configure_optional_date_edit,
+    _match_path,
+    _mtime_or_zero,
+    _optional_date,
+)
 from ui.search_scopes import (
     DATE_REGION_FOOTER,
     DATE_REGION_HEADER,
@@ -97,7 +105,7 @@ class WordMergeSearchDialog(QDialog):
         source_row.addWidget(self.source_drive_radio)
         source_row.addStretch(1)
 
-        self.source_stack = QStackedWidget()
+        self.source_stack = _CurrentWidgetSizedStack()
         self.source_stack.addWidget(self._build_local_panel())
         self.source_stack.addWidget(self._build_drive_panel())
 
@@ -145,13 +153,35 @@ class WordMergeSearchDialog(QDialog):
         self.status_label.setWordWrap(True)
 
         self.results = QListWidget()
+        # 02.09.2026 - see MergeSearchDialog's identical block (this
+        # dialog duplicates that one's results section) for the full
+        # reasoning behind results_stack/the sort buttons/detach button.
+        self.results_placeholder_label = QLabel()
+        self.results_placeholder_label.setAlignment(Qt.AlignCenter)
+        self.results_placeholder_label.setWordWrap(True)
+        self.results_stack = QStackedWidget()
+        self.results_stack.addWidget(self.results)
+        self.results_stack.addWidget(self.results_placeholder_label)
+        self._detached_results_window: _DetachedResultsWindow | None = None
+
         self.select_all_button = QPushButton()
         self.select_all_button.clicked.connect(lambda: self._set_all_checked(True))
         self.select_none_button = QPushButton()
         self.select_none_button.clicked.connect(lambda: self._set_all_checked(False))
+        self._results_name_sort_ascending = True
+        self._results_date_sort_ascending = True
+        self.sort_results_by_name_button = QPushButton()
+        self.sort_results_by_name_button.clicked.connect(self._sort_results_by_name)
+        self.sort_results_by_date_button = QPushButton()
+        self.sort_results_by_date_button.clicked.connect(self._sort_results_by_date)
+        self.detach_results_button = QPushButton()
+        self.detach_results_button.clicked.connect(self._toggle_detach_results)
         select_row = QHBoxLayout()
         select_row.addWidget(self.select_all_button)
         select_row.addWidget(self.select_none_button)
+        select_row.addWidget(self.sort_results_by_name_button)
+        select_row.addWidget(self.sort_results_by_date_button)
+        select_row.addWidget(self.detach_results_button)
         select_row.addStretch(1)
 
         self.take_selected_button = QPushButton()
@@ -176,7 +206,7 @@ class WordMergeSearchDialog(QDialog):
         layout.addWidget(self.progress)
         layout.addWidget(self.status_label)
         layout.addLayout(select_row)
-        layout.addWidget(self.results, 1)
+        layout.addWidget(self.results_stack, 1)
         layout.addLayout(button_row)
         self.resize(680, 640)
 
@@ -217,6 +247,10 @@ class WordMergeSearchDialog(QDialog):
         if text:
             self.settings.setValue("word_merge_search_drive_folder_link", text)
         self.settings.setValue("word_merge_search_recursive", self.recursive_checkbox.isChecked())
+        # 02.09.2026 - see MergeSearchDialog.done()'s identical comment
+        # (this dialog duplicates that one's detach-results feature).
+        if self._detached_results_window is not None:
+            self._detached_results_window.close()
         super().done(result)
 
     # --- panel construction ------------------------------------------------
@@ -392,15 +426,25 @@ class WordMergeSearchDialog(QDialog):
         exact_layout.addWidget(self.date_exact_edit)
         exact_layout.addStretch(1)
 
-        self.date_range_stack = QStackedWidget()
+        self.date_range_stack = _CurrentWidgetSizedStack()
         self.date_range_stack.addWidget(range_panel)  # index 0: Von/Bis
         self.date_range_stack.addWidget(exact_panel)  # index 1: Exaktes Datum
 
+        # 02.09.2026 - see MergeSearchDialog._build_date_filter_group()'s
+        # identical comment (this dialog duplicates that one's date-filter
+        # panel) for why the group's content is wrapped like this.
+        self.date_filter_content = QWidget()
+        content_layout = QVBoxLayout(self.date_filter_content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.addLayout(date_source_row)
+        content_layout.addWidget(self.date_document_options)
+        content_layout.addWidget(self.date_exact_checkbox)
+        content_layout.addWidget(self.date_range_stack)
+        self.date_filter_content.setVisible(False)  # group starts unchecked
+        group.toggled.connect(self.date_filter_content.setVisible)
+
         layout = QVBoxLayout(group)
-        layout.addLayout(date_source_row)
-        layout.addWidget(self.date_document_options)
-        layout.addWidget(self.date_exact_checkbox)
-        layout.addWidget(self.date_range_stack)
+        layout.addWidget(self.date_filter_content)
         return group
 
     # --- i18n ------------------------------------------------------------
@@ -421,6 +465,9 @@ class WordMergeSearchDialog(QDialog):
         self.scope_ico_format_checkbox.setText(t("merge_search.scope_ico_format"))
         self.scope_header_checkbox.setText(t("merge_search.scope_header"))
         self.scope_full_text_checkbox.setText(t("merge_search.scope_full_text"))
+        self.scope_ico_format_checkbox.setToolTip(t("merge_search.scope_ico_format_tooltip"))
+        self.scope_header_checkbox.setToolTip(t("merge_search.scope_header_tooltip"))
+        self.scope_full_text_checkbox.setToolTip(t("merge_search.scope_full_text_tooltip"))
 
         self.date_filter_group.setTitle(t("merge_search.date_filter_group"))
         self.date_source_file_radio.setText(t("merge_search.date_source_file"))
@@ -453,6 +500,14 @@ class WordMergeSearchDialog(QDialog):
         self.cancel_button.setText(t("merge_search.cancel_button"))
         self.select_all_button.setText(t("merge_search.select_all"))
         self.select_none_button.setText(t("merge_search.select_none"))
+        self.sort_results_by_date_button.setToolTip(t("merge.sort_by_date_tooltip"))
+        self._update_results_sort_button_labels()
+        detach_key = (
+            "merge_search.reattach_results_button" if self._detached_results_window is not None
+            else "merge_search.detach_results_button"
+        )
+        self.detach_results_button.setText(t(detach_key))
+        self.results_placeholder_label.setText(t("merge_search.results_detached_placeholder"))
         self.take_selected_button.setText(t("merge_search.take_selected"))
         self.close_button.setText(t("merge_search.close_button"))
 
@@ -706,6 +761,81 @@ class WordMergeSearchDialog(QDialog):
             None,
         )
 
+    # --- results: sorting/detaching ---------------------------------------
+    # 02.09.2026 - see MergeSearchDialog's identical methods (this dialog
+    # duplicates that one's results section) for the full reasoning.
+
+    def _sort_button_label(self, base_key: str, ascending_next: bool) -> str:
+        arrow = "▲" if ascending_next else "▼"
+        return f"{self.language.text(base_key)} {arrow}"
+
+    def _update_results_sort_button_labels(self) -> None:
+        self.sort_results_by_name_button.setText(
+            self._sort_button_label("merge.sort_by_name", self._results_name_sort_ascending)
+        )
+        self.sort_results_by_date_button.setText(
+            self._sort_button_label("merge.sort_by_date", self._results_date_sort_ascending)
+        )
+
+    def _sort_results(self, key, ascending: bool) -> None:
+        entries = [
+            (item.data(Qt.UserRole), item.checkState(), item.text(), item.toolTip())
+            for item in (self.results.item(row) for row in range(self.results.count()))
+        ]
+        entries.sort(key=lambda entry: key(entry[0]), reverse=not ascending)
+        self.results.clear()
+        for path, check_state, label, tooltip in entries:
+            item = QListWidgetItem(label)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(check_state)
+            item.setData(Qt.UserRole, path)
+            item.setToolTip(tooltip)
+            self.results.addItem(item)
+
+    def _sort_results_by_name(self) -> None:
+        ascending = self._results_name_sort_ascending
+        self._sort_results(lambda path: path.name.lower(), ascending)
+        self._results_name_sort_ascending = not ascending
+        self._update_results_sort_button_labels()
+
+    def _sort_results_by_date(self) -> None:
+        ascending = self._results_date_sort_ascending
+        self._sort_results(_mtime_or_zero, ascending)
+        self._results_date_sort_ascending = not ascending
+        self._update_results_sort_button_labels()
+
+    def _update_results_button_states(self) -> None:
+        enabled = self.results.count() > 1
+        self.sort_results_by_name_button.setEnabled(enabled)
+        self.sort_results_by_date_button.setEnabled(enabled)
+
+    def _toggle_detach_results(self) -> None:
+        if self._detached_results_window is None:
+            self._detach_results()
+        else:
+            self._detached_results_window.close()
+
+    def _detach_results(self) -> None:
+        self.results_stack.setCurrentWidget(self.results_placeholder_label)
+        window = _DetachedResultsWindow(self._on_detached_results_closed)
+        window.setWindowTitle(
+            f"{self.windowTitle()} – {self.language.text('merge_search.detached_results_title_suffix')}"
+        )
+        window_layout = QVBoxLayout(window)
+        window_layout.addWidget(self.results)
+        window.resize(420, 480)
+        self._detached_results_window = window
+        self.detach_results_button.setText(self.language.text("merge_search.reattach_results_button"))
+        window.show()
+
+    def _on_detached_results_closed(self) -> None:
+        if self._detached_results_window is None:
+            return
+        self._detached_results_window = None
+        self.results_stack.insertWidget(0, self.results)
+        self.results_stack.setCurrentIndex(0)
+        self.detach_results_button.setText(self.language.text("merge_search.detach_results_button"))
+
     def _update_search_enabled(self) -> None:
         if self._worker is not None:
             return
@@ -717,6 +847,7 @@ class WordMergeSearchDialog(QDialog):
 
     def _start_search(self) -> None:
         self.results.clear()
+        self._update_results_button_states()
         self.take_selected_button.setEnabled(False)
         self.status_label.setText("")
 
@@ -797,6 +928,7 @@ class WordMergeSearchDialog(QDialog):
             item.setToolTip(str(path) + ("\n\n" + match.snippet if match.snippet else ""))
             self.results.addItem(item)
         self.take_selected_button.setEnabled(bool(result.matches))
+        self._update_results_button_states()
 
         key = "word_merge_search.status_cancelled" if result.cancelled else (
             "word_merge_search.status_done_with_errors" if result.errors else "word_merge_search.status_done"

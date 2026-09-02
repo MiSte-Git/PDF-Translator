@@ -380,6 +380,30 @@ DE = {
     "merge_search.scope_ico_format": "ICO Format (Kopfbereich Seite 1)",
     "merge_search.scope_header": "Header (alle Seiten)",
     "merge_search.scope_full_text": "Volltext",
+    # 02.09.2026 (Michael: "Bedeutet jetzt 'ICO Format (Kopfbereich Seite
+    # 1)' das auch der Header mit durchsucht wird, oder nur der
+    # Kopfbereich?") - die drei Bereiche sind unabhängig voneinander und
+    # überschneiden sich nicht: "ICO Format" durchsucht NUR den
+    # Metadatenblock auf Seite 1, "Header" NUR den auf jeder Seite
+    # wiederkehrenden oberen Bereich, "Volltext" bewusst den gesamten
+    # Text inkl. beider anderen Bereiche. Wird nichts angehakt, wird auch
+    # nichts durchsucht - die Checkboxen sind frei kombinierbar.
+    "merge_search.scope_ico_format_tooltip": (
+        "Durchsucht NUR den ICO-Metadatenblock auf Seite 1 (Developer, QSI "
+        "ICO, Ausstellungsdatum, ...). Unabhängig von „Header“ unten - "
+        "wenn nur diese Option angehakt ist, wird der wiederkehrende "
+        "Kopfbereich auf den ANDEREN Seiten NICHT durchsucht."
+    ),
+    "merge_search.scope_header_tooltip": (
+        "Durchsucht NUR den auf jeder Seite wiederkehrenden oberen "
+        "Bereich (z. B. Firmenname/Logo-Zeile). Unabhängig von „ICO "
+        "Format“ oben - eine eigene, separate Textregion, keine "
+        "Erweiterung davon."
+    ),
+    "merge_search.scope_full_text_tooltip": (
+        "Durchsucht den GESAMTEN Text auf allen Seiten, inklusive der "
+        "Bereiche von „ICO Format“ und „Header“ oben."
+    ),
     "merge_search.error_missing_scope": "Bitte mindestens einen Suchbereich auswählen.",
     # Datumsfilter (02.09.2026, Michael: "Können wir noch eine nach
     # Datumsbereich, von, bis, exakt einbauen.") - siehe
@@ -418,6 +442,9 @@ DE = {
         "Gemischt mit Klammern: „StellarRussia ODER (The UND Korolev UND "
         "Directive)“ findet Dateien mit „StellarRussia“ ODER Dateien, die ALLE "
         "DREI Begriffe „The“, „Korolev“ und „Directive“ enthalten.\n\n"
+        "Statt UND/ODER lassen sich auch die Zeichen && und || verwenden "
+        "(gleichbedeutend, auch gemischt mit den Wörtern): „Acme && Vertrag“ "
+        "ist dasselbe wie „Acme UND Vertrag“.\n\n"
         "Ohne UND/ODER wird der gesamte Text als ein einzelner Suchbegriff "
         "behandelt (wie bisher). Groß-/Kleinschreibung spielt keine Rolle."
     ),
@@ -425,6 +452,23 @@ DE = {
     "merge_search.cancel_button": "Abbrechen",
     "merge_search.select_all": "Alle auswählen",
     "merge_search.select_none": "Keine auswählen",
+    # 02.09.2026 (Michael: "Vielleicht das Ergebnis Fenster rausnehmbar
+    # machen. Wäre auch besser handhabbar bei vielen Dateien.") - ein
+    # Knopf öffnet die Ergebnisliste als eigenes, frei verschieb-/
+    # vergrößerbares Fenster; ein zweiter Klick (oder Schließen dieses
+    # Fensters) holt sie wieder in den Suchdialog zurück - siehe
+    # ui/merge_search_dialog.py::_toggle_detach_results().
+    "merge_search.detach_results_button": "Ergebnisliste in eigenem Fenster öffnen",
+    "merge_search.reattach_results_button": "Ergebnisliste andocken",
+    "merge_search.results_detached_placeholder": "Die Ergebnisliste ist in einem eigenen Fenster geöffnet.",
+    "merge_search.detached_results_title_suffix": "Ergebnisse",
+    # 02.09.2026 (Michael: "Die Sortierung nach Dateinamen [...] Es würde
+    # reichen die Sortierung im Anzeigefenster gemacht werden könnte.") -
+    # dieselben merge.sort_by_name/merge.sort_by_date/
+    # merge.sort_by_date_tooltip-Schlüssel wie im Zusammenführen-Dialog
+    # (ui/merge_dialog.py, Fortsetzung 12) werden hier wiederverwendet,
+    # da die Formulierung ("Nach Name sortieren"/"Nach Datum sortieren")
+    # dialogunabhängig ist.
     "merge_search.take_selected": "Ausgewählte übernehmen",
     "merge_search.close_button": "Schließen",
     "merge_search.status_running": "Durchsuche: {current} ({done}/{total})",
@@ -931,6 +975,21 @@ EN = {
     "merge_search.scope_ico_format": "ICO format (page 1 header area)",
     "merge_search.scope_header": "Header (all pages)",
     "merge_search.scope_full_text": "Full text",
+    "merge_search.scope_ico_format_tooltip": (
+        "Searches ONLY the ICO metadata block on page 1 (developer, QSI "
+        "ICO, issue date, ...). Independent from “Header” below - with "
+        "only this option checked, the recurring header area on the "
+        "OTHER pages is NOT searched."
+    ),
+    "merge_search.scope_header_tooltip": (
+        "Searches ONLY the area that recurs at the top of every page "
+        "(e.g. company name/logo line). Independent from “ICO format” "
+        "above - a separate text region, not an extension of it."
+    ),
+    "merge_search.scope_full_text_tooltip": (
+        "Searches the ENTIRE text on every page, including the areas "
+        "covered by “ICO format” and “Header” above."
+    ),
     "merge_search.error_missing_scope": "Please select at least one search scope.",
     "merge_search.date_filter_group": "Filter by date",
     "merge_search.date_source_file": "File date",
@@ -963,6 +1022,9 @@ EN = {
         "Mixed with parentheses: “StellarRussia OR (The AND Korolev AND "
         "Directive)” finds files containing “StellarRussia” OR files "
         "containing ALL THREE of “The”, “Korolev” and “Directive”.\n\n"
+        "The symbols && and || also work instead of AND/OR (equivalent, "
+        "even mixed with the words): “Acme && contract” is the same as "
+        "“Acme AND contract”.\n\n"
         "Without AND/OR, the whole text is treated as a single search term "
         "(as before). Not case-sensitive."
     ),
@@ -970,6 +1032,10 @@ EN = {
     "merge_search.cancel_button": "Cancel",
     "merge_search.select_all": "Select all",
     "merge_search.select_none": "Select none",
+    "merge_search.detach_results_button": "Open results in a separate window",
+    "merge_search.reattach_results_button": "Dock results back",
+    "merge_search.results_detached_placeholder": "The results list is open in a separate window.",
+    "merge_search.detached_results_title_suffix": "Results",
     "merge_search.take_selected": "Add selected",
     "merge_search.close_button": "Close",
     "merge_search.status_running": "Searching: {current} ({done}/{total})",

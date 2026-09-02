@@ -36,6 +36,14 @@ Both German (UND/ODER) and English (AND/OR) keywords are recognized,
 case-insensitively, so the app's own language toggle (ui/i18n.py) doesn't
 also have to translate what the user types into a search field.
 
+02.09.2026 (Michael: "IM Suchfeld sollten auch die Operatoren '||' und
+'&&' akzeptiert werden.") - the programmer-style symbols `&&`/`||` are
+recognized as exact synonyms for UND/AND and ODER/OR respectively,
+interchangeable with the word forms anywhere in a query (including mixed
+in the same query, e.g. "A && B || C"). Mentioned in the query field's
+tooltip alongside the word forms - see ui/i18n_data.py's
+merge_search.query_tooltip.
+
 Shared between ui/merge_search.py (local scan) and ui/drive_search.py
 (Google Drive scan), and both dialogs' PDF/DOCX callers - matching itself
 has nothing PDF- or DOCX-specific about it, see ui/search_scopes.py for
@@ -51,8 +59,10 @@ import re
 # and both operator keywords are tokenized in one pass so a term may still
 # contain, say, a literal "(" only if it's never actually balanced/used as
 # grouping - see _tokenize()'s fallback behavior below for that case.
-_SPLIT_RE = re.compile(r"\(|\)|\b(?:UND|AND|ODER|OR)\b", re.IGNORECASE)
-_AND_WORD_RE = re.compile(r"^(?:UND|AND)$", re.IGNORECASE)
+# `&&`/`||` (02.09.2026) need no \b anchoring - they're symbol pairs, not
+# word characters, so they can never appear "mid-word" the way "and" can.
+_SPLIT_RE = re.compile(r"\(|\)|&&|\|\||\b(?:UND|AND|ODER|OR)\b", re.IGNORECASE)
+_AND_WORD_RE = re.compile(r"^(?:UND|AND|&&)$", re.IGNORECASE)
 
 # A node is either ("term", text) or ("and"/"or", [child, child, ...]).
 QueryNode = tuple  # (str, Union[str, list["QueryNode"]]) - see module docstring's grammar.

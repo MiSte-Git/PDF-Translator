@@ -114,3 +114,26 @@ def test_unbalanced_parenthesis_falls_back_to_a_single_literal_term() -> None:
 def test_dangling_operator_falls_back_to_a_single_literal_term() -> None:
     query = "Acme AND"
     assert parse_query(query) == ("term", query)
+
+
+def test_symbol_operators_and_and_or_are_synonyms_for_the_word_forms() -> None:
+    # 02.09.2026 (Michael: "IM Suchfeld sollten auch die Operatoren '||'
+    # und '&&' akzeptiert werden.") - exact synonyms for UND/AND and
+    # ODER/OR, usable anywhere the word forms are, including mixed with
+    # them in the same query.
+    assert matches_query("Developer: StellarRussia, QSI ICO: AUREXIS", "StellarRussia && AUREXIS") is True
+    assert matches_query("Developer: StellarRussia, QSI ICO: AUREXIS", "StellarRussia && Zenith") is False
+    assert matches_query("Developer: StellarRussia", "Acme || StellarRussia") is True
+    assert matches_query("Developer: StellarRussia", "Acme || Zenith") is False
+
+
+def test_symbol_operators_support_the_same_mixed_precedence_and_parentheses() -> None:
+    query = "StellarRussia || (The && Korolev && Directive)"
+    assert matches_query("Developer: StellarRussia", query) is True
+    assert matches_query("The Korolev Directive - a treaty draft", query) is True
+    assert matches_query("The Korolev Memorandum", query) is False
+    assert matches_query("Zenith Holdings", query) is False
+
+    # Symbol and word forms mixed in one query.
+    assert matches_query("Acme Vertrag GmbH", "Acme UND Vertrag || StellarRussia") is True
+    assert matches_query("StellarRussia Ventures", "Acme UND Vertrag || StellarRussia") is True

@@ -8844,3 +8844,100 @@ durchreicht bzw. bei Fehlern gar keinen Worker startet). i18n: 17 neue
 `merge_search.date_*`-Schlüssel (DE/EN, Parität geprüft, 363/363 Keys),
 von beiden Dialogen geteilt, da die Formulierungen formatunabhängig
 sind. Komplette Testsuite (658 Tests) läuft grün.
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung 15) - Sechs UI-Rückmeldungen zum Datumsfilter/Suchdialog behoben
+
+Michael meldete nach dem ersten Blick auf den neuen Datumsfilter sechs
+zusammenhängende Punkte in einer Nachricht.
+
+**Unklarheit ICO Format vs. Header:** "Bedeutet jetzt 'ICO Format
+(Kopfbereich Seite 1)' das auch der Header mit durchsucht wird, oder nur
+der Kopfbereich?" Recherche bestätigte: die drei Suchbereiche waren im
+Code schon immer unabhängig und überschneidungsfrei (ICO Format nur der
+Metadatenblock auf Seite 1, Header nur der auf jeder Seite wiederkehrende
+obere Bereich, Volltext bewusst beides plus alles Weitere) - kein Bug,
+nur ein Beschriftungsproblem. Jede der drei Checkboxen hat jetzt einen
+eigenen Tooltip, der genau erklärt, welchen Bereich sie durchsucht und
+dass sie unabhängig von den anderen beiden ist (`merge_search.scope_*_tooltip`,
+DE/EN).
+
+**Datumsoptionen bleiben bei deaktiviertem Filter sichtbar:** "Wenn 'Nach
+Datum filtern' deaktiviert ist sollten die anderen Datums Optionen nicht
+sichtbar sein." `QGroupBox.setCheckable()` deaktiviert (graut aus) seine
+Kinder nur, blendet sie aber nicht aus. Der gesamte Inhalt der Gruppe
+liegt jetzt in einem eigenen `date_filter_content`-Widget, dessen
+Sichtbarkeit direkt an den Checked-Status der Gruppe gekoppelt ist - eine
+deaktivierte Gruppe klappt jetzt auf nur die Titelzeile zusammen, statt
+weiterhin den vollen, nur ausgegrauten Bereich zu belegen. Identisch in
+beiden Dialogen.
+
+**Zusätzliche Operatoren "&&"/"||":** "IM Suchfeld sollten auch die
+Operatoren '||' und '&&' akzeptiert werden. Sollte auch im Hilfetext
+erwähnt werden." `pipeline/search_query.py`: `&&`/`||` sind jetzt exakte,
+frei mit UND/ODER mischbare Synonyme (keine `\b`-Wortgrenzen nötig, da
+Symbolpaare nie mitten in einem Wort auftauchen können). Tooltip
+(`merge_search.query_tooltip`, DE/EN) um ein Beispiel mit den Symbolen
+erweitert.
+
+**Sortierung im Suchdialog:** "Die Sortierung nach Dateinamen [...]
+sortiert scheinbar nicht strikt nach Dateinamen [...] Es würde reichen
+die Sortierung im Anzeigefenster gemacht werden könnte." Recherche ergab:
+die lokale Ordner-Suche liefert Treffer bereits alphabetisch sortiert
+(deterministischer Scan), es gab aber schlicht noch KEINEN Sortier-Knopf
+im Suchdialog selbst - anders als im Zusammenführen-Dialog (Fortsetzung
+12). Zwei neue Knöpfe "Nach Name sortieren ▲/▼"/"Nach Datum sortieren
+▲/▼" neben "Alle/Keine auswählen", exakt nach dem dortigen Muster
+(Pfeil zeigt die Richtung des NÄCHSTEN Klicks), aber angepasst auf die
+checkbare Ergebnisliste: eine Sortierung liest Pfad/Checkbox-Status/
+Label/Tooltip jedes Eintrags aus, sortiert und baut die Liste neu auf -
+bereits angehakte/abgehakte Treffer bleiben dabei unverändert. Nutzt
+dieselben `merge.sort_by_name`/`merge.sort_by_date`-Schlüssel wie der
+Zusammenführen-Dialog, da die Beschriftung dialogunabhängig ist.
+
+**Ergebnisfenster herausnehmbar:** "Vielleicht das Ergebnis Fenster
+rausnehmbar machen. Wäre auch besser handhabbar bei vielen Dateien." Per
+AskUserQuestion bestätigt: ein eigenes, frei verschieb-/vergrößerbares
+Fenster statt eines größeren Dialogs oder eines Splitters. Ein neuer
+Knopf "Ergebnisliste in eigenem Fenster öffnen" reparentet die
+BESTEHENDE Ergebnisliste (kein Kopieren/Synchronisieren nötig,
+`selected_paths()` funktioniert unabhängig vom aktuellen Elternfenster)
+in ein eigenständiges, nicht-modales Fenster; im Hauptdialog erscheint an
+ihrer Stelle ein Platzhaltertext. Ein zweiter Klick auf denselben Knopf
+("Ergebnisliste andocken") ODER das Schließen des schwebenden Fensters
+über dessen eigenes X holen die Liste beide über denselben Weg zurück
+(`_DetachedResultsWindow` mit Callback im `closeEvent`). Schließt der
+Nutzer den Suchdialog selbst während die Liste noch schwebt, wird sie in
+`done()` zuerst automatisch angedockt, damit kein verwaistes Fenster
+zurückbleibt.
+
+**Riesige Lücke zwischen Quellen-Umschalter und "Ordner"-Feld:** "Dann
+ist im UI des Suchdialogs zwischen dem Suchordner Feld und den Auswahl
+Optionen 'Lokaler Ordner' und 'Google Drive' nur ein Label 'Ordner' aber
+das scheint 1/3 des Dialogs einzunehmen." Ursache: `QStackedWidget`
+bemisst sich standardmäßig nach der GRÖSSTEN seiner Seiten, nicht nach
+der aktuell sichtbaren - das Google-Drive-Panel (Zugangsdaten,
+Verbindungsstatus, Cache-Ordner, ...) ist deutlich höher als das
+Lokal-Panel (nur ein Label + ein Textfeld), wodurch Letzteres bisher mit
+toter Leerfläche auf die Höhe des Drive-Panels aufgefüllt wurde, obwohl
+dieses gar nicht angezeigt war. Neue Klasse `_CurrentWidgetSizedStack`
+(Unterklasse von `QStackedWidget`, überschreibt `sizeHint()`/
+`minimumSizeHint()` auf die aktuell sichtbare Seite) ersetzt den
+bisherigen `QStackedWidget` sowohl für `source_stack` als auch für
+`date_range_stack` (Von/Bis vs. Exaktes Datum) in beiden Dialogen - der
+frei werdende Platz fließt automatisch in die Ergebnisliste (Stretch-
+Faktor 1), ganz ohne manuelles Resize.
+
+Neue Tests: `tests/test_ui_search_results_sort_and_detach.py` (neu, 20
+Fälle über beide Dialoge: unterschiedliche Scope-Tooltips, Sortier-Knöpfe
+deaktiviert bei 0/1 Treffern, Sortierung nach Name/Datum inkl.
+Richtungswechsel bei erneutem Klick, Checkbox-Status übersteht eine
+Sortierung, Herausnehmen zeigt Platzhalter und reparentet die Liste,
+Andocken über Knopf UND über das Fenster-X, Schließen des Suchdialogs
+dockt eine noch schwebende Liste automatisch an, `source_stack` bemisst
+sich nach der aktuellen statt der größten Seite). `test_ui_date_filter.py`
+um einen Fall für "Gruppe deaktiviert blendet den gesamten Inhalt aus"
+erweitert, ein bestehender Fall angepasst (Sichtbarkeitsprüfungen setzen
+jetzt voraus, dass die Gruppe selbst angehakt ist). `test_search_query.py`
+um zwei Fälle für die `&&`/`||`-Symbole erweitert (als Synonyme UND
+gemischt mit den Wortformen). i18n: 13 neue Schlüssel (DE/EN, Parität
+geprüft, 370/370 Keys). Komplette Testsuite (682 Tests) läuft grün.

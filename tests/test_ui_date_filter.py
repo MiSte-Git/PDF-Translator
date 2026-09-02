@@ -87,11 +87,38 @@ def test_date_filter_group_is_unchecked_by_default(qapp, module_name, dialog_att
 def test_source_toggle_shows_and_hides_the_document_options(qapp, module_name, dialog_attr) -> None:
     dialog = _make_dialog(module_name, dialog_attr, "DateSourceToggle")
     try:
+        # 02.09.2026 - the group must be checked (see
+        # test_group_unchecked_hides_the_entire_date_filter_content below)
+        # for isVisible() to reflect the source toggle at all - an
+        # unchecked group hides date_filter_content itself, which makes
+        # every descendant's isVisible() False regardless of its own
+        # explicit visibility flag.
+        dialog.date_filter_group.setChecked(True)
         assert dialog.date_document_options.isVisible() is False
         dialog.date_source_document_radio.setChecked(True)
         assert dialog.date_document_options.isVisible() is True
         dialog.date_source_file_radio.setChecked(True)
         assert dialog.date_document_options.isVisible() is False
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_group_unchecked_hides_the_entire_date_filter_content(qapp, module_name, dialog_attr) -> None:
+    # 02.09.2026 (Michael: "Wenn 'Nach Datum filtern' deaktiviert ist
+    # sollten die anderen Datums Optionen nicht sichtbar sein.") -
+    # QGroupBox.setCheckable() alone only disables (greys out, keeps
+    # visible) its children; date_filter_content's own visibility must be
+    # tied to the group's checked state so an unchecked group actually
+    # hides the panel instead of just greying it out.
+    dialog = _make_dialog(module_name, dialog_attr, "DateGroupHidesContent")
+    try:
+        assert dialog.date_filter_group.isChecked() is False
+        assert dialog.date_filter_content.isVisible() is False
+        dialog.date_filter_group.setChecked(True)
+        assert dialog.date_filter_content.isVisible() is True
+        dialog.date_filter_group.setChecked(False)
+        assert dialog.date_filter_content.isVisible() is False
     finally:
         dialog.close()
 

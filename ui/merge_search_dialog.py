@@ -162,6 +162,79 @@ def _optional_date(edit: QDateEdit) -> date | None:
     return date(value.year(), value.month(), value.day())
 
 
+def _mtime_or_zero(path: Path) -> float:
+    """Same defensive pattern as MergeDialog._mtime() (ui/merge_dialog.py)
+    - a result whose file vanished between the scan and a "Nach Datum
+    sortieren" click (02.09.2026, see _sort_results() below) is an edge
+    case, not a crash; sorts as if it were the oldest file."""
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+class _CurrentWidgetSizedStack(QStackedWidget):
+    """A QStackedWidget that sizes itself to whichever page is CURRENTLY
+    shown, not to the largest of all its pages (Qt's own default).
+
+    02.09.2026 (Michael: "...zwischen dem Suchordner Feld und den Auswahl
+    Optionen 'Lokaler Ordner' und 'Google Drive' ist nur ein Label
+    'Ordner' aber das scheint 1/3 des Dialogs einzunehmen.") -
+    source_stack's Google-Drive panel (folder link/status, cache folder,
+    credentials fields, connection status - see _build_drive_panel())
+    is far taller than its local-folder panel (just a label + one text
+    field), and QStackedWidget.sizeHint()/minimumSizeHint() default to
+    the MAX over every page it holds - so the local panel used to be
+    padded with a lot of dead vertical space to match the Drive panel's
+    height even while the Drive panel itself was never shown. Also used
+    for date_range_stack below for the same reason, even though its two
+    pages (Von/Bis vs. Exaktes Datum) are closer in size already.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        # A page switch changes what OUR OWN sizeHint()/minimumSizeHint()
+        # report below - updateGeometry() tells the enclosing layout to
+        # recompute from those, so the freed/needed space actually
+        # reflows (e.g. into self.results_stack's stretch=1 slot) instead
+        # of sitting there as dead space until the window is resized by
+        # hand.
+        self.currentChanged.connect(lambda _index: self.updateGeometry())
+
+    def sizeHint(self):  # noqa: D102 (Qt override, see class docstring)
+        current = self.currentWidget()
+        return current.sizeHint() if current is not None else super().sizeHint()
+
+    def minimumSizeHint(self):  # noqa: D102 (Qt override, see class docstring)
+        current = self.currentWidget()
+        return current.minimumSizeHint() if current is not None else super().minimumSizeHint()
+
+
+class _DetachedResultsWindow(QWidget):
+    """Standalone, non-modal top-level window for the "in eigenem Fenster
+    öffnen" button (02.09.2026, Michael: "Vielleicht das Ergebnis Fenster
+    rausnehmbar machen. Wäre auch besser handhabbar bei vielen Dateien.",
+    confirmed via AskUserQuestion: a separate, freely movable/resizable
+    window rather than a bigger dialog or an in-dialog splitter) - just
+    reparents the SAME QListWidget (self.results) into its own layout for
+    as long as it's open, no copy/sync needed, since selected_paths()
+    keeps working regardless of which widget currently parents the list.
+    Calls back into the owning dialog when closed via THIS window's own
+    close button/X (not only via the dialog's "Andocken" toggle, which
+    calls window.close() itself - see _on_detached_results_closed()) so
+    the list always finds its way back into the dialog rather than being
+    stranded in a closed window.
+    """
+
+    def __init__(self, on_close) -> None:
+        super().__init__(None, Qt.Window)
+        self._on_close = on_close
+
+    def closeEvent(self, event) -> None:
+        self._on_close()
+        super().closeEvent(event)
+
+
 class MergeSearchDialog(QDialog):
     def __init__(self, language: LanguageManager, settings: QSettings, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -183,7 +256,7 @@ class MergeSearchDialog(QDialog):
         source_row.addWidget(self.source_drive_radio)
         source_row.addStretch(1)
 
-        self.source_stack = QStackedWidget()
+        self.source_stack = _CurrentWidgetSizedStack()
         self.source_stack.addWidget(self._build_local_panel())
         self.source_stack.addWidget(self._build_drive_panel())
 
@@ -243,13 +316,42 @@ class MergeSearchDialog(QDialog):
         self.status_label.setWordWrap(True)
 
         self.results = QListWidget()
+        # 02.09.2026 - see _DetachedResultsWindow's docstring: results_stack
+        # swaps between the real list (index 0) and a placeholder label
+        # (index 1) while the list itself is reparented into a separate
+        # window, so the main dialog never shows an empty gap in its place.
+        self.results_placeholder_label = QLabel()
+        self.results_placeholder_label.setAlignment(Qt.AlignCenter)
+        self.results_placeholder_label.setWordWrap(True)
+        self.results_stack = QStackedWidget()
+        self.results_stack.addWidget(self.results)
+        self.results_stack.addWidget(self.results_placeholder_label)
+        self._detached_results_window: _DetachedResultsWindow | None = None
+
         self.select_all_button = QPushButton()
         self.select_all_button.clicked.connect(lambda: self._set_all_checked(True))
         self.select_none_button = QPushButton()
         self.select_none_button.clicked.connect(lambda: self._set_all_checked(False))
+        # 02.09.2026 (Michael: "Die Sortierung nach Dateinamen [...] Es
+        # würde reichen die Sortierung im Anzeigefenster gemacht werden
+        # könnte.") - mirrors MergeDialog's own sort_by_name_button/
+        # sort_by_date_button (ui/merge_dialog.py, Fortsetzung 12)
+        # adapted for this dialog's checkable QListWidget instead of a
+        # QTableWidget; see _sort_results() below.
+        self._results_name_sort_ascending = True
+        self._results_date_sort_ascending = True
+        self.sort_results_by_name_button = QPushButton()
+        self.sort_results_by_name_button.clicked.connect(self._sort_results_by_name)
+        self.sort_results_by_date_button = QPushButton()
+        self.sort_results_by_date_button.clicked.connect(self._sort_results_by_date)
+        self.detach_results_button = QPushButton()
+        self.detach_results_button.clicked.connect(self._toggle_detach_results)
         select_row = QHBoxLayout()
         select_row.addWidget(self.select_all_button)
         select_row.addWidget(self.select_none_button)
+        select_row.addWidget(self.sort_results_by_name_button)
+        select_row.addWidget(self.sort_results_by_date_button)
+        select_row.addWidget(self.detach_results_button)
         select_row.addStretch(1)
 
         self.take_selected_button = QPushButton()
@@ -274,7 +376,7 @@ class MergeSearchDialog(QDialog):
         layout.addWidget(self.progress)
         layout.addWidget(self.status_label)
         layout.addLayout(select_row)
-        layout.addWidget(self.results, 1)
+        layout.addWidget(self.results_stack, 1)
         layout.addLayout(button_row)
         self.resize(680, 640)
 
@@ -347,6 +449,12 @@ class MergeSearchDialog(QDialog):
         # recursive checkbox is remembered the same way the Drive folder
         # link above already was, on every path that closes this dialog.
         self.settings.setValue("merge_search_recursive", self.recursive_checkbox.isChecked())
+        # 02.09.2026 - a still-open detached results window (see
+        # _DetachedResultsWindow) must not outlive this dialog: closing it
+        # here reparents self.results back before this dialog itself is
+        # possibly torn down.
+        if self._detached_results_window is not None:
+            self._detached_results_window.close()
         super().done(result)
 
     # --- panel construction ------------------------------------------------
@@ -545,15 +653,30 @@ class MergeSearchDialog(QDialog):
         exact_layout.addWidget(self.date_exact_edit)
         exact_layout.addStretch(1)
 
-        self.date_range_stack = QStackedWidget()
+        self.date_range_stack = _CurrentWidgetSizedStack()
         self.date_range_stack.addWidget(range_panel)  # index 0: Von/Bis
         self.date_range_stack.addWidget(exact_panel)  # index 1: Exaktes Datum
 
+        # 02.09.2026 (Michael: "Wenn 'Nach Datum filtern' deaktiviert ist
+        # sollten die anderen Datums Optionen nicht sichtbar sein.") -
+        # QGroupBox.setCheckable() alone only DISABLES (greys out, keeps
+        # visible) its children when unchecked; everything below is now
+        # wrapped in one content widget whose visibility is tied directly
+        # to the group's checked state, so an unchecked group collapses
+        # to just its title bar instead of a greyed-out, still full-size
+        # panel.
+        self.date_filter_content = QWidget()
+        content_layout = QVBoxLayout(self.date_filter_content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.addLayout(date_source_row)
+        content_layout.addWidget(self.date_document_options)
+        content_layout.addWidget(self.date_exact_checkbox)
+        content_layout.addWidget(self.date_range_stack)
+        self.date_filter_content.setVisible(False)  # group starts unchecked
+        group.toggled.connect(self.date_filter_content.setVisible)
+
         layout = QVBoxLayout(group)
-        layout.addLayout(date_source_row)
-        layout.addWidget(self.date_document_options)
-        layout.addWidget(self.date_exact_checkbox)
-        layout.addWidget(self.date_range_stack)
+        layout.addWidget(self.date_filter_content)
         return group
 
     # --- i18n ------------------------------------------------------------
@@ -570,6 +693,14 @@ class MergeSearchDialog(QDialog):
         self.scope_ico_format_checkbox.setText(t("merge_search.scope_ico_format"))
         self.scope_header_checkbox.setText(t("merge_search.scope_header"))
         self.scope_full_text_checkbox.setText(t("merge_search.scope_full_text"))
+        # 02.09.2026 (Michael: "Bedeutet jetzt 'ICO Format (Kopfbereich
+        # Seite 1)' das auch der Header mit durchsucht wird, oder nur der
+        # Kopfbereich?") - the three scopes were already independent and
+        # non-overlapping in the underlying code; these tooltips just make
+        # that explicit in the UI (see ui/i18n_data.py's comment there).
+        self.scope_ico_format_checkbox.setToolTip(t("merge_search.scope_ico_format_tooltip"))
+        self.scope_header_checkbox.setToolTip(t("merge_search.scope_header_tooltip"))
+        self.scope_full_text_checkbox.setToolTip(t("merge_search.scope_full_text_tooltip"))
 
         self.date_filter_group.setTitle(t("merge_search.date_filter_group"))
         self.date_source_file_radio.setText(t("merge_search.date_source_file"))
@@ -598,6 +729,14 @@ class MergeSearchDialog(QDialog):
         self.cancel_button.setText(t("merge_search.cancel_button"))
         self.select_all_button.setText(t("merge_search.select_all"))
         self.select_none_button.setText(t("merge_search.select_none"))
+        self.sort_results_by_date_button.setToolTip(t("merge.sort_by_date_tooltip"))
+        self._update_results_sort_button_labels()
+        detach_key = (
+            "merge_search.reattach_results_button" if self._detached_results_window is not None
+            else "merge_search.detach_results_button"
+        )
+        self.detach_results_button.setText(t(detach_key))
+        self.results_placeholder_label.setText(t("merge_search.results_detached_placeholder"))
         self.take_selected_button.setText(t("merge_search.take_selected"))
         self.close_button.setText(t("merge_search.close_button"))
 
@@ -874,6 +1013,100 @@ class MergeSearchDialog(QDialog):
             None,
         )
 
+    # --- results: sorting/detaching ---------------------------------------
+    # 02.09.2026 - see this dialog's comments above sort_results_by_name_
+    # button/detach_results_button (constructor) for both features' origin.
+
+    def _sort_button_label(self, base_key: str, ascending_next: bool) -> str:
+        # Arrow shows the direction the NEXT click will apply - mirrors
+        # MergeDialog._sort_button_label() (ui/merge_dialog.py).
+        arrow = "▲" if ascending_next else "▼"
+        return f"{self.language.text(base_key)} {arrow}"
+
+    def _update_results_sort_button_labels(self) -> None:
+        self.sort_results_by_name_button.setText(
+            self._sort_button_label("merge.sort_by_name", self._results_name_sort_ascending)
+        )
+        self.sort_results_by_date_button.setText(
+            self._sort_button_label("merge.sort_by_date", self._results_date_sort_ascending)
+        )
+
+    def _sort_results(self, key, ascending: bool) -> None:
+        """Re-orders the results list in place by `key(path)` - reads
+        every item's current path/check-state/label/tooltip first so a
+        sort never resets which matches the user already (un)checked,
+        then repopulates in the new order. See MergeDialog._sort_rows()
+        (ui/merge_dialog.py) for the same pattern applied to a
+        QTableWidget instead of a checkable QListWidget.
+        """
+        entries = [
+            (item.data(Qt.UserRole), item.checkState(), item.text(), item.toolTip())
+            for item in (self.results.item(row) for row in range(self.results.count()))
+        ]
+        entries.sort(key=lambda entry: key(entry[0]), reverse=not ascending)
+        self.results.clear()
+        for path, check_state, label, tooltip in entries:
+            item = QListWidgetItem(label)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(check_state)
+            item.setData(Qt.UserRole, path)
+            item.setToolTip(tooltip)
+            self.results.addItem(item)
+
+    def _sort_results_by_name(self) -> None:
+        ascending = self._results_name_sort_ascending
+        self._sort_results(lambda path: path.name.lower(), ascending)
+        self._results_name_sort_ascending = not ascending
+        self._update_results_sort_button_labels()
+
+    def _sort_results_by_date(self) -> None:
+        ascending = self._results_date_sort_ascending
+        self._sort_results(_mtime_or_zero, ascending)
+        self._results_date_sort_ascending = not ascending
+        self._update_results_sort_button_labels()
+
+    def _update_results_button_states(self) -> None:
+        enabled = self.results.count() > 1
+        self.sort_results_by_name_button.setEnabled(enabled)
+        self.sort_results_by_date_button.setEnabled(enabled)
+
+    def _toggle_detach_results(self) -> None:
+        if self._detached_results_window is None:
+            self._detach_results()
+        else:
+            # Reuses the exact same path as the window's own close button/X
+            # - see _DetachedResultsWindow.closeEvent() and
+            # _on_detached_results_closed() below - so there is only ONE
+            # place that actually reparents self.results back.
+            self._detached_results_window.close()
+
+    def _detach_results(self) -> None:
+        # Switch to the placeholder page WHILE self.results is still one of
+        # results_stack's two pages - reparenting it into the new window's
+        # own layout below implicitly removes it from results_stack (a
+        # QWidget can only have one parent), which would otherwise shift
+        # the placeholder down to index 0 first and make a subsequent
+        # setCurrentIndex(1) target nothing.
+        self.results_stack.setCurrentWidget(self.results_placeholder_label)
+        window = _DetachedResultsWindow(self._on_detached_results_closed)
+        window.setWindowTitle(
+            f"{self.windowTitle()} – {self.language.text('merge_search.detached_results_title_suffix')}"
+        )
+        window_layout = QVBoxLayout(window)
+        window_layout.addWidget(self.results)
+        window.resize(420, 480)
+        self._detached_results_window = window
+        self.detach_results_button.setText(self.language.text("merge_search.reattach_results_button"))
+        window.show()
+
+    def _on_detached_results_closed(self) -> None:
+        if self._detached_results_window is None:
+            return
+        self._detached_results_window = None
+        self.results_stack.insertWidget(0, self.results)
+        self.results_stack.setCurrentIndex(0)
+        self.detach_results_button.setText(self.language.text("merge_search.detach_results_button"))
+
     def _update_search_enabled(self) -> None:
         if self._worker is not None:
             return  # a scan is already running - _finish_run() re-enables afterwards
@@ -885,6 +1118,7 @@ class MergeSearchDialog(QDialog):
 
     def _start_search(self) -> None:
         self.results.clear()
+        self._update_results_button_states()
         self.take_selected_button.setEnabled(False)
         self.status_label.setText("")
 
@@ -965,6 +1199,7 @@ class MergeSearchDialog(QDialog):
             item.setToolTip(str(path) + ("\n\n" + match.snippet if match.snippet else ""))
             self.results.addItem(item)
         self.take_selected_button.setEnabled(bool(result.matches))
+        self._update_results_button_states()
 
         key = "merge_search.status_cancelled" if result.cancelled else (
             "merge_search.status_done_with_errors" if result.errors else "merge_search.status_done"

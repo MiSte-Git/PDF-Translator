@@ -1,0 +1,267 @@
+"""Covers three 02.09.2026 additions to the results section of
+MergeSearchDialog/WordMergeSearchDialog (ui/merge_search_dialog.py,
+ui/word_merge_search_dialog.py), all from the same round of feedback:
+
+- "Die Sortierung nach Dateinamen [...] sortiert scheinbar nicht strikt
+  nach Dateinamen [...] Es würde reichen die Sortierung im Anzeigefenster
+  gemacht werden könnte." - Name/Datum sort buttons for the results list,
+  mirroring MergeDialog's existing sort_by_name_button/sort_by_date_button
+  (ui/merge_dialog.py, Fortsetzung 12) but adapted to a checkable
+  QListWidget: sorting must not reset which matches the user already
+  (un)checked.
+- "Vielleicht das Ergebnis Fenster rausnehmbar machen." (confirmed via
+  AskUserQuestion: a separate, freely movable/resizable window) - the
+  detach/reattach toggle, both via the dialog's own button and via the
+  floating window's own close button/X.
+- The `_CurrentWidgetSizedStack` fix for "...nur ein Label 'Ordner' aber
+  das scheint 1/3 des Dialogs einzunehmen" (source_stack sizing to its
+  LARGEST page by default, per Qt's own QStackedWidget behavior, instead
+  of the currently shown one).
+
+Follows the established `_DIALOGS`-parametrized-across-both-dialogs shape
+(see tests/test_ui_date_filter.py) since every one of these is duplicated
+identically into both dialogs.
+"""
+from __future__ import annotations
+
+import importlib
+import os
+import time
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from pathlib import Path
+
+import pytest
+from PySide6.QtCore import QSettings, Qt
+from PySide6.QtWidgets import QApplication, QListWidgetItem
+
+
+@pytest.fixture(scope="module")
+def qapp() -> QApplication:
+    return QApplication.instance() or QApplication([])
+
+
+_DIALOGS = [
+    ("ui.merge_search_dialog", "MergeSearchDialog"),
+    ("ui.word_merge_search_dialog", "WordMergeSearchDialog"),
+]
+
+
+def _make_dialog(module_name: str, dialog_attr: str, settings_key: str):
+    dialog_module = importlib.import_module(module_name)
+    DialogClass = getattr(dialog_module, dialog_attr)
+    from ui.i18n import LanguageManager
+
+    dialog = DialogClass(LanguageManager("de"), QSettings("PDF-Translator-Test", f"{dialog_attr}{settings_key}"))
+    dialog.show()  # isVisible()/sizeHint() need an actually-shown top-level
+    return dialog
+
+
+def _add_result(dialog, path: Path, checked: bool = True) -> None:
+    item = QListWidgetItem(path.name)
+    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+    item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+    item.setData(Qt.UserRole, path)
+    dialog.results.addItem(item)
+
+
+# --- scope checkbox tooltips (Michael: "Bedeutet jetzt 'ICO Format ---
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_scope_checkboxes_have_distinct_clarifying_tooltips(qapp, module_name, dialog_attr) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, "ScopeTooltips")
+    try:
+        ico_tip = dialog.scope_ico_format_checkbox.toolTip()
+        header_tip = dialog.scope_header_checkbox.toolTip()
+        full_text_tip = dialog.scope_full_text_checkbox.toolTip()
+        assert ico_tip and header_tip and full_text_tip
+        assert len({ico_tip, header_tip, full_text_tip}) == 3  # all different
+    finally:
+        dialog.close()
+
+
+# --- sort buttons ----------------------------------------------------------
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_sort_buttons_disabled_with_zero_or_one_result(qapp, module_name, dialog_attr) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, "SortDisabledFew")
+    try:
+        dialog._update_results_button_states()
+        assert dialog.sort_results_by_name_button.isEnabled() is False
+        assert dialog.sort_results_by_date_button.isEnabled() is False
+
+        _add_result(dialog, Path("/tmp/only-one.pdf"))
+        dialog._update_results_button_states()
+        assert dialog.sort_results_by_name_button.isEnabled() is False
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_sort_by_name_orders_alphabetically_and_toggles_direction(qapp, module_name, dialog_attr) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, "SortByName")
+    try:
+        for name in ("Zeta.pdf", "Alpha.pdf", "Mitte.pdf"):
+            _add_result(dialog, Path(f"/tmp/{name}"))
+        dialog._update_results_button_states()
+        assert dialog.sort_results_by_name_button.isEnabled() is True
+
+        dialog._sort_results_by_name()
+        names = [dialog.results.item(i).data(Qt.UserRole).name for i in range(dialog.results.count())]
+        assert names == ["Alpha.pdf", "Mitte.pdf", "Zeta.pdf"]
+
+        dialog._sort_results_by_name()  # second click reverses
+        names = [dialog.results.item(i).data(Qt.UserRole).name for i in range(dialog.results.count())]
+        assert names == ["Zeta.pdf", "Mitte.pdf", "Alpha.pdf"]
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_sort_by_date_uses_file_mtime_and_toggles_direction(qapp, module_name, dialog_attr, tmp_path) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, "SortByDate")
+    try:
+        older = tmp_path / "older.pdf"
+        newer = tmp_path / "newer.pdf"
+        older.write_bytes(b"x")
+        newer.write_bytes(b"x")
+        now = time.time()
+        os.utime(older, (now - 1000, now - 1000))
+        os.utime(newer, (now, now))
+        _add_result(dialog, newer)
+        _add_result(dialog, older)
+
+        dialog._sort_results_by_date()  # ascending: oldest first
+        names = [dialog.results.item(i).data(Qt.UserRole).name for i in range(dialog.results.count())]
+        assert names == ["older.pdf", "newer.pdf"]
+
+        dialog._sort_results_by_date()  # descending: newest first
+        names = [dialog.results.item(i).data(Qt.UserRole).name for i in range(dialog.results.count())]
+        assert names == ["newer.pdf", "older.pdf"]
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_sorting_preserves_each_items_check_state(qapp, module_name, dialog_attr) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, "SortPreservesChecks")
+    try:
+        _add_result(dialog, Path("/tmp/Zeta.pdf"), checked=True)
+        _add_result(dialog, Path("/tmp/Alpha.pdf"), checked=False)
+
+        dialog._sort_results_by_name()
+
+        by_name = {
+            dialog.results.item(i).data(Qt.UserRole).name: dialog.results.item(i).checkState()
+            for i in range(dialog.results.count())
+        }
+        assert by_name["Zeta.pdf"] == Qt.Checked
+        assert by_name["Alpha.pdf"] == Qt.Unchecked
+    finally:
+        dialog.close()
+
+
+# --- detach/reattach ---------------------------------------------------
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_detach_shows_placeholder_and_moves_the_list_into_its_own_window(qapp, module_name, dialog_attr) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, "DetachBasic")
+    try:
+        _add_result(dialog, Path("/tmp/a.pdf"))
+        assert dialog._detached_results_window is None
+        assert dialog.results_stack.currentWidget() is dialog.results
+
+        dialog._toggle_detach_results()
+
+        assert dialog._detached_results_window is not None
+        assert dialog.results_stack.currentWidget() is dialog.results_placeholder_label
+        assert dialog.results.parent() is dialog._detached_results_window
+        assert dialog.detach_results_button.text() == dialog.language.text("merge_search.reattach_results_button")
+        assert dialog.results.count() == 1  # the list itself, and its content, are untouched
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_reattach_via_toggle_button_restores_the_list_into_the_dialog(qapp, module_name, dialog_attr) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, "ReattachButton")
+    try:
+        _add_result(dialog, Path("/tmp/a.pdf"))
+        dialog._toggle_detach_results()
+        dialog._toggle_detach_results()
+
+        assert dialog._detached_results_window is None
+        assert dialog.results_stack.currentWidget() is dialog.results
+        assert dialog.results.parent() is dialog.results_stack
+        assert dialog.results.count() == 1
+        assert dialog.detach_results_button.text() == dialog.language.text("merge_search.detach_results_button")
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_reattach_via_the_floating_windows_own_close_button(qapp, module_name, dialog_attr) -> None:
+    # The dialog's "Andocken" toggle is not the only way to close the
+    # floating window - the user can also just close it directly (the
+    # window's own X). Both paths must reattach the list the same way.
+    dialog = _make_dialog(module_name, dialog_attr, "ReattachViaX")
+    try:
+        _add_result(dialog, Path("/tmp/a.pdf"))
+        dialog._toggle_detach_results()
+        window = dialog._detached_results_window
+
+        window.close()
+
+        assert dialog._detached_results_window is None
+        assert dialog.results_stack.currentWidget() is dialog.results
+        assert dialog.results.count() == 1
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_closing_the_dialog_while_detached_reattaches_first(qapp, module_name, dialog_attr) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, "DoneReattaches")
+    try:
+        _add_result(dialog, Path("/tmp/a.pdf"))
+        dialog._toggle_detach_results()
+        assert dialog._detached_results_window is not None
+
+        dialog.done(0)
+
+        assert dialog._detached_results_window is None
+    finally:
+        dialog.close()
+
+
+# --- source_stack sizes to the currently shown page, not the largest ------
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_source_stack_size_hint_tracks_the_current_page_not_the_largest(qapp, module_name, dialog_attr) -> None:
+    # 02.09.2026 (Michael: "...zwischen dem Suchordner Feld und den
+    # Auswahl Optionen 'Lokaler Ordner' und 'Google Drive' [...] nur ein
+    # Label 'Ordner' aber das scheint 1/3 des Dialogs einzunehmen.") - the
+    # Drive panel (credentials fields, connection status, ...) is much
+    # taller than the local-folder panel; source_stack must report the
+    # CURRENT page's height, not Qt's own QStackedWidget default (the max
+    # over every page).
+    dialog = _make_dialog(module_name, dialog_attr, "SourceStackSizing")
+    try:
+        local_hint = dialog.source_stack.sizeHint().height()
+        assert local_hint == dialog.source_stack.widget(0).sizeHint().height()
+
+        dialog.source_drive_radio.setChecked(True)
+        drive_hint = dialog.source_stack.sizeHint().height()
+        assert drive_hint == dialog.source_stack.widget(1).sizeHint().height()
+
+        # The Drive panel is meaningfully taller - this is the actual
+        # symptom Michael reported (a huge gap around the short local
+        # panel to match the tall Drive panel's height).
+        assert drive_hint > local_hint
+    finally:
+        dialog.close()
