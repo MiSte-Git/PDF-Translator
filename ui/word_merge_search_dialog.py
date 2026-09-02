@@ -171,6 +171,12 @@ class WordMergeSearchDialog(QDialog):
         drive_folder_row.addWidget(self.drive_resolve_button)
         self.drive_folder_status_label = QLabel()
         self.drive_folder_status_label.setWordWrap(True)
+        # 02.09.2026 (Michael): Fehlermeldungen (z. B. HttpError-Details)
+        # sollen sich markieren und kopieren lassen - QLabel ist dafür
+        # standardmäßig NICHT selektierbar.
+        self.drive_folder_status_label.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+        )
 
         self.drive_cache_label = QLabel()
         self.drive_cache_edit = QLineEdit()
@@ -203,6 +209,10 @@ class WordMergeSearchDialog(QDialog):
         credentials_row.addWidget(self.drive_save_credentials_button)
 
         self.drive_connection_status_label = QLabel()
+        self.drive_connection_status_label.setWordWrap(True)
+        self.drive_connection_status_label.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+        )
         self.drive_connect_button = QPushButton()
         self.drive_connect_button.clicked.connect(self._connect_drive)
         self.drive_disconnect_button = QPushButton()

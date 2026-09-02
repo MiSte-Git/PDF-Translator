@@ -8211,3 +8211,79 @@ Schlüssel statt Client-ID, Projekt-ID separat suchen müssen).
   unverändert, Abbrechen des Datei-Dialogs tut nichts - alle
   parametrisiert über beide Dialoge). Alle 491 Tests des gesamten
   Projekts grün (1 Skip, unverändert).
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung 4) - Falscher Wert in "Projekt-ID" gefunden + Fehlermeldungen im UI jetzt markier-/kopierbar
+
+Michael, nach dem Google-Login: "Bei Google anmelden hat funktioniert. Den
+Google Drive kann ich aber so nicht erreichen." Danach ein Screenshot mit
+dem vollständigen Fehler:
+
+    Fehlgeschlagen: <HttpError 400 when requesting
+    https://www.googleapis.com/drive/v3/files/1IGMZ...?fields=id%2C+name%2C+mimeType%2C+trashed&supportsAllDrives=true&alt=json
+    returned "Project 'projects/AIzaSyCrGVds-v8eQQiHwncxVHqnySUkhNdsQ0A' not
+    found or deleted.". Details: [{'message': "Project
+    'projects/AIzaSyCrGVds-...' not found or deleted.", 'domain': 'global',
+    'reason': 'badRequest'}]>
+
+**Root Cause:** Der aktuell gespeicherte Wert im Feld "Projekt-ID"
+(`AIzaSyCrGVds-v8eQQiHwncxVHqnySUkhNdsQ0A`) hat exakt die Form eines
+Google-**API-Schlüssels** (Präfix `AIza...`), nicht die einer echten
+Google-Cloud-Projekt-ID (die ist entweder eine kurze
+klein-geschriebene/mit-Bindestrichen-Zeichenkette wie `pdf-translator-123456`
+oder eine reine Zahl). `build_service()` (pipeline/drive_auth.py) reicht
+diesen Wert als `quota_project_id` an `Credentials(...)` weiter, und Google
+versucht daraufhin, `projects/AIzaSy...` als echte Projekt-Referenz
+aufzulösen - was natürlich fehlschlägt, mit genau dieser
+"not found or deleted"-Meldung. Das ist bereits die dritte unterschiedliche
+Verwechslung von Google-Zugangsdaten-Typen in dieser Sitzung (zuvor:
+API-Schlüssel ins Client-ID-Feld eingefügt) - ein Beleg dafür, dass die
+bereits ausgelieferte "Aus JSON-Datei laden …"-Funktion (Fortsetzung 3
+oben) genau das richtige Mittel dagegen ist, für alle, die die Einrichtung
+neu durchlaufen. Sie behebt aber keine bereits falsch gespeicherten Werte
+rückwirkend.
+
+**Kein Code-Fix nötig** - der Bug liegt im gespeicherten Wert, nicht im
+Programm. Michael wurde angeleitet, entweder erneut "Aus JSON-Datei laden
+…" zu klicken (falls die heruntergeladene Datei noch vorliegt) oder nur
+das Feld "Projekt-ID" von Hand mit dem echten Wert zu korrigieren (zu
+finden oben links in der Projektauswahl der Google Cloud Console, oder auf
+der "Zugangsdaten"-Seite im Bereich "Projektinformationen") und danach neu
+zu speichern und zu verbinden.
+
+Als Nebenbefund (nicht bestätigt, nicht die Ursache dieses konkreten
+Fehlers, offen gelassen): ob die Leerzeichen im `fields=`-Parameter von
+`resolve_folder()`/`list_children()` (z. B. `"id, name, mimeType,
+trashed"`) selbst zu 400-Fehlern führen könnten - Googles eigene
+Drive-API-Doku verwendet in ihren Beispielen ebenfalls Leerzeichen, die
+Recherche dazu blieb ergebnislos. Nur relevant, falls nach Korrektur der
+Projekt-ID ein NEUER 400-Fehler auftritt, der sich nicht auf ein falsches
+Konto zurückführen lässt.
+
+---
+
+Direkt im Anschluss, zum vollständigen Fehlertext im Screenshot: "Es wäre
+gut wenn man solche Meldungen im UI auch direkt selektieren und kopieren
+könnte."
+
+**Fix:** `QLabel` ist in Qt standardmäßig NICHT selektierbar - Text lässt
+sich weder markieren noch kopieren. Auf allen Status-/Fehler-Labels der
+App jetzt `setTextInteractionFlags(Qt.TextSelectableByMouse |
+Qt.TextSelectableByKeyboard)` gesetzt:
+
+- `ui/app.py`: `SettingsDialog.status`, `HardwareCheckDialog.status`,
+  `MainWindow.job_status` (das Feld, das während/nach einem Übersetzungs-
+  lauf Fehler wie Provider-Ausfälle anzeigt).
+- `ui/merge_search_dialog.py` und `ui/word_merge_search_dialog.py` (beide
+  duplizieren dasselbe Drive-Panel): `drive_folder_status_label` (genau
+  das Feld aus dem Screenshot) und `drive_connection_status_label` (jetzt
+  zusätzlich mit `setWordWrap(True)`, das fehlte bisher).
+
+Bewusst nicht nur auf das eine Feld aus dem Screenshot beschränkt, da
+Michael allgemein von "solche Meldungen" sprach - alle Stellen, an denen
+die App Fehlertext anzeigt, profitieren gleichermaßen (z. B. für einen
+Bugreport wie diesen hier).
+
+**Tests:** Neue Datei `tests/test_ui_selectable_status_labels.py` (+5,
+prüft `textInteractionFlags()` auf allen fünf Labels, die Drive-Labels
+parametrisiert über beide Dialoge). Alle 496 Tests des gesamten Projekts
+grün (1 Skip, unverändert; 491 → 496 durch die neuen Tests).

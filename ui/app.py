@@ -120,6 +120,10 @@ class SettingsDialog(QDialog):
         # last globally-saved default provider.
         self.provider.setCurrentText(initial_provider or str(settings.value("provider", "deepl")))
         self.status = QLabel()
+        # 02.09.2026 (Michael): Fehler-/Statusmeldungen sollen sich im UI
+        # markieren und kopieren lassen (z. B. für einen Bugreport) - QLabel
+        # ist dafür standardmäßig NICHT selektierbar.
+        self.status.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         self.secret = QLineEdit()
         self.secret.setEchoMode(QLineEdit.Password)
         self.target = QComboBox()
@@ -239,6 +243,7 @@ class HardwareCheckDialog(QDialog):
         self._result = None
         self.status = QLabel()
         self.status.setWordWrap(True)
+        self.status.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         self.note = QLabel()
         self.note.setWordWrap(True)
         self.recheck_button = QPushButton()
@@ -520,6 +525,7 @@ class MainWindow(QMainWindow):
         self.job_status = QLabel()
         self.job_status.setWordWrap(True)
         self.job_status.setStyleSheet("padding: 10px")
+        self.job_status.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         self.job_progress = QProgressBar()
         self.job_progress.setVisible(False)
         self.cancel_button = QPushButton()
