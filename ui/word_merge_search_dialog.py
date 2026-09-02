@@ -60,7 +60,7 @@ from pipeline.date_extract import (
 )
 from ui.drive_search import DriveSearchResult, extract_folder_id
 from ui.i18n import LanguageManager
-from ui.merge_search import IcoSearchResult
+from ui.merge_search import IcoSearchResult, extract_developer_name
 from ui.merge_search_dialog import (
     _DRIVE_CONNECTED_STYLE,
     _CurrentWidgetSizedStack,
@@ -81,8 +81,6 @@ from ui.search_scopes import (
     SCOPE_ICO_FORMAT,
 )
 from ui.workers import DriveConnectWorker, WordDriveSearchWorker, WordIcoSearchWorker
-
-_SNIPPET_PREVIEW_LENGTH = 120
 
 
 class WordMergeSearchDialog(QDialog):
@@ -180,13 +178,17 @@ class WordMergeSearchDialog(QDialog):
         self.sort_results_by_date_button.clicked.connect(self._sort_results_by_date)
         self.detach_results_button = QPushButton()
         self.detach_results_button.clicked.connect(self._toggle_detach_results)
-        select_row = QHBoxLayout()
-        select_row.addWidget(self.select_all_button)
-        select_row.addWidget(self.select_none_button)
-        select_row.addWidget(self.sort_results_by_name_button)
-        select_row.addWidget(self.sort_results_by_date_button)
-        select_row.addWidget(self.detach_results_button)
-        select_row.addStretch(1)
+        # 02.09.2026 - see MergeSearchDialog's identical block (this
+        # dialog duplicates that one's select_row, kept as self.select_row
+        # so _detach_results()/_on_detached_results_closed() can move the
+        # sort buttons in and out of it).
+        self.select_row = QHBoxLayout()
+        self.select_row.addWidget(self.select_all_button)
+        self.select_row.addWidget(self.select_none_button)
+        self.select_row.addWidget(self.sort_results_by_name_button)
+        self.select_row.addWidget(self.sort_results_by_date_button)
+        self.select_row.addWidget(self.detach_results_button)
+        self.select_row.addStretch(1)
 
         self.take_selected_button = QPushButton()
         self.take_selected_button.clicked.connect(self.accept)
@@ -209,7 +211,7 @@ class WordMergeSearchDialog(QDialog):
         layout.addLayout(search_row)
         layout.addWidget(self.progress)
         layout.addWidget(self.status_label)
-        layout.addLayout(select_row)
+        layout.addLayout(self.select_row)
         layout.addWidget(self.results_stack, 1)
         layout.addLayout(button_row)
         self.resize(680, 640)
@@ -835,6 +837,16 @@ class WordMergeSearchDialog(QDialog):
             f"{self.windowTitle()} – {self.language.text('merge_search.detached_results_title_suffix')}"
         )
         window_layout = QVBoxLayout(window)
+        # See MergeSearchDialog._detach_results()'s identical comment (this
+        # dialog duplicates that one's sort-buttons-follow-the-list
+        # behavior) - self.select_row.removeWidget() first, same reasoning.
+        self.select_row.removeWidget(self.sort_results_by_name_button)
+        self.select_row.removeWidget(self.sort_results_by_date_button)
+        detached_sort_row = QHBoxLayout()
+        detached_sort_row.addWidget(self.sort_results_by_name_button)
+        detached_sort_row.addWidget(self.sort_results_by_date_button)
+        detached_sort_row.addStretch(1)
+        window_layout.addLayout(detached_sort_row)
         window_layout.addWidget(self.results)
         # See MergeSearchDialog._detach_results()'s identical comment (this
         # dialog duplicates that one's detach-results feature) - reparenting
@@ -854,6 +866,11 @@ class WordMergeSearchDialog(QDialog):
         self._detached_results_window = None
         self.results_stack.insertWidget(0, self.results)
         self.results_stack.setCurrentIndex(0)
+        # See MergeSearchDialog._on_detached_results_closed()'s identical
+        # comment (this dialog duplicates that one's sort-buttons-follow-
+        # the-list behavior).
+        self.select_row.insertWidget(2, self.sort_results_by_name_button)
+        self.select_row.insertWidget(3, self.sort_results_by_date_button)
         self.detach_results_button.setText(self.language.text("merge_search.detach_results_button"))
 
     def _update_search_enabled(self) -> None:
@@ -937,10 +954,10 @@ class WordMergeSearchDialog(QDialog):
         self._finish_run()
         for match in result.matches:
             path = _match_path(match)
-            preview = match.snippet.replace("\n", " ").strip()
-            if len(preview) > _SNIPPET_PREVIEW_LENGTH:
-                preview = preview[:_SNIPPET_PREVIEW_LENGTH].rstrip() + "…"
-            label = path.name if not preview else f"{path.name} — {preview}"
+            # See MergeSearchDialog._on_finished()'s identical comment
+            # (this dialog duplicates that one's results list).
+            developer = extract_developer_name(match.snippet)
+            label = path.name if not developer else f"{path.name} — {developer}"
             item = QListWidgetItem(label)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Checked)

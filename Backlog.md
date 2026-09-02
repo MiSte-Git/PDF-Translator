@@ -9090,3 +9090,56 @@ im Gegensatz zum ersten Bug oben lässt sich DIESER hier unter
 Qt-Widget-Verhalten ist, kein natives Plattform-Modal-Verhalten).
 Komplette Testsuite (weiterhin 703 Tests, ein bestehender Fall erweitert
 statt ein neuer hinzugefügt) läuft grün.
+
+### Zweiter Nachtrag (selbe Sitzung): Ergebnis-Label zeigt nur noch Developer, Sortierbuttons wandern mit ins eigene Fenster
+
+Michael, nachdem die Liste im eigenen Fenster jetzt sichtbar war: "Noch
+zur Liste. Es reicht wenn hinter dem Namen nur der Teil mit Developer
+erscheint und nicht die ganze 1. Seite. Wenn kein Developer gefunden
+wird, darf es leer bleiben. Dann sollten beim eigenen Fenster die
+gleichen Sortierbuttons angezeigt werde wie im Original Fenster sonst
+ist das Fenster recht nutzlos."
+
+**Label nur noch Developer-Name:** Die Ergebnisliste zeigte bisher hinter
+dem Dateinamen einen auf 120 Zeichen gekappten Rohdump des kompletten
+Extraktor-Snippets (je nach gewähltem Suchbereich der ganze ICO-Kopfblock
+oder mehr) - oft mehrere unzusammenhängende Metadatenzeilen statt nur des
+Developer-Namens. Neue Funktion `extract_developer_name()`
+(`ui/merge_search.py`, format- und quellenunabhängig - funktioniert
+gleichermaßen für `IcoSearchMatch.snippet` und `DriveSearchMatch.snippet`,
+beide PDF und DOCX): durchsucht den Snippet-Text zeilenweise nach
+"Developer:" und extrahiert nur den Wert bis zum Zeilenende oder einem
+direkt folgenden "QSI ICO:" (auch ohne Leerzeichen dazwischen - derselbe
+reale Fall wie in `pipeline/word/duplicate_analysis.py::_DEVELOPER_RE`,
+hier aber als eigene, unabhängige Regex, da diese zeilenweise auf dem
+bereits zusammengesetzten Snippet arbeitet statt auf einer Liste
+einzelner DOCX-Absätze). Kein Treffer -> leerer String -> Label bleibt
+einfach der Dateiname (kein " — "-Anhang), genau wie gefordert. Der
+komplette Snippet-Text bleibt unverändert im Tooltip beim Hovern
+verfügbar. Beide Such-Dialoge (`_on_finished()`) umgestellt, das nicht
+mehr gebrauchte `_SNIPPET_PREVIEW_LENGTH` entfernt.
+
+**Sortierbuttons wandern mit ins eigene Fenster:** `select_row` (die
+Knopfzeile mit "Alle auswählen"/"Keine auswählen"/Sortier-/Andocken-
+Knöpfen) wurde als `self.select_row`-Attribut gespeichert statt als
+lokale Variable. `_detach_results()` entfernt jetzt zusätzlich die beiden
+Sortier-Knöpfe (`sort_results_by_name_button`/`sort_results_by_date_button`)
+per `select_row.removeWidget()` und hängt sie in eine neue Knopfzeile
+ÜBER der Liste im schwebenden Fenster - dieselben Knopf-Objekte, nicht
+Kopien, da beide direkt auf `self.results`s Einträgen arbeiten und daher
+unabhängig davon funktionieren, welches Widget sie gerade optisch
+umschließt. `_on_detached_results_closed()` setzt sie beim Andocken per
+`select_row.insertWidget(2/3, ...)` an ihre ursprüngliche Position
+zurück (bestätigt: `QBoxLayout.insertWidget()` entfernt einen Knopf
+automatisch aus seinem vorherigen Layout, kein explizites `removeWidget()`
+auf der Fenster-Seite nötig - von Hand nachgeprüft).
+
+Neue Tests: `tests/test_extract_developer_name.py` (neu, 6 Fälle für
+`extract_developer_name()` direkt, inkl. des zusammenlaufenden
+"...DirectiveQSI ICO:..."-Falls). `test_ui_search_results_sort_and_detach.py`
+um vier weitere Fälle erweitert: Label zeigt nur den Developer-Namen
+(voller Snippet bleibt im Tooltip), Label ist nur der Dateiname ohne
+Developer-Treffer, Sortier-Knöpfe wandern beim Herausnehmen ins Fenster
+(`parent() is window`) und funktionieren dort weiterhin, und landen beim
+Andocken wieder an ihrer ursprünglichen Stelle in `select_row`. Komplette
+Testsuite (715 Tests) läuft grün.

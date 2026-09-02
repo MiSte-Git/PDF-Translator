@@ -49,6 +49,8 @@ import pytest
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtWidgets import QApplication, QListWidgetItem
 
+from ui.merge_search import IcoSearchMatch, IcoSearchResult
+
 
 @pytest.fixture(scope="module")
 def qapp() -> QApplication:
@@ -375,5 +377,92 @@ def test_query_label_mentions_symbol_operators_and_drops_the_confusing_empty_hin
         # inside the empty field itself still explains this, unchanged).
         assert "leer" not in label_text.lower()
         assert "empty" not in label_text.lower()
+    finally:
+        dialog.close()
+
+
+# --- results list label shows only the Developer value (02.09.2026) ------
+# Michael, after the detach-window fixes above: "Noch zur Liste. Es
+# reicht wenn hinter dem Namen nur der Teil mit Developer erscheint und
+# nicht die ganze 1. Seite. Wenn kein Developer gefunden wird, darf es
+# leer bleiben."
+
+
+def _finish_with_snippet(dialog, path: Path, snippet: str) -> None:
+    result = IcoSearchResult(matches=[IcoSearchMatch(path=path, snippet=snippet)], scanned=1)
+    dialog._on_finished(result)
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_result_label_shows_only_the_developer_value_not_the_whole_snippet(
+    qapp, module_name, dialog_attr
+) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, "ResultLabelDeveloper")
+    try:
+        snippet = (
+            "Developer: StellarRussia\nQSI ICO: AUREXIS\n"
+            "Issuer Address: 123 Main St\nAsset Matrix: a long block of "
+            "unrelated first-page text that used to spill into the label"
+        )
+        _finish_with_snippet(dialog, Path("/tmp/a.pdf"), snippet)
+
+        label = dialog.results.item(0).text()
+        assert label == "a.pdf — StellarRussia"
+        # The full snippet is still available on hover, unchanged.
+        assert "Asset Matrix" in dialog.results.item(0).toolTip()
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_result_label_is_just_the_filename_when_no_developer_is_found(
+    qapp, module_name, dialog_attr
+) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, "ResultLabelNoDeveloper")
+    try:
+        _finish_with_snippet(dialog, Path("/tmp/plain.pdf"), "Issuer Address: 123 Main St")
+
+        assert dialog.results.item(0).text() == "plain.pdf"
+    finally:
+        dialog.close()
+
+
+# --- detached window keeps the sort buttons usable (02.09.2026) ----------
+# Michael, same round: "Dann sollten beim eigenen Fenster die gleichen
+# Sortierbuttons angezeigt werde wie im Original Fenster sonst ist das
+# Fenster recht nutzlos."
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_sort_buttons_move_into_the_detached_window_and_back(qapp, module_name, dialog_attr) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, "SortButtonsFollowWindow")
+    try:
+        _add_result(dialog, Path("/tmp/a.pdf"))
+        assert dialog.sort_results_by_name_button.parent() is dialog  # not detached yet
+
+        dialog._toggle_detach_results()
+        window = dialog._detached_results_window
+        assert dialog.sort_results_by_name_button.parent() is window
+        assert dialog.sort_results_by_date_button.parent() is window
+        # Still fully functional while detached - operates on self.results
+        # directly, regardless of which widget currently parents the button.
+        _add_result(dialog, Path("/tmp/z.pdf"))
+        dialog._sort_results_by_name()
+        names = [dialog.results.item(i).data(Qt.UserRole).name for i in range(dialog.results.count())]
+        assert names == ["a.pdf", "z.pdf"]
+
+        dialog._toggle_detach_results()  # reattach
+
+        assert dialog.sort_results_by_name_button.parent() is dialog
+        assert dialog.sort_results_by_date_button.parent() is dialog
+        # Back in their original slot in select_row - not just anywhere.
+        row_widgets = [dialog.select_row.itemAt(i).widget() for i in range(dialog.select_row.count())]
+        assert row_widgets[:5] == [
+            dialog.select_all_button,
+            dialog.select_none_button,
+            dialog.sort_results_by_name_button,
+            dialog.sort_results_by_date_button,
+            dialog.detach_results_button,
+        ]
     finally:
         dialog.close()

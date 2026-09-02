@@ -87,7 +87,7 @@ from pipeline.date_extract import (
 )
 from ui.drive_search import DriveSearchResult, extract_folder_id
 from ui.i18n import LanguageManager
-from ui.merge_search import IcoSearchResult
+from ui.merge_search import IcoSearchResult, extract_developer_name
 from ui.natural_sort import natural_sort_key
 from ui.search_scopes import (
     DATE_REGION_FOOTER,
@@ -99,8 +99,6 @@ from ui.search_scopes import (
     SCOPE_ICO_FORMAT,
 )
 from ui.workers import DriveConnectWorker, DriveSearchWorker, IcoSearchWorker
-
-_SNIPPET_PREVIEW_LENGTH = 120
 
 # 02.09.2026 (Michael: "Das wir mit Google verbunden sind darf ruhig
 # prominenter dargestellt werden. Vielleicht mit einem grünem Rahmen um
@@ -364,13 +362,19 @@ class MergeSearchDialog(QDialog):
         self.sort_results_by_date_button.clicked.connect(self._sort_results_by_date)
         self.detach_results_button = QPushButton()
         self.detach_results_button.clicked.connect(self._toggle_detach_results)
-        select_row = QHBoxLayout()
-        select_row.addWidget(self.select_all_button)
-        select_row.addWidget(self.select_none_button)
-        select_row.addWidget(self.sort_results_by_name_button)
-        select_row.addWidget(self.sort_results_by_date_button)
-        select_row.addWidget(self.detach_results_button)
-        select_row.addStretch(1)
+        # 02.09.2026 - kept as self.select_row (not a local var) so
+        # _detach_results()/_on_detached_results_closed() can move the sort
+        # buttons in and out of it - see _detach_results()'s comment there
+        # (Michael: "Dann sollten beim eigenen Fenster die gleichen
+        # Sortierbuttons angezeigt werde wie im Original Fenster sonst ist
+        # das Fenster recht nutzlos.").
+        self.select_row = QHBoxLayout()
+        self.select_row.addWidget(self.select_all_button)
+        self.select_row.addWidget(self.select_none_button)
+        self.select_row.addWidget(self.sort_results_by_name_button)
+        self.select_row.addWidget(self.sort_results_by_date_button)
+        self.select_row.addWidget(self.detach_results_button)
+        self.select_row.addStretch(1)
 
         self.take_selected_button = QPushButton()
         self.take_selected_button.clicked.connect(self.accept)
@@ -393,7 +397,7 @@ class MergeSearchDialog(QDialog):
         layout.addLayout(search_row)
         layout.addWidget(self.progress)
         layout.addWidget(self.status_label)
-        layout.addLayout(select_row)
+        layout.addLayout(self.select_row)
         layout.addWidget(self.results_stack, 1)
         layout.addLayout(button_row)
         self.resize(680, 640)
@@ -1123,6 +1127,32 @@ class MergeSearchDialog(QDialog):
             f"{self.windowTitle()} – {self.language.text('merge_search.detached_results_title_suffix')}"
         )
         window_layout = QVBoxLayout(window)
+        # 02.09.2026 (Michael: "Dann sollten beim eigenen Fenster die
+        # gleichen Sortierbuttons angezeigt werde wie im Original Fenster
+        # sonst ist das Fenster recht nutzlos.") - the sort buttons operate
+        # directly on self.results' items (see _sort_results()), never on
+        # whichever widget currently happens to parent them, so moving the
+        # actual button objects into the floating window works exactly
+        # like moving the list itself just above - not a second pair of
+        # buttons to keep in sync, the SAME ones, wherever they currently
+        # live. self.select_row.removeWidget() first: unlike
+        # results_stack.setCurrentWidget()'s automatic reparent-out
+        # (QStackedWidget-specific), a plain QHBoxLayout does not drop a
+        # widget's slot on its own just because the widget got a new
+        # parent elsewhere - without this, select_row would keep an empty
+        # gap where these two buttons used to be for as long as this
+        # window stays open. (The reverse direction, in
+        # _on_detached_results_closed() below, needs no such explicit
+        # removeWidget() - insertWidget() on a NEW layout detaches a
+        # widget from whatever layout it was in before automatically,
+        # confirmed by hand.)
+        self.select_row.removeWidget(self.sort_results_by_name_button)
+        self.select_row.removeWidget(self.sort_results_by_date_button)
+        detached_sort_row = QHBoxLayout()
+        detached_sort_row.addWidget(self.sort_results_by_name_button)
+        detached_sort_row.addWidget(self.sort_results_by_date_button)
+        detached_sort_row.addStretch(1)
+        window_layout.addLayout(detached_sort_row)
         window_layout.addWidget(self.results)
         # 02.09.2026 (Michael, after the parent=self fix above: "Jetzt geht
         # zwar ein Fenster auf, es wird aber keine Liste angezeigt.") -
@@ -1152,6 +1182,12 @@ class MergeSearchDialog(QDialog):
         self._detached_results_window = None
         self.results_stack.insertWidget(0, self.results)
         self.results_stack.setCurrentIndex(0)
+        # 02.09.2026 - moves the sort buttons back to their original spot
+        # in select_row (see _detach_results()'s comment there) - indices
+        # 2/3 are exactly where they were before being removed (after
+        # select_all_button/select_none_button, before detach_results_button).
+        self.select_row.insertWidget(2, self.sort_results_by_name_button)
+        self.select_row.insertWidget(3, self.sort_results_by_date_button)
         self.detach_results_button.setText(self.language.text("merge_search.detach_results_button"))
 
     def _update_search_enabled(self) -> None:
@@ -1235,10 +1271,15 @@ class MergeSearchDialog(QDialog):
         self._finish_run()
         for match in result.matches:
             path = _match_path(match)
-            preview = match.snippet.replace("\n", " ").strip()
-            if len(preview) > _SNIPPET_PREVIEW_LENGTH:
-                preview = preview[:_SNIPPET_PREVIEW_LENGTH].rstrip() + "…"
-            label = path.name if not preview else f"{path.name} — {preview}"
+            # 02.09.2026 (Michael: "Es reicht wenn hinter dem Namen nur der
+            # Teil mit Developer erscheint und nicht die ganze 1. Seite.
+            # Wenn kein Developer gefunden wird, darf es leer bleiben.") -
+            # used to show a truncated dump of the whole snippet text; see
+            # ui/merge_search.py::extract_developer_name(). The full
+            # snippet is still available on hover (tooltip, unchanged
+            # below) for whoever wants the rest of the header/page text.
+            developer = extract_developer_name(match.snippet)
+            label = path.name if not developer else f"{path.name} — {developer}"
             item = QListWidgetItem(label)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Checked)

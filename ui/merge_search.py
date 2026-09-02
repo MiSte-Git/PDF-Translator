@@ -28,6 +28,7 @@ with ".docx"/extract_docx_ico_header_text instead.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
@@ -43,6 +44,45 @@ from ui.search_scopes import (
     PDF_SCOPE_EXTRACTORS,
     combined_extractor,
 )
+
+# 02.09.2026 (Michael, on the results list in both search dialogs: "Es
+# reicht wenn hinter dem Namen nur der Teil mit Developer erscheint und
+# nicht die ganze 1. Seite. Wenn kein Developer gefunden wird, darf es
+# leer bleiben.") - the label used to show a truncated dump of the whole
+# extractor snippet (up to the first 120 characters of the ICO header
+# block/whatever scope(s) were selected - could be several unrelated
+# metadata lines, not just the developer name). This pulls out just the
+# "Developer: X" value, same regex shape as
+# pipeline/word/duplicate_analysis.py::_DEVELOPER_RE (kept independent
+# rather than imported - that one is DOCX-duplicate-analysis-specific,
+# works on a list of already-split paragraph texts; this one works
+# line-by-line on the combined, possibly multi-line snippet text used by
+# BOTH search dialogs' results list, PDF and DOCX and Drive alike, since
+# they all share the exact same IcoSearchMatch/DriveSearchMatch.snippet
+# shape - see extract_ico_header_text()'s docstring for a real example:
+# "Developer: StellarRussia" / "QSI ICO: AUREXIS", and
+# pipeline/word/duplicate_analysis.py's own comment for why the two
+# fields sometimes run together with no space at all in DOCX header text
+# ("Developer: The Korolev DirectiveQSI ICO: INERTIARA").
+_DEVELOPER_RE = re.compile(r"Developer:\s*(.*?)\s*(?:QSI ICO:.*)?$", re.IGNORECASE)
+
+
+def extract_developer_name(snippet: str) -> str:
+    """The "Developer: X" value out of `snippet` (an IcoSearchMatch/
+    DriveSearchMatch's full extractor text), or "" if no "Developer:"
+    field is present at all - e.g. the file isn't an ICO document, or the
+    selected search scope(s) never included ico_format's text. `.` can't
+    span lines (no re.DOTALL) so a match never runs past its own line,
+    same effect as searching paragraph-by-paragraph in
+    duplicate_analysis.py, just applied to `snippet`'s already-joined
+    lines instead of a list of paragraphs.
+    """
+    for line in snippet.splitlines():
+        if "developer:" in line.lower():
+            match = _DEVELOPER_RE.search(line)
+            if match:
+                return match.group(1).strip()
+    return ""
 
 
 @dataclass
