@@ -212,6 +212,7 @@
   "merge.status_failed": "Failed: {error}",
   "merge.status_running": "Processing: {message}",
   "merge.title": "Merge / insert PDFs",
+  "merge_box.group": "Merge files",
   "merge_search.button": "Search a folder …",
   "merge_search.cancel_button": "Cancel",
   "merge_search.choose_folder": "Choose folder …",

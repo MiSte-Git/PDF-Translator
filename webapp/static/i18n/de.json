@@ -212,6 +212,7 @@
   "merge.status_failed": "Fehlgeschlagen: {error}",
   "merge.status_running": "Verarbeite: {message}",
   "merge.title": "PDFs zusammenführen / einfügen",
+  "merge_box.group": "Dateien zusammenführen",
   "merge_search.button": "Ordner durchsuchen …",
   "merge_search.cancel_button": "Abbrechen",
   "merge_search.choose_folder": "Ordner wählen …",

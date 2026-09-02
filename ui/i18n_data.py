@@ -120,6 +120,11 @@ DE = {
     ),
     "source_language.placeholder": "optional / automatisch",
     "protected.placeholder": "Ein geschützter Begriff pro Zeile",
+    # 02.09.2026 (Michael: "Sollten die beiden Optionen [...] mit in die
+    # 'Vorgang' Auswahlbox? Oder sollten wir Rahmen für Übersetzung und
+    # für 'PDF/DOCX' Zusammenführen machen. So ist es ein unangenehmer
+    # Mix.") - siehe ui/app.py's Kommentar über merge_box.
+    "merge_box.group": "Dateien zusammenführen",
     "config.group": "Auftrag konfigurieren",
     "analysis.group": "Analyse und Kostenkontrolle",
     "analysis.required": "Vor dem Start ist eine Analyse erforderlich.",
@@ -738,6 +743,7 @@ EN = {
     ),
     "source_language.placeholder": "optional / automatic",
     "protected.placeholder": "One protected term per line",
+    "merge_box.group": "Merge files",
     "config.group": "Configure job",
     "analysis.group": "Analysis and cost control",
     "analysis.required": "Analysis is required before starting.",

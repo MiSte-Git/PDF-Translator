@@ -415,6 +415,24 @@ class MainWindow(QMainWindow):
         # enabled regardless of the mode combo above: it starts its own,
         # completely independent flow (no provider, no cost analysis, no
         # interaction with self.paths/self.last_result at all).
+        #
+        # 02.09.2026 (Michael: "Sollten die beiden Optionen [...] mit in
+        # die 'Vorgang' Auswahlbox? Oder sollten wir Rahmen für Übersetzung
+        # und für 'PDF/DOCX' Zusammenführen machen. So ist es ein
+        # unangenehmer Mix.") - used to sit as two unlabeled rows inside
+        # self.form/config_box, sandwiched between the mode combo and the
+        # source-file row, visually indistinguishable from the translation-
+        # specific fields around them even though merging shares none of
+        # their state (no provider/languages/protected terms, its own
+        # modal dialog with its own file table). Folding them INTO the
+        # mode combo was considered and rejected: mode selection only
+        # toggles which rows of THIS SAME form are visible
+        # (_mode_changed()) - merging doesn't belong to that form at all,
+        # so it would need the whole form hidden behind a mode that
+        # otherwise does nothing "Start" can act on. Given their own card
+        # instead (self.merge_box below), reusing the config_box/cost_box/
+        # job_box "stack of cards" pattern already established in this
+        # window rather than introducing a new UI concept.
         self.merge_button = QPushButton()
         self.merge_button.clicked.connect(self._open_merge_dialog)
         # DOCX-Gegenstück (01.09.2026, Michael: "Jetzt noch das ganze für
@@ -489,8 +507,6 @@ class MainWindow(QMainWindow):
         self.form = QFormLayout()
         self.form_labels = [QLabel() for _ in range(12)]
         self.form.addRow(self.form_labels[0], self.mode)
-        self.form.addRow("", self.merge_button)
-        self.form.addRow("", self.word_merge_button)
         source_row = QHBoxLayout(); source_row.addWidget(self.source_label, 1); source_row.addWidget(self.choose)
         self.form.addRow(self.form_labels[1], source_row)
         self.form.addRow(self.form_labels[2], self.image_mode)
@@ -602,9 +618,25 @@ class MainWindow(QMainWindow):
         self.config_box = QGroupBox()
         config_layout = QVBoxLayout(self.config_box)
         config_layout.addLayout(self.form)
+        # 02.09.2026 - see the comment above merge_button/word_merge_button
+        # (constructor) for why these two moved out of self.form/
+        # config_box into their own card: merging is an independent action,
+        # not a translation mode, so it gets its own "Dateien
+        # zusammenführen" card instead of two undifferentiated rows inside
+        # the translation config form. Placed ABOVE config_box (confirmed
+        # with Michael) so it reads as an equally-weighted, independent
+        # first choice rather than a translation-config afterthought.
+        self.merge_box = QGroupBox()
+        merge_box_row = QHBoxLayout()
+        merge_box_row.addWidget(self.merge_button)
+        merge_box_row.addWidget(self.word_merge_button)
+        merge_box_row.addStretch(1)
+        merge_box_layout = QVBoxLayout(self.merge_box)
+        merge_box_layout.addLayout(merge_box_row)
         root = QVBoxLayout()
         root.setContentsMargins(20, 20, 20, 20)
         root.setSpacing(16)
+        root.addWidget(self.merge_box)
         root.addWidget(self.config_box)
         root.addWidget(self.cost_box)
         root.addWidget(self.job_box)
@@ -706,6 +738,7 @@ class MainWindow(QMainWindow):
     def retranslate(self) -> None:
         t = self.language.text
         self.setWindowTitle(t("app.title"))
+        self.merge_box.setTitle(t("merge_box.group"))
         self.config_box.setTitle(t("config.group"))
         for index, mode in enumerate(MODE_KEYS): self.mode.setItemText(index, t(MODE_KEYS[mode]))
         for index, key in enumerate(("image.none", "image.selected", "image.all")): self.image_mode.setItemText(index, t(key))

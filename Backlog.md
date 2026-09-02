@@ -8941,3 +8941,41 @@ jetzt voraus, dass die Gruppe selbst angehakt ist). `test_search_query.py`
 um zwei Fälle für die `&&`/`||`-Symbole erweitert (als Synonyme UND
 gemischt mit den Wortformen). i18n: 13 neue Schlüssel (DE/EN, Parität
 geprüft, 370/370 Keys). Komplette Testsuite (682 Tests) läuft grün.
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung 16) - "Dateien zusammenführen" bekommt eine eigene Karte im Hauptfenster
+
+Michael: "Sollten die beiden Optionen 'PDFs zusammenführen...' und
+'Docx-Dateien zusammenführen..' mit in die 'Vorgang' Auswahlbox? Oder
+sollten wir Rahmen für Übersetzung und für 'PDF/DOCX' Zusammenführen
+machen. So ist es ein unangenehmer Mix."
+
+`merge_button`/`word_merge_button` (ui/app.py) saßen bisher als zwei
+unbeschriftete Zeilen mitten in `self.form`/`config_box`, zwischen dem
+Vorgang-Dropdown und der Quelldateien-Zeile - optisch nicht von den
+Übersetzungs-Feldern (Provider, Sprachen, geschützte Begriffe, ...) zu
+unterscheiden, obwohl Zusammenführen inhaltlich nichts damit zu tun hat
+(eigener modaler Dialog, eigene Dateitabelle, kein Provider/keine
+Sprachen). Eine Aufnahme ins Vorgang-Dropdown wurde geprüft und verworfen:
+die Dropdown-Auswahl steuert nur, welche Zeilen DESSELBEN Formulars
+sichtbar sind (`_mode_changed()`) - Zusammenführen gehört gar nicht zu
+diesem Formular, müsste also entweder das ganze Formular ausblenden oder
+der "Start"-Knopf würde für diesen "Modus" gar nichts tun.
+
+Stattdessen bekommen beide Knöpfe eine eigene Karte `self.merge_box`
+("Dateien zusammenführen", `merge_box.group`) - reines Wiederverwenden
+des im Fenster bereits etablierten "Stapel aus Karten"-Musters
+(`config_box`/`cost_box`/`job_box`), kein neues UI-Konzept. Platzierung
+per AskUserQuestion bestätigt: ganz oben, VOR `config_box` - Zusammenführen
+liest sich damit als gleichwertige, unabhängige erste Wahl statt als
+Anhängsel der Übersetzungs-Konfiguration. `_set_running()`s bestehende
+Enable/Disable-Logik für beide Knöpfe (während ein Übersetzungs-Auftrag
+läuft) ist unverändert - reine Positionsänderung, keine
+Verhaltensänderung.
+
+Neuer Test: `tests/test_ui_merge_box_placement.py` (4 Fälle: Knöpfe sind
+keine Zeilen von `self.form` mehr und gehören jetzt `merge_box`,
+`merge_box` liegt vor `config_box` im Root-Layout, `_set_running()`
+deaktiviert beide Knöpfe weiterhin korrekt, Beschriftungen überstehen
+einen Sprachwechsel). i18n: 1 neuer Schlüssel (`merge_box.group`, DE/EN,
+Parität geprüft, 371/371 Keys). Komplette Testsuite (686 Tests) läuft
+grün.
