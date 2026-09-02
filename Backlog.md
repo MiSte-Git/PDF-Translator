@@ -9263,3 +9263,126 @@ Freitext bleibt der bestehende Fehler, ein ungültiges Freitext-Muster
 ist ein Fehler auch bei aktiver Checkbox, und reiner Text ohne
 Platzhalter ist ebenfalls ungültig). Komplette Testsuite (753 Tests,
 1 übersprungen) läuft grün.
+
+### Fünfter Nachtrag (selbe Sitzung): Kalender-Popup-Fix war nicht zuverlässig genug
+
+Michael, nach echtem Ausprobieren: "Beim Datumsbereich auswählen habe
+ich auf den Pfeil geklickt und dann zeigte er mir wieder 1900 an und
+ich konnte keine Tag mehr auswählen."
+
+Der Fix aus dem dritten Nachtrag (oben) rief `calendar.setCurrentPage()`
+SYNCHRON und REENTRANT direkt aus dem `currentPageChanged`-Handler
+heraus auf, der von Qts eigenem Seiten-Sync beim Öffnen des Popups
+ausgelöst wurde. Das lief unter der Offscreen-Testplattform dieser
+Umgebung sauber durch (deshalb "als funktionierend bestätigt" im
+dritten Nachtrag) - aber echte Qt-Builds schützen `QCalendarWidget`
+intern gegen genau so einen verschachtelten Aufruf, während die erste
+Seitenänderung noch nicht fertig verarbeitet ist. Das würde den
+verschachtelten `setCurrentPage()`-Aufruf stillschweigend verwerfen -
+Popup bleibt auf 1900, UND weil das intern halb angewendete Modell-
+Update verworfen wird, reagiert auch das Tagesraster nicht mehr richtig
+auf Klicks. Genau das hat Michael beobachtet.
+
+Fix: die Korrektur läuft jetzt über `QTimer.singleShot(0, ...)` statt
+direkt/reentrant - sie wird also erst in der NÄCHSTEN Event-Loop-
+Runde ausgeführt, nachdem Qt seine eigene Seitenänderung vollständig
+abgeschlossen und die interne Sperre wieder freigegeben hat. Das ist
+der Standard-Weg in Qt, um eine gerade abgeschlossene interne
+Widget-Aktualisierung sicher zu überschreiben, ohne sich auf
+Reentrancy-Verhalten zu verlassen, das sich zwischen Qt-Builds
+unterscheiden kann.
+
+`tests/test_ui_date_filter.py`s `_open_calendar_popup()`-Helfer ruft
+nach dem simulierten Klick jetzt zusätzlich `QTest.qWait(0)` auf, um
+den wartenden `QTimer.singleShot(0, ...)`-Callback tatsächlich laufen
+zu lassen (vorher lief die Korrektur synchron im selben Klick, daher
+unnötig) - sonst hätten genau diese Tests den Regressions-Fall (Fix
+wirkt nicht ohne eine Event-Loop-Runde) nicht abdecken können. Zusätzlich
+von Hand nachgeprüft (nicht nur über die Seiten-Anzeige, sondern über
+einen echten simulierten Klick auf eine konkrete Tageszelle im
+Kalenderraster nach dem Öffnen): das Datum wird nach diesem Fix korrekt
+übernommen. Komplette Testsuite (753 Tests, 1 übersprungen) läuft
+weiterhin grün.
+
+Offene Rückfrage an Michael zum zweiten gemeldeten Punkt (keine Treffer
+bei "Englisch (Monatsname)" + Von/Bis 02.01.2025-01.09.2025): die
+Dokumenten-Datumssuche durchsucht NICHT den gesamten Dokumenttext,
+sondern nur die ausgewählten Regionen - standardmäßig nur "ICO Feld"
+(ein sehr schmaler, nur bei einem bestimmten internen ICO-Dokumenttyp
+vorhandener Bereich auf Seite 1), optional zusätzlich Header/Footer
+(nur falls über alle Seiten hinweg ein eindeutig wiederkehrender
+Header/Footer erkannt wird). Ein Datum irgendwo im normalen Fließtext
+eines Dokuments fällt in KEINE der drei Regionen - das ist vermutlich
+der eigentliche Grund für die fehlenden Treffer, nicht ein Format-
+Umwandlungsproblem (das Von/Bis-Datum muss nicht "ins Format
+umgewandelt" werden, es wird nur mit dem im Text GEFUNDENEN Datum
+verglichen). Noch nicht behoben, da unklar, wo in Michaels PDFs die
+gesuchten Daten tatsächlich stehen - siehe Rückfrage im Chat.
+
+### Sechster Nachtrag (selbe Sitzung): eigentlicher Grund für die fehlenden Treffer gefunden
+
+Michael bestätigt auf Rückfrage: das Datum steht bei seinen ICO-PDFs
+IMMER im ICO-Feld auf Seite 1 (Screenshot, dann die echte Datei "2133
+XLMFOMO.pdf" hochgeladen). Region-Auswahl war also von Anfang an
+richtig - die Ursache lag woanders.
+
+Direkte Analyse der PDF-internen Blockstruktur (`page.get_text("dict")`)
+zeigt: "June 18, 2026" und "ICO Telegram Write Up: Post Link" liegen im
+SELBEN PyMuPDF-Textblock wie "Issuer Address" weiter unten - werden
+aber schon VOR jeder Datums-/Format-Logik verschluckt.
+`_group_lines_by_x0()` (`pipeline/pdf/pymupdf_engine.py`, teilt einen
+Block in Spalten-Gruppen anhand der x0-Streuung, Schwelle 50pt) verglich
+bisher JEDE Zeile gegen die laufende Spannweite, auch reine
+Leerzeilen. In Michaels Datei sitzt genau eine solche Leerzeile - der
+Cursor-Rest, den PyMuPDF direkt nach einem Hyperlink-Lauf einfügt - bei
+x0≈553 (rechter Seitenrand), obwohl jede echte Textzeile drumherum bei
+x0≈43 liegt. Diese eine Leerzeile hat einen ansonsten einspaltigen
+Block in drei fremde Gruppen zerrissen; Datum und Telegram-Zeile landen
+dabei allein in einer Gruppe ohne "Issuer Address"-Anker.
+`_split_first_page_metadata()` gibt eine Gruppe ohne Anker unverändert
+zurück (Länge 1 statt 2), und `extract_ico_header_text()` übernimmt nur
+Gruppen, deren Aufteilung tatsächlich einen Anker gefunden hat - die
+Datums-/Telegram-Gruppe fällt also komplett unter den Tisch, lange
+bevor Format oder Datumsbereich überhaupt eine Rolle spielen.
+
+Fix: `_group_lines_by_x0()` ignoriert jetzt Leerzeilen bei der
+Spalten-Entscheidung UND bei der Fortschreibung der x0-Spannweite
+vollständig - sie werden weiterhin der gerade offenen Gruppe angehängt,
+lösen aber selbst nie eine Trennung aus und verschieben auch nicht die
+Grenze, an der eine ECHTE Inhaltszeile später getrennt würde. Der
+eigentliche Zweck der Funktion (eine Spalte neben einem Bild von der
+folgenden Volltext-Zeile trennen, siehe `_COLUMN_SPLIT_THRESHOLD`s
+Kommentar) bleibt unverändert - nur Leerzeilen zählen jetzt nicht mehr
+mit. Direkt an Michaels echter Datei verifiziert: "June 18, 2026"
+erscheint jetzt korrekt im extrahierten ICO-Text, und ein kompletter
+Suchlauf (Region "ICO Feld", Format "Englisch Monatsname", Bereich
+2026) findet die Datei; mit Bereich 2025 (außerhalb) findet er sie
+korrekt NICHT.
+
+`_group_lines_by_x0()` wird geteilt von `extract_blocks()` (die
+eigentliche Übersetzungs-Logik) UND beiden ICO-Suchfunktionen - deshalb
+komplette Testsuite nach der Änderung nochmal laufen lassen, keine
+Regression.
+
+Neue Tests: `tests/test_pdf_group_lines_by_x0.py` (neu) - testet
+`_group_lines_by_x0()` diesmal direkt (nicht wie sonst in diesem
+Projekt nur über eine echte PDF), weil sich Michaels genaue
+PyMuPDF-Eigenheit (die Leerzeile bei x0≈553) über `page.insert_text()`
+nicht zuverlässig nachbauen ließ (von Hand geprüft: PyMuPDFs eigene
+Block-Erkennung hat die künstliche Ausreißer-Zeile je nach Position
+unvorhersehbar mit Nachbarn verschmolzen oder ganz verschluckt, anders
+als in der echten Datei) - mit von Hand gebauten Zeilen-Dicts (nur
+"bbox"/"spans" wie im echten PyMuPDF-Dict) 5 Fälle: die genaue
+Ausreißer-Situation aus Michaels Datei bleibt EINE Gruppe, eine
+Leerzeile ganz am Anfang vergiftet die Spannweite nicht, mehrere
+Ausreißer-Leerzeilen hintereinander bleiben harmlos, ein echter
+Zwei-Spalten-Fall (zwei INHALTS-Zeilen mit echtem x0-Abstand) trennt
+weiterhin wie bisher, und eine Leerzeile zwischen zwei echten Spalten
+hängt sich an die erste Gruppe an statt eine dritte zu bilden. Jeder
+Fall von Hand gegen die alte Funktion gegengeprüft (schlägt dort
+tatsächlich fehl). `tests/test_pdf_ico_header_search.py` bekommt
+zusätzlich einen Fall auf extract_ico_header_text()-Ebene mit einer
+synthetischen PDF, die zwar nicht exakt Michaels PyMuPDF-Eigenheit
+trifft, aber dieselbe Form (Ausreißer-Leerzeile zwischen zwei echten
+Inhaltszeilen im selben Block) über die öffentliche Funktion abdeckt.
+Komplette Testsuite (759 Tests, 1 übersprungen) läuft grün.

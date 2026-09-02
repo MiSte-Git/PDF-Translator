@@ -52,7 +52,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import QDate, QSettings, Qt, QThreadPool
+from PySide6.QtCore import QDate, QSettings, Qt, QThreadPool, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QDateEdit,
@@ -154,14 +154,26 @@ def _configure_optional_date_edit(edit: QDateEdit) -> None:
     the value itself to today isn't an option, that would make an
     untouched field silently filter by today's date. Only the CALENDAR
     POPUP's displayed page is nudged to the current month instead.
-    Confirmed by hand (QTest.mouseClick on the dropdown arrow) that Qt
-    re-syncs the popup's page to the edit's actual value - still the 1900
-    sentinel - every single time it's opened, undoing a plain one-off
-    setCurrentPage() call made right after construction; _snap_calendar_
-    to_today_while_unset() below reapplies it via currentPageChanged
-    instead, but ONLY while the field is still unset AND the page is
-    exactly back at the 1900 sentinel - never fighting the user's own
-    navigation once they're actually browsing to some other month/year.
+
+    02.09.2026, second attempt (Michael, after trying the first version:
+    "zeigte er mir wieder 1900 an und ich konnte keine Tag mehr
+    auswählen") - the first version called calendar.setCurrentPage()
+    synchronously from INSIDE the currentPageChanged handler that Qt's
+    own popup-opening code had just triggered. That round-trip happened
+    to work under the offscreen test platform, but real Qt builds guard
+    QCalendarWidgetPrivate against exactly this kind of reentrant call
+    while it's still in the middle of applying the first page change, so
+    the nested setCurrentPage() could get silently dropped - popup stays
+    on 1900 AND (since the model update it silently dropped may leave
+    the day grid/selection model referencing the old, half-applied page)
+    the day cells stop responding to clicks. Deferring the correction
+    with QTimer.singleShot(0, ...) instead runs it on the NEXT event-loop
+    iteration, after Qt has fully finished its own page change and
+    cleared that internal guard - the standard, non-reentrant way to
+    override a Qt widget's own just-finished internal update. Still only
+    while the field is genuinely unset AND the page is exactly the 1900
+    sentinel - never fighting the user's own navigation once they're
+    actually browsing to some other month/year.
     """
     edit.setCalendarPopup(True)
     edit.setDisplayFormat("dd.MM.yyyy")
@@ -172,13 +184,23 @@ def _configure_optional_date_edit(edit: QDateEdit) -> None:
 
     calendar = edit.calendarWidget()
 
-    def _snap_calendar_to_today_while_unset(year: int, month: int) -> None:
-        if edit.date() == _DATE_UNSET and (year, month) == (_DATE_UNSET.year(), _DATE_UNSET.month()):
+    def _snap_calendar_to_today_while_unset() -> None:
+        if (
+            edit.date() == _DATE_UNSET
+            and (calendar.yearShown(), calendar.monthShown()) == (_DATE_UNSET.year(), _DATE_UNSET.month())
+        ):
             today = QDate.currentDate()
             calendar.setCurrentPage(today.year(), today.month())
 
-    calendar.currentPageChanged.connect(_snap_calendar_to_today_while_unset)
-    _snap_calendar_to_today_while_unset(_DATE_UNSET.year(), _DATE_UNSET.month())  # apply once immediately too
+    def _schedule_snap(year: int, month: int) -> None:
+        # Deferred (see docstring above) - read calendar.yearShown()/
+        # monthShown() fresh once this actually runs rather than trusting
+        # the (year, month) this particular signal emission carried,
+        # since further page changes may already be queued ahead of it.
+        QTimer.singleShot(0, _snap_calendar_to_today_while_unset)
+
+    calendar.currentPageChanged.connect(_schedule_snap)
+    _schedule_snap(_DATE_UNSET.year(), _DATE_UNSET.month())  # apply once immediately too
 
 
 def _optional_date(edit: QDateEdit) -> date | None:

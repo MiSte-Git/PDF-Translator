@@ -253,21 +253,47 @@ def _group_lines_by_x0(
     """Split lines into groups whose min/max x0 spread stays within threshold.
 
     Lines are consumed in order; a new group starts as soon as adding the
-    next line would push the current group's x0 range beyond threshold.
+    next NON-BLANK line would push the current group's x0 range beyond
+    threshold.
+
+    02.09.2026 (Michael, real document "2133 XLMFOMO.pdf" via
+    extract_ico_header_text() below: date "June 18, 2026" and "ICO
+    Telegram Write Up: Post Link" silently missing from the ICO-region
+    search even though both sit in the same PyMuPDF block as "Issuer
+    Address") - a blank/whitespace-only line's own x0 is meaningless
+    noise (confirmed on that file: the trailing space PyMuPDF emits
+    right after a hyperlink run sits at x0≈553, the page's right edge,
+    even though every real text line around it sits at x0≈43) and must
+    never be allowed to (a) trigger a column split on its own, or (b)
+    widen the range future lines get compared against - otherwise one
+    stray blank line fractures an otherwise single-column block into
+    unrelated groups, exactly what silently dropped those two lines
+    here (they ended up alone in their own anchor-less group, which
+    _split_first_page_metadata() then passes through unchanged and
+    extract_ico_header_text() only ever collects a group whose split
+    actually found an anchor). Blank lines still end up in whichever
+    group is open when they're reached - only the split DECISION and
+    the min/max bookkeeping ignore them.
     """
     groups: list[list[dict]] = []
     current: list[dict] = []
     current_min = current_max = 0.0
+    have_content = False  # whether `current` has a non-blank line yet
     for line in lines:
+        if not _line_text(line.get("spans", [])).strip():
+            current.append(line)  # blank line - never affects split/range
+            continue
         x0 = line["bbox"][0]
-        if current and max(current_max, x0) - min(current_min, x0) > threshold:
+        if have_content and max(current_max, x0) - min(current_min, x0) > threshold:
             groups.append(current)
             current = []
-        if current:
+            have_content = False
+        if have_content:
             current_min = min(current_min, x0)
             current_max = max(current_max, x0)
         else:
             current_min = current_max = x0
+            have_content = True
         current.append(line)
     if current:
         groups.append(current)

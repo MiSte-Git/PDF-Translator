@@ -468,11 +468,20 @@ def _open_calendar_popup(edit) -> None:
     reproduces the real symptom before the fix (calendar page snapping
     back to January 1900) and the fix (page staying on the current
     month).
+
+    02.09.2026, second attempt (see _configure_optional_date_edit()'s
+    docstring, ui/merge_search_dialog.py) - the correction is now
+    deferred via QTimer.singleShot(0, ...) rather than applied
+    synchronously/reentrantly, so a plain click no longer suffices here
+    either: QTest.qWait(0) pumps the event loop once to let that queued
+    callback actually run, the same way it would on the very next spin
+    of a real application's event loop.
     """
     opt = QStyleOptionSpinBox()
     opt.initFrom(edit)
     rect = edit.style().subControlRect(QStyle.CC_SpinBox, opt, QStyle.SC_SpinBoxDown, edit)
     QTest.mouseClick(edit, Qt.LeftButton, Qt.NoModifier, rect.center())
+    QTest.qWait(0)
 
 
 @pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
