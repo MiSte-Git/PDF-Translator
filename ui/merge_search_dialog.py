@@ -88,6 +88,7 @@ from pipeline.date_extract import (
 from ui.drive_search import DriveSearchResult, extract_folder_id
 from ui.i18n import LanguageManager
 from ui.merge_search import IcoSearchResult
+from ui.natural_sort import natural_sort_key
 from ui.search_scopes import (
     DATE_REGION_FOOTER,
     DATE_REGION_HEADER,
@@ -224,10 +225,22 @@ class _DetachedResultsWindow(QWidget):
     calls window.close() itself - see _on_detached_results_closed()) so
     the list always finds its way back into the dialog rather than being
     stranded in a closed window.
+
+    02.09.2026 (Michael: "Das Fenster erscheint nicht wenn ich auf
+    'Ergebnisliste in eigenem Fenster öffnen' anklicke. Die Liste
+    verschwindet aber es geht keine neues Fenster auf.") - this dialog is
+    normally opened via exec() (application-modal, both directly from
+    MainWindow and, one level deeper, from MergeDialog/WordMergeDialog -
+    see their own _open_search_dialog()), and Qt blocks/never surfaces
+    top-level windows that are not descendants of the modal widget while
+    a modal exec() loop is running. `parent` MUST therefore be the owning
+    MergeSearchDialog/WordMergeSearchDialog itself (still shown as a real
+    top-level window on screen, thanks to the Qt.Window flag below) -
+    NOT None, which is what silently produced an unshowable window.
     """
 
-    def __init__(self, on_close) -> None:
-        super().__init__(None, Qt.Window)
+    def __init__(self, parent: QWidget, on_close) -> None:
+        super().__init__(parent, Qt.Window)
         self._on_close = on_close
 
     def closeEvent(self, event) -> None:
@@ -298,6 +311,11 @@ class MergeSearchDialog(QDialog):
 
         self.query_label = QLabel()
         self.query_edit = QLineEdit()
+        # 02.09.2026 (Michael: "Es sollte noch die letzten Suchbegriffe im
+        # Suchfeld angezeigt werden.") - restored the same way as the last
+        # folder/recursive-checkbox state (_restore_local_folder_state()),
+        # persisted in done() below.
+        self.query_edit.setText(str(self.settings.value("merge_search_last_query", "", type=str)))
 
         self.search_button = QPushButton()
         self.search_button.clicked.connect(self._start_search)
@@ -449,6 +467,10 @@ class MergeSearchDialog(QDialog):
         # recursive checkbox is remembered the same way the Drive folder
         # link above already was, on every path that closes this dialog.
         self.settings.setValue("merge_search_recursive", self.recursive_checkbox.isChecked())
+        # 02.09.2026 (Michael: "Es sollte noch die letzten Suchbegriffe im
+        # Suchfeld angezeigt werden.") - see query_edit's constructor
+        # comment above.
+        self.settings.setValue("merge_search_last_query", self.query_edit.text())
         # 02.09.2026 - a still-open detached results window (see
         # _DetachedResultsWindow) must not outlive this dialog: closing it
         # here reparents self.results back before this dialog itself is
@@ -1054,8 +1076,13 @@ class MergeSearchDialog(QDialog):
             self.results.addItem(item)
 
     def _sort_results_by_name(self) -> None:
+        # 02.09.2026 (Michael: "Die Dateinamen fangen hier aktuell alle
+        # mit Nummern an [...] Ich dachte das nach Namen sortieren
+        # Standardmässig immer erst die Nummern ausliest [...]") - see
+        # ui/natural_sort.py for why a plain string sort gets this wrong
+        # for ICO-numbered filenames.
         ascending = self._results_name_sort_ascending
-        self._sort_results(lambda path: path.name.lower(), ascending)
+        self._sort_results(lambda path: natural_sort_key(path.name), ascending)
         self._results_name_sort_ascending = not ascending
         self._update_results_sort_button_labels()
 
@@ -1088,7 +1115,10 @@ class MergeSearchDialog(QDialog):
         # the placeholder down to index 0 first and make a subsequent
         # setCurrentIndex(1) target nothing.
         self.results_stack.setCurrentWidget(self.results_placeholder_label)
-        window = _DetachedResultsWindow(self._on_detached_results_closed)
+        # `self` (not None) as parent - see _DetachedResultsWindow's
+        # docstring: required for the window to actually show up at all
+        # while this application-modal dialog's exec() loop is running.
+        window = _DetachedResultsWindow(self, self._on_detached_results_closed)
         window.setWindowTitle(
             f"{self.windowTitle()} – {self.language.text('merge_search.detached_results_title_suffix')}"
         )
@@ -1098,6 +1128,8 @@ class MergeSearchDialog(QDialog):
         self._detached_results_window = window
         self.detach_results_button.setText(self.language.text("merge_search.reattach_results_button"))
         window.show()
+        window.raise_()
+        window.activateWindow()
 
     def _on_detached_results_closed(self) -> None:
         if self._detached_results_window is None:

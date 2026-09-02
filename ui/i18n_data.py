@@ -433,7 +433,13 @@ DE = {
     "merge_search.error_date_range_reversed": "„Von“ darf nicht nach „Bis“ liegen.",
     "merge_search.error_missing_date_region": "Bitte mindestens einen Bereich für die Datumssuche auswählen.",
     "merge_search.error_missing_date_format": "Bitte mindestens ein Datumsformat auswählen.",
-    "merge_search.query_label": "Suchtext (leer = alle Dateien; UND/ODER zum Verknüpfen mehrerer Begriffe)",
+    # 02.09.2026 (Michael: "wird in der Überschrift über dem Suchfeld nicht
+    # die Operatoren mit angezeigt. Die Aussage 'leer = alle Dateien' ist
+    # eher verwirrend und sollte dort raus.") - "leer = alle Dateien"
+    # entfernt (steht bereits als klarerer Hinweis im Platzhaltertext
+    # query_placeholder direkt IM leeren Feld) und die &&/||-Symbole mit
+    # aufgenommen, nicht nur UND/ODER wie zuvor.
+    "merge_search.query_label": "Suchtext (UND/ODER bzw. &&/|| zum Verknüpfen mehrerer Begriffe)",
     "merge_search.query_placeholder": (
         "z. B. Firmenname des Developers, oder Begriff1 UND Begriff2 – leer lassen für alle Dateien im Ordner"
     ),
@@ -1014,7 +1020,10 @@ EN = {
     "merge_search.error_date_range_reversed": "“From” must not be after “To”.",
     "merge_search.error_missing_date_region": "Please select at least one region for the date search.",
     "merge_search.error_missing_date_format": "Please select at least one date format.",
-    "merge_search.query_label": "Search text (empty = every file; combine terms with AND/OR)",
+    # 02.09.2026 - see the German string's comment: "empty = every file"
+    # dropped (already covered, more clearly, by query_placeholder), &&/||
+    # added alongside AND/OR.
+    "merge_search.query_label": "Search text (combine terms with AND/OR or &&/||)",
     "merge_search.query_placeholder": (
         "e.g. the developer's company name, or term1 AND term2 – leave empty for every file in the folder"
     ),

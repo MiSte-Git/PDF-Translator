@@ -83,6 +83,25 @@ def test_sort_by_name_ascending_then_descending(qapp, module_name, dialog_attr, 
 
 
 @pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_sort_by_name_sorts_ico_numbered_filenames_numerically(qapp, module_name, dialog_attr, tmp_path: Path) -> None:
+    # 02.09.2026 (Michael: "Die Dateinamen fangen hier aktuell alle mit
+    # Nummern an [...] Ich dachte das nach Namen sortieren Standardmässig
+    # immer erst die Nummern ausliest [...]") - a plain string sort put
+    # "176 ChinaAMC.pdf" AFTER "1747 ABSENCE.pdf" (see
+    # tests/test_natural_sort.py for the underlying key's own tests).
+    dialog = _make_dialog(module_name, dialog_attr, "SortNameIco")
+    try:
+        names = ["1747 ABSENCE.pdf", "176 ChinaAMC.pdf", "1750 ANEMNESIS.pdf"]
+        for path in _populate_with_distinct_mtimes(tmp_path, names):
+            dialog._append_row(path)
+
+        dialog._sort_by_name()
+        assert _row_names(dialog) == ["176 ChinaAMC.pdf", "1747 ABSENCE.pdf", "1750 ANEMNESIS.pdf"]
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
 def test_sort_by_name_is_case_insensitive(qapp, module_name, dialog_attr, tmp_path: Path) -> None:
     dialog = _make_dialog(module_name, dialog_attr, "SortNameCase")
     try:

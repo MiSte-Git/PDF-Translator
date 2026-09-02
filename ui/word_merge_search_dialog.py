@@ -70,6 +70,7 @@ from ui.merge_search_dialog import (
     _mtime_or_zero,
     _optional_date,
 )
+from ui.natural_sort import natural_sort_key
 from ui.search_scopes import (
     DATE_REGION_FOOTER,
     DATE_REGION_HEADER,
@@ -135,6 +136,9 @@ class WordMergeSearchDialog(QDialog):
 
         self.query_label = QLabel()
         self.query_edit = QLineEdit()
+        # 02.09.2026 - see MergeSearchDialog's identical block (this dialog
+        # duplicates that one's query field restore/persist).
+        self.query_edit.setText(str(self.settings.value("word_merge_search_last_query", "", type=str)))
 
         self.search_button = QPushButton()
         self.search_button.clicked.connect(self._start_search)
@@ -247,6 +251,9 @@ class WordMergeSearchDialog(QDialog):
         if text:
             self.settings.setValue("word_merge_search_drive_folder_link", text)
         self.settings.setValue("word_merge_search_recursive", self.recursive_checkbox.isChecked())
+        # 02.09.2026 - see MergeSearchDialog.done()'s identical comment
+        # (this dialog duplicates that one's query field restore/persist).
+        self.settings.setValue("word_merge_search_last_query", self.query_edit.text())
         # 02.09.2026 - see MergeSearchDialog.done()'s identical comment
         # (this dialog duplicates that one's detach-results feature).
         if self._detached_results_window is not None:
@@ -793,8 +800,10 @@ class WordMergeSearchDialog(QDialog):
             self.results.addItem(item)
 
     def _sort_results_by_name(self) -> None:
+        # See MergeSearchDialog._sort_results_by_name()'s identical
+        # comment (this dialog duplicates that one's sort buttons).
         ascending = self._results_name_sort_ascending
-        self._sort_results(lambda path: path.name.lower(), ascending)
+        self._sort_results(lambda path: natural_sort_key(path.name), ascending)
         self._results_name_sort_ascending = not ascending
         self._update_results_sort_button_labels()
 
@@ -817,7 +826,11 @@ class WordMergeSearchDialog(QDialog):
 
     def _detach_results(self) -> None:
         self.results_stack.setCurrentWidget(self.results_placeholder_label)
-        window = _DetachedResultsWindow(self._on_detached_results_closed)
+        # See MergeSearchDialog._detach_results()'s identical comment
+        # (this dialog duplicates that one's detach-results feature) -
+        # `self` as parent is required for the window to actually show up
+        # while this application-modal dialog's exec() loop is running.
+        window = _DetachedResultsWindow(self, self._on_detached_results_closed)
         window.setWindowTitle(
             f"{self.windowTitle()} – {self.language.text('merge_search.detached_results_title_suffix')}"
         )
@@ -827,6 +840,8 @@ class WordMergeSearchDialog(QDialog):
         self._detached_results_window = window
         self.detach_results_button.setText(self.language.text("merge_search.reattach_results_button"))
         window.show()
+        window.raise_()
+        window.activateWindow()
 
     def _on_detached_results_closed(self) -> None:
         if self._detached_results_window is None:

@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.i18n import LanguageManager
+from ui.natural_sort import natural_sort_key
 from ui.word_merge_job import WordMergeJobResult, validate_merge_word_sources
 from ui.word_merge_search_dialog import WordMergeSearchDialog
 from ui.workers import WordMergeWorker
@@ -265,8 +266,10 @@ class WordMergeDialog(QDialog):
         self.table.clearSelection()
 
     def _sort_by_name(self) -> None:
+        # 02.09.2026 (Michael: ICO-numbered filenames need numeric-aware
+        # sorting, not a plain string sort) - see ui/natural_sort.py.
         ascending = self._name_sort_ascending
-        self._sort_rows(lambda path: path.name.lower(), ascending)
+        self._sort_rows(lambda path: natural_sort_key(path.name), ascending)
         self._name_sort_ascending = not ascending
         self._update_sort_button_labels()
 

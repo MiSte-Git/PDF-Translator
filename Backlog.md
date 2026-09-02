@@ -8979,3 +8979,86 @@ deaktiviert beide Knöpfe weiterhin korrekt, Beschriftungen überstehen
 einen Sprachwechsel). i18n: 1 neuer Schlüssel (`merge_box.group`, DE/EN,
 Parität geprüft, 371/371 Keys). Komplette Testsuite (686 Tests) läuft
 grün.
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung 17) - Zwei Bugs aus Fortsetzung 15 gefixt + Suchfeld-Feinschliff
+
+Michael, direkt nach dem Test der in Fortsetzung 15 gebauten Features:
+"Das Fenster erscheint nicht wenn ich auf 'Ergebnisliste in eigenem
+Fenster öffnen' anklicke. Die Liste verschwindet aber es geht keine neues
+Fenster auf. Wenn ich wieder auf 'Andocken' klicke ist es wieder da. Das
+sortieren nach Namen scheint nicht so zu funktionieren wie ich es
+erwarte. Die Dateinamen fangen hier aktuell alle mit Nummern an, dann ein
+Leerzeichen und dann Text. Ich dachte das nach Namen sortieren
+Standardmässig immer erst die Nummern ausliest, wenn das nicht der Fall
+ist kommt da eine falsche Sortierung für die ICOs für mich zustande."
+
+**Bug 1 - Fenster erscheint nicht:** `_DetachedResultsWindow` wurde mit
+`parent=None` erzeugt (`ui/merge_search_dialog.py`). Der Such-Dialog
+selbst läuft aber als `.exec()`-modaler Dialog (application-modal), meist
+sogar zweifach verschachtelt (`MergeDialog`/`WordMergeDialog` selbst
+werden ebenfalls per `.exec()` aus `MainWindow` geöffnet). Qt zeigt
+während eines application-modalen `exec()` grundsätzlich nur Fenster an,
+die Nachfahren des gerade aktiven modalen Widgets sind - ein Fenster mit
+`parent=None` gehört nicht dazu und wird schlicht nie sichtbar. Fix:
+`parent=self` (der Such-Dialog selbst, weiterhin ein echtes Top-Level-
+Fenster dank `Qt.Window`-Flag) statt `None`, plus `raise_()`/
+`activateWindow()` nach dem `show()`. Gilt für beide Such-Dialoge
+(`MergeSearchDialog` und `WordMergeSearchDialog`, letzterer importiert
+`_DetachedResultsWindow` von ersterem).
+
+Wichtig für die Tests: `QT_QPA_PLATFORM=offscreen` bildet dieses
+Blockier-Verhalten NICHT nach (von Hand geprüft: sowohl `parent=None` als
+auch `parent=dialog` melden unter offscreen `isVisible() is True`) - Qt
+setzt die eigentliche Blockade größtenteils über native
+Plattform-Mechanismen um (z. B. `EnableWindow()` unter Windows für alle
+Nicht-Nachfahren-Fenster). Der automatisierte Test prüft deshalb
+`window.parent() is dialog` (die eigentliche Korrektur, zuverlässig
+prüfbar) statt Sichtbarkeit.
+
+**Bug 2 - Sortierung nach Name ignoriert ICO-Nummern:** Alle vier
+"Nach Name sortieren"-Knöpfe der App (`ui/merge_dialog.py`,
+`ui/word_merge_dialog.py` aus Fortsetzung 12, sowie
+`ui/merge_search_dialog.py`/`ui/word_merge_search_dialog.py` aus
+Fortsetzung 15) sortierten per `path.name.lower()` - eine reine
+String-Sortierung, die "176 ChinaAMC.pdf" NACH "1747 ABSENCE.pdf"
+einordnet (dritte Stelle '6' > '4'), obwohl 176 < 1747. Neues gemeinsames
+Modul `ui/natural_sort.py` mit `natural_sort_key()`: zerlegt einen
+Dateinamen per Regex in abwechselnde Text-/Zahl-Abschnitte
+(`re.split(r"(\d+)", name)`) und wandelt jeden Zahl-Abschnitt in `int` um,
+sodass Zahlen numerisch statt zeichenweise verglichen werden - genau wie
+Windows Explorer/macOS Finder ihre eigene Dateinamen-Sortierung
+handhaben. Als eigenständiges Modul (nicht in `ui/merge_search_dialog.py`
+untergebracht), weil es von VIER Dateien aus zwei unabhängigen
+Dialog-Familien gebraucht wird und ein Import von einem "Unter-Dialog" in
+seinen eigenen "Eltern-Dialog" (`merge_search_dialog.py` -> `merge_dialog.py`)
+die Modulabhängigkeit verkehrt herum gelesen hätte. Alle vier
+Sortier-Knöpfe wurden umgestellt, nicht nur der, den Michael gerade
+bemerkt hat.
+
+**Zusätzlich, aus derselben Rückmeldungsrunde (Michael, kurz danach):**
+"Es sollte noch die letzten Suchbegriffe im Suchfeld angezeigt werden.
+Ausserdem wird in der Überschrift über dem Suchfeld nicht die Operatoren
+mit angezeigt. Die Aussage 'leer = alle Dateien' ist eher verwirrend und
+sollte dort raus." Drei kleine Änderungen an `query_edit`/`query_label`
+in beiden Such-Dialogen:
+- Der zuletzt eingegebene Suchtext wird jetzt wie der letzte Ordner/die
+  Rekursiv-Checkbox in `QSettings` gespeichert (`merge_search_last_query`
+  / `word_merge_search_last_query`, geschrieben in `done()`) und beim
+  nächsten Öffnen des Dialogs wieder ins Feld eingesetzt.
+- Die Überschrift über dem Suchfeld (`merge_search.query_label`) nennt
+  jetzt auch die `&&`/`||`-Symbole, nicht nur UND/ODER.
+- "leer = alle Dateien" wurde aus dieser Überschrift entfernt (der
+  Platzhaltertext direkt IM leeren Feld - `query_placeholder` - erklärt
+  das bereits unaufdringlicher, bleibt unverändert).
+
+Neue/erweiterte Tests: `tests/test_natural_sort.py` (neu, 6 Fälle für
+`natural_sort_key()` direkt, u. a. genau Michaels ICO-Beispiel).
+`tests/test_ui_merge_sort.py` und `tests/test_ui_search_results_sort_and_detach.py`
+je um einen ICO-Nummern-Sortierfall erweitert (parametrisiert über beide
+Dialoge der jeweiligen Familie). `test_ui_search_results_sort_and_detach.py`
+zusätzlich um `test_detached_window_is_parented_to_the_dialog_not_none`
+(Regressionsschutz für Bug 1), `test_last_query_text_is_restored_on_the_next_open`
+und `test_query_label_mentions_symbol_operators_and_drops_the_confusing_empty_hint`
+erweitert. i18n: keine neuen Schlüssel, nur zwei bestehende Werte
+geändert (`merge_search.query_label`, DE/EN, Parität geprüft, weiterhin
+371/371 Keys). Komplette Testsuite (703 Tests) läuft grün.

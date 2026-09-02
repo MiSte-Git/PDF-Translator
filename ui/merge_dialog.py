@@ -50,6 +50,7 @@ from pipeline.pdf.pymupdf_engine import MergeSourceSpec
 from ui.i18n import LanguageManager
 from ui.merge_job import MergeJobResult, validate_merge_sources
 from ui.merge_search_dialog import MergeSearchDialog
+from ui.natural_sort import natural_sort_key
 from ui.workers import MergeWorker
 
 _PATH_ROLE = Qt.UserRole  # QTableWidgetItem.setData/.data role for the file column's full Path
@@ -289,8 +290,10 @@ class MergeDialog(QDialog):
         self.table.clearSelection()
 
     def _sort_by_name(self) -> None:
+        # 02.09.2026 (Michael: ICO-numbered filenames need numeric-aware
+        # sorting, not a plain string sort) - see ui/natural_sort.py.
         ascending = self._name_sort_ascending
-        self._sort_rows(lambda path: path.name.lower(), ascending)
+        self._sort_rows(lambda path: natural_sort_key(path.name), ascending)
         self._name_sort_ascending = not ascending
         self._update_sort_button_labels()
 

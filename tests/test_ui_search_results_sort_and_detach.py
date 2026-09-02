@@ -21,6 +21,19 @@ ui/word_merge_search_dialog.py), all from the same round of feedback:
 Follows the established `_DIALOGS`-parametrized-across-both-dialogs shape
 (see tests/test_ui_date_filter.py) since every one of these is duplicated
 identically into both dialogs.
+
+02.09.2026 addendum (Michael, second round: "Das Fenster erscheint nicht
+[...] es geht keine neues Fenster auf.") - _DetachedResultsWindow's
+`parent` was the root cause (was `None`, must be the owning dialog - see
+that class's docstring in ui/merge_search_dialog.py). Confirmed by hand
+under QT_QPA_PLATFORM=offscreen that this specific on-screen symptom does
+NOT reproduce as a difference in `isVisible()` here - Qt's real modal-
+window blocking is largely native-platform behavior (e.g. Windows'
+EnableWindow() on sibling top-levels), which the offscreen QPA plugin
+doesn't simulate; both a `parent=None` and a `parent=dialog` window report
+`isVisible() is True` under offscreen. So `parent() is dialog` (the actual
+fix) is what's asserted below, not visibility - that's the one invariant
+that's both correct and reliably testable outside a real display.
 """
 from __future__ import annotations
 
@@ -121,6 +134,25 @@ def test_sort_by_name_orders_alphabetically_and_toggles_direction(qapp, module_n
 
 
 @pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_sort_by_name_sorts_ico_numbered_filenames_numerically(qapp, module_name, dialog_attr) -> None:
+    # 02.09.2026 (Michael: "Die Dateinamen fangen hier aktuell alle mit
+    # Nummern an [...] Ich dachte das nach Namen sortieren Standardmässig
+    # immer erst die Nummern ausliest [...]") - see tests/test_natural_sort.py
+    # for the underlying key's own tests, and MergeDialog's identical case
+    # in tests/test_ui_merge_sort.py.
+    dialog = _make_dialog(module_name, dialog_attr, "SortByNameIco")
+    try:
+        for name in ("1747 ABSENCE.pdf", "176 ChinaAMC.pdf", "1750 ANEMNESIS.pdf"):
+            _add_result(dialog, Path(f"/tmp/{name}"))
+
+        dialog._sort_results_by_name()
+        names = [dialog.results.item(i).data(Qt.UserRole).name for i in range(dialog.results.count())]
+        assert names == ["176 ChinaAMC.pdf", "1747 ABSENCE.pdf", "1750 ANEMNESIS.pdf"]
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
 def test_sort_by_date_uses_file_mtime_and_toggles_direction(qapp, module_name, dialog_attr, tmp_path) -> None:
     dialog = _make_dialog(module_name, dialog_attr, "SortByDate")
     try:
@@ -182,6 +214,31 @@ def test_detach_shows_placeholder_and_moves_the_list_into_its_own_window(qapp, m
         assert dialog.results.parent() is dialog._detached_results_window
         assert dialog.detach_results_button.text() == dialog.language.text("merge_search.reattach_results_button")
         assert dialog.results.count() == 1  # the list itself, and its content, are untouched
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_detached_window_is_parented_to_the_dialog_not_none(qapp, module_name, dialog_attr) -> None:
+    # 02.09.2026 (Michael: "Das Fenster erscheint nicht wenn ich auf
+    # 'Ergebnisliste in eigenem Fenster öffnen' anklicke. Die Liste
+    # verschwindet aber es geht keine neues Fenster auf.") - this dialog is
+    # normally opened via exec() (application-modal), and Qt never surfaces
+    # a top-level window that isn't a descendant of the active modal widget
+    # while that exec() loop is running. `parent=None` (the original bug)
+    # produced exactly that: a window that silently never appears. This is
+    # a regression guard for the fix (parent=self, see
+    # _DetachedResultsWindow's docstring) - QT_QPA_PLATFORM=offscreen
+    # doesn't reproduce the actual on-screen symptom (see this module's own
+    # docstring), so `parent()` is the one invariant that's both correct
+    # and reliably testable here.
+    dialog = _make_dialog(module_name, dialog_attr, "DetachParent")
+    try:
+        _add_result(dialog, Path("/tmp/a.pdf"))
+        dialog._toggle_detach_results()
+        window = dialog._detached_results_window
+        assert window.parent() is dialog
+        assert window.parent() is not None
     finally:
         dialog.close()
 
@@ -263,5 +320,52 @@ def test_source_stack_size_hint_tracks_the_current_page_not_the_largest(qapp, mo
         # symptom Michael reported (a huge gap around the short local
         # panel to match the tall Drive panel's height).
         assert drive_hint > local_hint
+    finally:
+        dialog.close()
+
+
+# --- query field: last-used text remembered, label wording (02.09.2026) ---
+# Michael, third round of feedback on this same search dialog: "Es sollte
+# noch die letzten Suchbegriffe im Suchfeld angezeigt werden. Ausserdem
+# wird in der Überschrift über dem Suchfeld nicht die Operatoren mit
+# angezeigt. Die Aussage 'leer = alle Dateien' ist eher verwirrend und
+# sollte dort raus."
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_last_query_text_is_restored_on_the_next_open(qapp, module_name, dialog_attr) -> None:
+    settings = QSettings("PDF-Translator-Test", f"{dialog_attr}LastQuery")
+    dialog_module = importlib.import_module(module_name)
+    DialogClass = getattr(dialog_module, dialog_attr)
+    from ui.i18n import LanguageManager
+
+    first = DialogClass(LanguageManager("de"), settings)
+    try:
+        assert first.query_edit.text() == ""  # nothing remembered yet
+        first.query_edit.setText("Acme UND Vertrag")
+        first.done(0)  # QDialog.reject()/accept() both route through done()
+    finally:
+        first.close()
+
+    second = DialogClass(LanguageManager("de"), settings)
+    try:
+        assert second.query_edit.text() == "Acme UND Vertrag"
+    finally:
+        second.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_query_label_mentions_symbol_operators_and_drops_the_confusing_empty_hint(
+    qapp, module_name, dialog_attr
+) -> None:
+    dialog = _make_dialog(module_name, dialog_attr, "QueryLabelWording")
+    try:
+        label_text = dialog.query_label.text()
+        assert "&&" in label_text and "||" in label_text
+        # "leer = alle Dateien" / "empty = every file" - Michael: confusing,
+        # remove from the label above the field (the placeholder text
+        # inside the empty field itself still explains this, unchanged).
+        assert "leer" not in label_text.lower()
+        assert "empty" not in label_text.lower()
     finally:
         dialog.close()

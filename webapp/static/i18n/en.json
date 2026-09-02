@@ -271,7 +271,7 @@
   "merge_search.failed_title": "Search failed",
   "merge_search.folder_label": "Folder",
   "merge_search.folder_placeholder": "Choose a folder …",
-  "merge_search.query_label": "Search text (empty = every file; combine terms with AND/OR)",
+  "merge_search.query_label": "Search text (combine terms with AND/OR or &&/||)",
   "merge_search.query_placeholder": "e.g. the developer's company name, or term1 AND term2 – leave empty for every file in the folder",
   "merge_search.query_tooltip": "Combine multiple search terms with AND and OR - even mixed. Use parentheses to group what belongs together.\n\nExample: “Acme AND contract” only finds files containing BOTH terms.\n“Acme OR Zenith” finds files containing AT LEAST ONE of the two terms.\n\nMixed with parentheses: “StellarRussia OR (The AND Korolev AND Directive)” finds files containing “StellarRussia” OR files containing ALL THREE of “The”, “Korolev” and “Directive”.\n\nThe symbols && and || also work instead of AND/OR (equivalent, even mixed with the words): “Acme && contract” is the same as “Acme AND contract”.\n\nWithout AND/OR, the whole text is treated as a single search term (as before). Not case-sensitive.",
   "merge_search.reattach_results_button": "Dock results back",

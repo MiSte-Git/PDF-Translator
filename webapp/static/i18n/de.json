@@ -271,7 +271,7 @@
   "merge_search.failed_title": "Suche fehlgeschlagen",
   "merge_search.folder_label": "Ordner",
   "merge_search.folder_placeholder": "Ordner wählen …",
-  "merge_search.query_label": "Suchtext (leer = alle Dateien; UND/ODER zum Verknüpfen mehrerer Begriffe)",
+  "merge_search.query_label": "Suchtext (UND/ODER bzw. &&/|| zum Verknüpfen mehrerer Begriffe)",
   "merge_search.query_placeholder": "z. B. Firmenname des Developers, oder Begriff1 UND Begriff2 – leer lassen für alle Dateien im Ordner",
   "merge_search.query_tooltip": "Mehrere Suchbegriffe lassen sich mit UND und ODER verknüpfen - auch gemischt. Mit Klammern legst du fest, was zusammengehört.\n\nBeispiel: „Acme UND Vertrag“ findet nur Dateien, die BEIDE Begriffe enthalten.\n„Acme ODER Zenith“ findet Dateien mit MINDESTENS EINEM der beiden Begriffe.\n\nGemischt mit Klammern: „StellarRussia ODER (The UND Korolev UND Directive)“ findet Dateien mit „StellarRussia“ ODER Dateien, die ALLE DREI Begriffe „The“, „Korolev“ und „Directive“ enthalten.\n\nStatt UND/ODER lassen sich auch die Zeichen && und || verwenden (gleichbedeutend, auch gemischt mit den Wörtern): „Acme && Vertrag“ ist dasselbe wie „Acme UND Vertrag“.\n\nOhne UND/ODER wird der gesamte Text als ein einzelner Suchbegriff behandelt (wie bisher). Groß-/Kleinschreibung spielt keine Rolle.",
   "merge_search.reattach_results_button": "Ergebnisliste andocken",
