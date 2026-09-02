@@ -8111,3 +8111,49 @@ tatsächlich nie zurück (mit `timeout 8` erzwungen beendet, Exit-Code
   (prüft, dass ein endlicher Wert statt `None` übergeben wird und
   `WSGITimeoutError` sauber in `DriveAuthError` übersetzt wird). Alle
   476 Tests des gesamten Projekts weiterhin grün (1 Skip, unverändert).
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung 2) - "invalid_client"-Fehler bei Google eingegrenzt + echten Speicher-Bug gefunden ("Anmeldedaten werden nicht wirklich gespeichert")
+
+Michael bekam beim eigentlichen Google-Anmeldebildschirm (nicht mehr in
+unserer App) "Fehler 401: invalid_client - Client missing a project id."
+Eingrenzung: dieser Fehler entsteht serverseitig bei Google direkt beim
+Autorisierungsaufruf, bevor unser Code überhaupt beteiligt ist - unsere
+Projekt-ID (siehe voriger Eintrag) wird dabei technisch gar nicht
+mitgeschickt (`google_auth_oauthlib.helpers.session_from_client_config()`
+nutzt nur `client_id`/`client_secret`/`auth_uri`/`token_uri`/
+`redirect_uris`, `project_id` wird für den Autorisierungsaufruf selbst
+ignoriert). Ursache war bei Michael ein API-Schlüssel anstelle der
+tatsächlichen OAuth-Client-ID im entsprechenden Feld - kein Bug in
+diesem Projekt, sondern falscher Zugangsdaten-Typ, siehe
+docs/google_drive_setup.md Abschnitt 4 ("OAuth 2.0-Client-IDs", nicht
+"API-Schlüssel").
+
+Dabei aber ein echter, vorbestehender Bug gefunden: Michael berichtete
+zusätzlich "Es scheint auch so das die Anmeldedaten nicht wirklich
+gespeichert werden." `_save_drive_credentials()` in
+`ui/merge_search_dialog.py` UND `ui/word_merge_search_dialog.py` rief
+`pipeline.drive_auth.save_client_credentials()` bisher OHNE try/except
+auf - anders als `SettingsDialog._save_key()` (ui/app.py) für die
+Übersetzungs-Provider-Schlüssel, die denselben Aufruf korrekt absichert
+und Fehler per `QMessageBox.critical` anzeigt. Schlägt der OS-Schlüssel-
+bund fehl (kein laufender Secret-Service/D-Bus - der mit Abstand
+häufigste reale Fall auf Linux ohne volle Desktop-Umgebung, siehe
+`pipeline/credentials.py::set_api_key()`s `RuntimeError`), verschwand
+der Fehler bisher einfach im Nichts: kein Erfolgs-, kein Fehlerdialog,
+scheinbar passierte gar nichts - exakt das gemeldete Symptom.
+
+**Fix:** beide `_save_drive_credentials()`-Methoden fangen den Aufruf
+jetzt ab und zeigen bei Fehlschlag `QMessageBox.critical` mit der
+konkreten Fehlermeldung (neuer i18n-Schlüssel
+`merge_search.drive_save_failed`, DE/EN, 336/336 Parität,
+`webapp/static/i18n/{de,en}.json` neu generiert) - Felder bleiben dabei
+bewusst gefüllt (anders als beim Erfolg), damit nichts neu eingetippt
+werden muss. Neue Testdatei `tests/test_ui_drive_credentials_save.py`
+(4 Tests, parametrisiert über beide Dialoge: Fehlerfall zeigt Meldung
+und behält die Eingaben, Erfolgsfall funktioniert weiterhin
+unverändert). Alle 480 Tests des gesamten Projekts grün (1 Skip,
+unverändert).
+
+**Noch offen:** ob bei Michael tatsächlich der OS-Schlüsselbund die
+Ursache war, zeigt sich erst beim nächsten Speicherversuch mit diesem
+Fix - die neue Fehlermeldung sagt jetzt konkret, woran es liegt.

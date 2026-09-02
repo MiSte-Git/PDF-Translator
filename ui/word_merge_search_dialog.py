@@ -328,7 +328,20 @@ class WordMergeSearchDialog(QDialog):
         if not client_id or not client_secret or not project_id:
             QMessageBox.warning(self, self.windowTitle(), self.language.text("merge_search.drive_not_configured"))
             return
-        drive_auth.save_client_credentials(client_id, client_secret, project_id)
+        try:
+            drive_auth.save_client_credentials(client_id, client_secret, project_id)
+        except Exception as exc:
+            # 02.09.2026 - see MergeSearchDialog._save_drive_credentials()'s
+            # identical comment (this dialog duplicates that one's Drive
+            # panel code): an unguarded save() call here used to fail
+            # silently on a keyring error, which is exactly what got
+            # reported as "credentials don't actually get saved". Fields
+            # are deliberately left filled in so the user can retry without
+            # retyping.
+            QMessageBox.critical(
+                self, self.windowTitle(), self.language.text("merge_search.drive_save_failed", error=str(exc))
+            )
+            return
         self.drive_client_id_edit.clear()
         self.drive_client_secret_edit.clear()
         self.drive_project_id_edit.clear()

@@ -239,6 +239,7 @@
   "merge_search.drive_project_id_placeholder": "Projekt-ID",
   "merge_search.drive_resolve_button": "Prüfen",
   "merge_search.drive_save_credentials": "Zugangsdaten speichern",
+  "merge_search.drive_save_failed": "Speichern fehlgeschlagen: {error}",
   "merge_search.error_missing_folder": "Bitte zuerst einen Ordner wählen.",
   "merge_search.failed_title": "Suche fehlgeschlagen",
   "merge_search.folder_label": "Ordner",

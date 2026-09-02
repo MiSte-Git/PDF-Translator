@@ -357,7 +357,25 @@ class MergeSearchDialog(QDialog):
         if not client_id or not client_secret or not project_id:
             QMessageBox.warning(self, self.windowTitle(), self.language.text("merge_search.drive_not_configured"))
             return
-        drive_auth.save_client_credentials(client_id, client_secret, project_id)
+        try:
+            drive_auth.save_client_credentials(client_id, client_secret, project_id)
+        except Exception as exc:
+            # 02.09.2026 (Michael: "Es scheint auch so das die Anmeldedaten
+            # nicht wirklich gespeichert werden.") - this call used to be
+            # unguarded, unlike SettingsDialog._save_key()'s identical
+            # save-then-report pattern for the translation-provider API
+            # keys. Without a try/except, a keyring failure (no OS Secret
+            # Service running - the single most common real-world cause,
+            # see pipeline/credentials.py::set_api_key()) raised silently
+            # out of this Qt slot: no error dialog, no success dialog,
+            # nothing visibly happened, which is exactly what got reported.
+            # The fields are deliberately NOT cleared here (unlike the
+            # success path below) so the user doesn't have to retype
+            # everything after a failed save.
+            QMessageBox.critical(
+                self, self.windowTitle(), self.language.text("merge_search.drive_save_failed", error=str(exc))
+            )
+            return
         self.drive_client_id_edit.clear()
         self.drive_client_secret_edit.clear()
         self.drive_project_id_edit.clear()

@@ -239,6 +239,7 @@
   "merge_search.drive_project_id_placeholder": "Project ID",
   "merge_search.drive_resolve_button": "Check",
   "merge_search.drive_save_credentials": "Save credentials",
+  "merge_search.drive_save_failed": "Save failed: {error}",
   "merge_search.error_missing_folder": "Please choose a folder first.",
   "merge_search.failed_title": "Search failed",
   "merge_search.folder_label": "Folder",
