@@ -91,10 +91,29 @@ class MergeDialog(QDialog):
         self.move_down_button = QPushButton()
         self.move_down_button.clicked.connect(lambda: self._move_selected(1))
 
+        # 02.09.2026 (Michael: "Was mir sonst noch fehlt ist eine
+        # Sortierung wenn wir die PDFs zusammenführen wollen. Per
+        # Dateiname, per Datum, auf und absteigend.") - two buttons next
+        # to move_up/move_down rather than a dropdown or clickable column
+        # header (confirmed via AskUserQuestion, 02.09.2026): each button
+        # sorts the WHOLE table by its own key and toggles its own next
+        # direction on every click (the button's label always shows which
+        # direction the NEXT click will apply, via _sort_button_label()) -
+        # independent of the other button and of any manual move_up/
+        # move_down reordering done in between, so there's no separate
+        # "currently sorted by X" state to keep in sync.
+        self._name_sort_ascending = True
+        self._date_sort_ascending = True
+        self.sort_by_name_button = QPushButton()
+        self.sort_by_name_button.clicked.connect(self._sort_by_name)
+        self.sort_by_date_button = QPushButton()
+        self.sort_by_date_button.clicked.connect(self._sort_by_date)
+
         row_buttons = QHBoxLayout()
         for button in (
             self.add_button, self.search_button, self.remove_button,
             self.move_up_button, self.move_down_button,
+            self.sort_by_name_button, self.sort_by_date_button,
         ):
             row_buttons.addWidget(button)
         row_buttons.addStretch(1)
@@ -162,6 +181,8 @@ class MergeDialog(QDialog):
         self.remove_button.setText(t("merge.remove_selected"))
         self.move_up_button.setText(t("merge.move_up"))
         self.move_down_button.setText(t("merge.move_down"))
+        self.sort_by_date_button.setToolTip(t("merge.sort_by_date_tooltip"))
+        self._update_sort_button_labels()
         self.output_label.setText(t("merge.output_file_label"))
         self.output_edit.setPlaceholderText(t("merge.output_placeholder"))
         self.choose_output_button.setText(t("merge.choose_output_file"))
@@ -245,6 +266,50 @@ class MergeDialog(QDialog):
             sources.append(MergeSourceSpec(path, pages))
         return sources
 
+    # --- sorting (02.09.2026) -----------------------------------------
+
+    def _sort_button_label(self, base_key: str, ascending_next: bool) -> str:
+        # Arrow shows the direction the NEXT click will apply - see the
+        # constructor comment above sort_by_name_button/sort_by_date_button.
+        arrow = "▲" if ascending_next else "▼"
+        return f"{self.language.text(base_key)} {arrow}"
+
+    def _update_sort_button_labels(self) -> None:
+        self.sort_by_name_button.setText(self._sort_button_label("merge.sort_by_name", self._name_sort_ascending))
+        self.sort_by_date_button.setText(self._sort_button_label("merge.sort_by_date", self._date_sort_ascending))
+
+    def _sort_rows(self, key, ascending: bool) -> None:
+        rows = [
+            (self.table.item(row, 0).data(_PATH_ROLE), self.table.cellWidget(row, 1).text())
+            for row in range(self.table.rowCount())
+        ]
+        rows.sort(key=lambda entry: key(entry[0]), reverse=not ascending)
+        for row, (path, pages) in enumerate(rows):
+            self._set_row(row, path, pages)
+        self.table.clearSelection()
+
+    def _sort_by_name(self) -> None:
+        ascending = self._name_sort_ascending
+        self._sort_rows(lambda path: path.name.lower(), ascending)
+        self._name_sort_ascending = not ascending
+        self._update_sort_button_labels()
+
+    @staticmethod
+    def _mtime(path: Path) -> float:
+        # A file removed from disk between being added to the table and
+        # clicking "sortieren" is an edge case, not an error this button
+        # should crash on - sorts as if it were the oldest file.
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _sort_by_date(self) -> None:
+        ascending = self._date_sort_ascending
+        self._sort_rows(self._mtime, ascending)
+        self._date_sort_ascending = not ascending
+        self._update_sort_button_labels()
+
     # --- output file -------------------------------------------------------
 
     def _choose_output(self) -> None:
@@ -273,6 +338,8 @@ class MergeDialog(QDialog):
         self.move_down_button.setEnabled(
             not running and 0 <= self.table.currentRow() < self.table.rowCount() - 1
         )
+        self.sort_by_name_button.setEnabled(not running and self.table.rowCount() > 1)
+        self.sort_by_date_button.setEnabled(not running and self.table.rowCount() > 1)
         self.add_button.setEnabled(not running)
         self.choose_output_button.setEnabled(not running)
         self.table.setEnabled(not running)

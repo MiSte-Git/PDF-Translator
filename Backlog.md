@@ -8655,3 +8655,51 @@ Neue Tests: `tests/test_search_query.py`, `tests/test_search_scopes.py`,
 `tests/test_ui_search_scope_checkboxes.py`. Komplette bestehende
 Testsuite (572 Tests) läuft weiterhin grün, inkl. aller bisherigen
 ICO-Kopfbereich-Tests unverändert.
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung 12) - Tooltip für UND/ODER-Suche, Sortier-Buttons (Name/Datum, auf-/absteigend) im Zusammenführen-Dialog
+
+Zwei kleine Nachbesserungen im direkten Anschluss an Fortsetzung 11.
+
+**Tooltip:** Michael fragte, ob es im Suchfeld einen Hinweis auf die neue
+UND/ODER-Verknüpfung gibt - Label/Platzhalter allein reichten ihm nicht
+("einen Tooltip mit etwas mehr Text und Beispiel wäre schon schön").
+Neuer i18n-Schlüssel `merge_search.query_tooltip` (DE/EN) mit
+ausführlicherer Erklärung plus einem durchgerechneten Beispiel ("Acme UND
+Vertrag" vs. "Acme ODER Zenith"), gesetzt auf `query_edit` UND
+`query_label` in beiden Such-Dialogen (Hover auf Feld oder Beschriftung
+zeigt denselben Text).
+
+**Sortierung im Zusammenführen-Dialog:** Michael: "Was mir sonst noch
+fehlt ist eine Sortierung wenn wir die PDFs zusammenführen wollen. Per
+Dateiname, per Datum, auf und absteigend. Oder haben wir das schon?" -
+recherchiert: es gab bisher nur manuelles Verschieben einzelner Zeilen
+(Nach-oben/Nach-unten-Buttons), keine automatische Sortierung. Per
+AskUserQuestion bestätigtes UI-Muster: zwei neue Buttons ("Nach Name
+sortieren"/"Nach Datum sortieren") direkt neben den bestehenden
+Verschieben-Buttons, statt Dropdown oder klickbarer Tabellenkopfzeile.
+Jeder Button sortiert die GESAMTE Tabelle nach seinem eigenen Kriterium
+und merkt sich unabhängig vom anderen Button seine eigene nächste
+Richtung - ein Pfeil im Button-Text (▲/▼) zeigt, was der NÄCHSTE Klick
+macht; kein zusätzlicher "aktuell sortiert nach X"-Zustand nötig, bleibt
+also auch nach manuellem Verschieben einzelner Zeilen dazwischen
+korrekt. "Datum" sortiert nach dem Änderungsdatum der Datei auf der
+Festplatte (`Path.stat().st_mtime`) - per Tooltip am Datum-Button
+klargestellt, dass das nicht das Erstellungsdatum ist. Buttons sind
+deaktiviert, solange weniger als zwei Dateien in der Liste stehen.
+
+Implementiert identisch (mit den bereits bestehenden Unterschieden - PDF
+hat eine "Seiten"-Spalte, Word nicht) in `ui/merge_dialog.py` und
+`ui/word_merge_dialog.py`; beim PDF-Dialog wandert die "Seiten"-Angabe
+beim Sortieren korrekt mit ihrer Datei mit (nicht an der Zeilennummer
+hängen bleibend - eigens dafür ein Regressionstest).
+
+Neue i18n-Schlüssel: `merge.sort_by_name`, `merge.sort_by_date`,
+`merge.sort_by_date_tooltip`, `merge_search.query_tooltip` (DE/EN,
+346 Schlüssel insgesamt, Parität geprüft).
+
+Neue Tests: `tests/test_ui_merge_sort.py` (11 Fälle, parametrisiert über
+beide Dialoge: aufsteigend/absteigend, Groß-/Kleinschreibung, Pfeil-
+Richtung pro Button unabhängig, Deaktivierung bei <2 Zeilen, Seiten-Feld
+wandert mit), `tests/test_ui_search_query_tooltip.py` (4 Fälle: Tooltip-
+Inhalt DE/EN, Feld und Label zeigen denselben Text). Komplette
+Testsuite (587 Tests) läuft grün.

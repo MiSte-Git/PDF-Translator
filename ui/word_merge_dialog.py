@@ -81,10 +81,21 @@ class WordMergeDialog(QDialog):
         self.move_down_button = QPushButton()
         self.move_down_button.clicked.connect(lambda: self._move_selected(1))
 
+        # 02.09.2026 - see MergeDialog's identical block (this dialog
+        # duplicates that one's source table/button row) for the full
+        # reasoning.
+        self._name_sort_ascending = True
+        self._date_sort_ascending = True
+        self.sort_by_name_button = QPushButton()
+        self.sort_by_name_button.clicked.connect(self._sort_by_name)
+        self.sort_by_date_button = QPushButton()
+        self.sort_by_date_button.clicked.connect(self._sort_by_date)
+
         row_buttons = QHBoxLayout()
         for button in (
             self.add_button, self.search_button, self.remove_button,
             self.move_up_button, self.move_down_button,
+            self.sort_by_name_button, self.sort_by_date_button,
         ):
             row_buttons.addWidget(button)
         row_buttons.addStretch(1)
@@ -161,6 +172,8 @@ class WordMergeDialog(QDialog):
         self.remove_button.setText(t("merge.remove_selected"))
         self.move_up_button.setText(t("merge.move_up"))
         self.move_down_button.setText(t("merge.move_down"))
+        self.sort_by_date_button.setToolTip(t("merge.sort_by_date_tooltip"))
+        self._update_sort_button_labels()
         self.output_label.setText(t("merge.output_file_label"))
         self.output_edit.setPlaceholderText(t("merge.output_placeholder"))
         self.choose_output_button.setText(t("merge.choose_output_file"))
@@ -232,6 +245,44 @@ class WordMergeDialog(QDialog):
     def _sources(self) -> list[Path]:
         return [self.table.item(row, 0).data(_PATH_ROLE) for row in range(self.table.rowCount())]
 
+    # --- sorting (02.09.2026) -----------------------------------------
+    # See MergeDialog's identical block for the full reasoning - only
+    # difference here is _set_row()'s signature (no "pages" column).
+
+    def _sort_button_label(self, base_key: str, ascending_next: bool) -> str:
+        arrow = "▲" if ascending_next else "▼"
+        return f"{self.language.text(base_key)} {arrow}"
+
+    def _update_sort_button_labels(self) -> None:
+        self.sort_by_name_button.setText(self._sort_button_label("merge.sort_by_name", self._name_sort_ascending))
+        self.sort_by_date_button.setText(self._sort_button_label("merge.sort_by_date", self._date_sort_ascending))
+
+    def _sort_rows(self, key, ascending: bool) -> None:
+        paths = [self.table.item(row, 0).data(_PATH_ROLE) for row in range(self.table.rowCount())]
+        paths.sort(key=key, reverse=not ascending)
+        for row, path in enumerate(paths):
+            self._set_row(row, path)
+        self.table.clearSelection()
+
+    def _sort_by_name(self) -> None:
+        ascending = self._name_sort_ascending
+        self._sort_rows(lambda path: path.name.lower(), ascending)
+        self._name_sort_ascending = not ascending
+        self._update_sort_button_labels()
+
+    @staticmethod
+    def _mtime(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _sort_by_date(self) -> None:
+        ascending = self._date_sort_ascending
+        self._sort_rows(self._mtime, ascending)
+        self._date_sort_ascending = not ascending
+        self._update_sort_button_labels()
+
     # --- output file -------------------------------------------------------
 
     def _choose_output(self) -> None:
@@ -260,6 +311,8 @@ class WordMergeDialog(QDialog):
         self.move_down_button.setEnabled(
             not running and 0 <= self.table.currentRow() < self.table.rowCount() - 1
         )
+        self.sort_by_name_button.setEnabled(not running and self.table.rowCount() > 1)
+        self.sort_by_date_button.setEnabled(not running and self.table.rowCount() > 1)
         self.add_button.setEnabled(not running)
         self.choose_output_button.setEnabled(not running)
         self.table.setEnabled(not running)

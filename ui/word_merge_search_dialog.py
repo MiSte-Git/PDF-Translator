@@ -300,6 +300,10 @@ class WordMergeSearchDialog(QDialog):
         # reused key below.
         self.query_label.setText(t("merge_search.query_label"))
         self.query_edit.setPlaceholderText(t("merge_search.query_placeholder"))
+        # 02.09.2026 - see MergeSearchDialog's identical comment (this
+        # dialog duplicates that one's query field).
+        self.query_edit.setToolTip(t("merge_search.query_tooltip"))
+        self.query_label.setToolTip(t("merge_search.query_tooltip"))
         self.search_button.setText(t("merge_search.search_button"))
         self.cancel_button.setText(t("merge_search.cancel_button"))
         self.select_all_button.setText(t("merge_search.select_all"))

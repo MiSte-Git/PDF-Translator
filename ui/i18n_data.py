@@ -347,6 +347,12 @@ DE = {
     "merge.remove_selected": "Entfernen",
     "merge.move_up": "Nach oben",
     "merge.move_down": "Nach unten",
+    "merge.sort_by_name": "Nach Name sortieren",
+    "merge.sort_by_date": "Nach Datum sortieren",
+    "merge.sort_by_date_tooltip": (
+        "Sortiert nach dem Änderungsdatum der Datei auf der Festplatte "
+        "(letzte Änderung, nicht das Erstellungsdatum)."
+    ),
     "merge.output_file_label": "Zieldatei",
     "merge.output_placeholder": "Zieldatei wählen …",
     "merge.choose_output_file": "Speichern unter …",
@@ -378,6 +384,16 @@ DE = {
     "merge_search.query_label": "Suchtext (leer = alle Dateien; UND/ODER zum Verknüpfen mehrerer Begriffe)",
     "merge_search.query_placeholder": (
         "z. B. Firmenname des Developers, oder Begriff1 UND Begriff2 – leer lassen für alle Dateien im Ordner"
+    ),
+    "merge_search.query_tooltip": (
+        "Mehrere Suchbegriffe lassen sich wahlweise mit UND oder ODER verknüpfen "
+        "(nicht gemischt in derselben Suche).\n\n"
+        "Beispiel: „Acme UND Vertrag“ findet nur Dateien, die BEIDE Begriffe "
+        "enthalten.\n"
+        "„Acme ODER Zenith“ findet Dateien mit MINDESTENS EINEM der beiden "
+        "Begriffe.\n\n"
+        "Ohne UND/ODER wird der gesamte Text als ein einzelner Suchbegriff "
+        "behandelt (wie bisher). Groß-/Kleinschreibung spielt keine Rolle."
     ),
     "merge_search.search_button": "Suchen",
     "merge_search.cancel_button": "Abbrechen",
@@ -861,6 +877,11 @@ EN = {
     "merge.remove_selected": "Remove",
     "merge.move_up": "Move up",
     "merge.move_down": "Move down",
+    "merge.sort_by_name": "Sort by name",
+    "merge.sort_by_date": "Sort by date",
+    "merge.sort_by_date_tooltip": (
+        "Sorts by the file's last-modified date on disk (not its creation date)."
+    ),
     "merge.output_file_label": "Output file",
     "merge.output_placeholder": "Choose an output file …",
     "merge.choose_output_file": "Save as …",
@@ -888,6 +909,16 @@ EN = {
     "merge_search.query_label": "Search text (empty = every file; combine terms with AND/OR)",
     "merge_search.query_placeholder": (
         "e.g. the developer's company name, or term1 AND term2 – leave empty for every file in the folder"
+    ),
+    "merge_search.query_tooltip": (
+        "Combine multiple search terms with either AND or OR "
+        "(not mixed within the same search).\n\n"
+        "Example: “Acme AND contract” only finds files containing BOTH "
+        "terms.\n"
+        "“Acme OR Zenith” finds files containing AT LEAST ONE of the two "
+        "terms.\n\n"
+        "Without AND/OR, the whole text is treated as a single search term "
+        "(as before). Not case-sensitive."
     ),
     "merge_search.search_button": "Search",
     "merge_search.cancel_button": "Cancel",

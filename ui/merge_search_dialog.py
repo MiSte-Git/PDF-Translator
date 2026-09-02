@@ -375,6 +375,12 @@ class MergeSearchDialog(QDialog):
         self.scope_full_text_checkbox.setText(t("merge_search.scope_full_text"))
         self.query_label.setText(t("merge_search.query_label"))
         self.query_edit.setPlaceholderText(t("merge_search.query_placeholder"))
+        # 02.09.2026 (Michael: "einen Tooltip mit etwas mehr Text und
+        # Beispiel wäre schon schön") - the label/placeholder text alone
+        # only hints at UND/ODER, no room there for a worked example. Set
+        # on both the field and its label so hovering either one shows it.
+        self.query_edit.setToolTip(t("merge_search.query_tooltip"))
+        self.query_label.setToolTip(t("merge_search.query_tooltip"))
         self.search_button.setText(t("merge_search.search_button"))
         self.cancel_button.setText(t("merge_search.cancel_button"))
         self.select_all_button.setText(t("merge_search.select_all"))
