@@ -49,6 +49,7 @@ from ui.drive_search import DriveSearchResult, extract_folder_id
 from ui.i18n import LanguageManager
 from ui.merge_search import IcoSearchResult
 from ui.merge_search_dialog import _DRIVE_CONNECTED_STYLE, _match_path
+from ui.search_scopes import DEFAULT_SCOPES, SCOPE_FULL_TEXT, SCOPE_HEADER, SCOPE_ICO_FORMAT
 from ui.workers import DriveConnectWorker, WordDriveSearchWorker, WordIcoSearchWorker
 
 _SNIPPET_PREVIEW_LENGTH = 120
@@ -79,9 +80,24 @@ class WordMergeSearchDialog(QDialog):
         self.source_stack.addWidget(self._build_local_panel())
         self.source_stack.addWidget(self._build_drive_panel())
 
-        # --- shared: recursive/query/search/progress/results -----------
+        # --- shared: recursive/scope/query/search/progress/results -----
         self.recursive_checkbox = QCheckBox()
         self.recursive_checkbox.setChecked(True)
+
+        # 02.09.2026 - see MergeSearchDialog's identical block (this
+        # dialog duplicates that one's search-scope checkboxes; see
+        # ui/search_scopes.py).
+        self.scope_ico_format_checkbox = QCheckBox()
+        self.scope_ico_format_checkbox.setChecked(SCOPE_ICO_FORMAT in DEFAULT_SCOPES)
+        self.scope_header_checkbox = QCheckBox()
+        self.scope_header_checkbox.setChecked(SCOPE_HEADER in DEFAULT_SCOPES)
+        self.scope_full_text_checkbox = QCheckBox()
+        self.scope_full_text_checkbox.setChecked(SCOPE_FULL_TEXT in DEFAULT_SCOPES)
+        scope_row = QHBoxLayout()
+        scope_row.addWidget(self.scope_ico_format_checkbox)
+        scope_row.addWidget(self.scope_header_checkbox)
+        scope_row.addWidget(self.scope_full_text_checkbox)
+        scope_row.addStretch(1)
 
         self.query_label = QLabel()
         self.query_edit = QLineEdit()
@@ -126,6 +142,7 @@ class WordMergeSearchDialog(QDialog):
         layout.addLayout(source_row)
         layout.addWidget(self.source_stack)
         layout.addWidget(self.recursive_checkbox)
+        layout.addLayout(scope_row)
         layout.addWidget(self.query_label)
         layout.addWidget(self.query_edit)
         layout.addLayout(search_row)
@@ -271,8 +288,18 @@ class WordMergeSearchDialog(QDialog):
         self.folder_edit.setPlaceholderText(t("merge_search.folder_placeholder"))
         self.choose_folder_button.setText(t("merge_search.choose_folder"))
         self.recursive_checkbox.setText(t("merge_search.recursive_checkbox"))
-        self.query_label.setText(t("word_merge_search.query_label"))
-        self.query_edit.setPlaceholderText(t("word_merge_search.query_placeholder"))
+        self.scope_ico_format_checkbox.setText(t("merge_search.scope_ico_format"))
+        self.scope_header_checkbox.setText(t("merge_search.scope_header"))
+        self.scope_full_text_checkbox.setText(t("merge_search.scope_full_text"))
+        # 02.09.2026: query_label/query_placeholder used to be
+        # word_merge_search.*-specific ("... am Dokumentanfang" vs. the
+        # PDF dialog's "... auf Seite 1") back when the search scope was a
+        # fixed part of the label text - now that scope is chosen via the
+        # checkboxes above (format-agnostic wording either way), both
+        # dialogs share the same merge_search.* key, like every other
+        # reused key below.
+        self.query_label.setText(t("merge_search.query_label"))
+        self.query_edit.setPlaceholderText(t("merge_search.query_placeholder"))
         self.search_button.setText(t("merge_search.search_button"))
         self.cancel_button.setText(t("merge_search.cancel_button"))
         self.select_all_button.setText(t("merge_search.select_all"))
@@ -454,6 +481,18 @@ class WordMergeSearchDialog(QDialog):
 
     # --- search --------------------------------------------------------
 
+    def _selected_scopes(self) -> set[str]:
+        """See MergeSearchDialog._selected_scopes() - identical reasoning
+        (this dialog duplicates that one's search-scope checkboxes)."""
+        scopes: set[str] = set()
+        if self.scope_ico_format_checkbox.isChecked():
+            scopes.add(SCOPE_ICO_FORMAT)
+        if self.scope_header_checkbox.isChecked():
+            scopes.add(SCOPE_HEADER)
+        if self.scope_full_text_checkbox.isChecked():
+            scopes.add(SCOPE_FULL_TEXT)
+        return scopes
+
     def _update_search_enabled(self) -> None:
         if self._worker is not None:
             return
@@ -468,6 +507,11 @@ class WordMergeSearchDialog(QDialog):
         self.take_selected_button.setEnabled(False)
         self.status_label.setText("")
 
+        scopes = self._selected_scopes()
+        if not scopes:
+            QMessageBox.warning(self, self.windowTitle(), self.language.text("merge_search.error_missing_scope"))
+            return
+
         if self._is_drive_source():
             if self._drive_folder_id is None:
                 QMessageBox.warning(self, self.windowTitle(), self.language.text("merge_search.drive_error_missing_folder"))
@@ -481,13 +525,13 @@ class WordMergeSearchDialog(QDialog):
                 QMessageBox.critical(self, self.language.text("merge_search.failed_title"), str(exc))
                 return
             self._worker = WordDriveSearchWorker(
-                client, self._drive_folder_id, self.query_edit.text(), self.recursive_checkbox.isChecked(), self._drive_cache_dir
+                client, self._drive_folder_id, self.query_edit.text(), self.recursive_checkbox.isChecked(), self._drive_cache_dir, scopes
             )
         else:
             if self._folder is None:
                 QMessageBox.warning(self, self.windowTitle(), self.language.text("merge_search.error_missing_folder"))
                 return
-            self._worker = WordIcoSearchWorker(self._folder, self.query_edit.text(), self.recursive_checkbox.isChecked())
+            self._worker = WordIcoSearchWorker(self._folder, self.query_edit.text(), self.recursive_checkbox.isChecked(), scopes)
 
         self.progress.setRange(0, 0)
         self.progress.setVisible(True)

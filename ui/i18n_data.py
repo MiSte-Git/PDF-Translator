@@ -371,9 +371,13 @@ DE = {
     "merge_search.choose_folder": "Ordner wählen …",
     "merge_search.choose_folder_dialog_title": "Ordner zum Durchsuchen wählen",
     "merge_search.recursive_checkbox": "Inkl. Unterordner",
-    "merge_search.query_label": "Suchtext (nur ICO-Kopfbereich auf Seite 1)",
+    "merge_search.scope_ico_format": "ICO Format (Kopfbereich Seite 1)",
+    "merge_search.scope_header": "Header (alle Seiten)",
+    "merge_search.scope_full_text": "Volltext",
+    "merge_search.error_missing_scope": "Bitte mindestens einen Suchbereich auswählen.",
+    "merge_search.query_label": "Suchtext (leer = alle Dateien; UND/ODER zum Verknüpfen mehrerer Begriffe)",
     "merge_search.query_placeholder": (
-        "z. B. Firmenname des Developers – leer lassen für alle PDFs im Ordner"
+        "z. B. Firmenname des Developers, oder Begriff1 UND Begriff2 – leer lassen für alle Dateien im Ordner"
     ),
     "merge_search.search_button": "Suchen",
     "merge_search.cancel_button": "Abbrechen",
@@ -459,10 +463,9 @@ DE = {
     # die Absätze vor dem Trennelement (siehe pipeline/word/docx_engine.py's
     # extract_docx_ico_header_text()).
     "word_merge_search.title": "DOCX-Dateien im Ordner suchen",
-    "word_merge_search.query_label": "Suchtext (nur ICO-Kopfbereich am Dokumentanfang)",
-    "word_merge_search.query_placeholder": (
-        "z. B. Firmenname des Developers – leer lassen für alle DOCX-Dateien im Ordner"
-    ),
+    # query_label/query_placeholder: seit 02.09.2026 kein eigener Schlüssel
+    # mehr - siehe merge_search.query_label/query_placeholder und
+    # ui/word_merge_search_dialog.py::retranslate()s Kommentar dort.
     "word_merge_search.status_done": "{matches} Treffer von {scanned} durchsuchten DOCX-Datei(en).",
     "word_merge_search.status_done_with_errors": (
         "{matches} Treffer von {scanned} durchsuchten DOCX-Datei(en) ({errors} nicht lesbar)."
@@ -878,9 +881,13 @@ EN = {
     "merge_search.choose_folder": "Choose folder …",
     "merge_search.choose_folder_dialog_title": "Choose a folder to search",
     "merge_search.recursive_checkbox": "Include subfolders",
-    "merge_search.query_label": "Search text (ICO header on page 1 only)",
+    "merge_search.scope_ico_format": "ICO format (page 1 header area)",
+    "merge_search.scope_header": "Header (all pages)",
+    "merge_search.scope_full_text": "Full text",
+    "merge_search.error_missing_scope": "Please select at least one search scope.",
+    "merge_search.query_label": "Search text (empty = every file; combine terms with AND/OR)",
     "merge_search.query_placeholder": (
-        "e.g. the developer's company name – leave empty for every PDF in the folder"
+        "e.g. the developer's company name, or term1 AND term2 – leave empty for every file in the folder"
     ),
     "merge_search.search_button": "Search",
     "merge_search.cancel_button": "Cancel",
@@ -950,10 +957,8 @@ EN = {
     "word_merge.warnings_title": "Skipped files:",
     "word_merge.error_dialog_choose_files": "Select DOCX files",
     "word_merge_search.title": "Search DOCX files in a folder",
-    "word_merge_search.query_label": "Search text (ICO header at the start of the document only)",
-    "word_merge_search.query_placeholder": (
-        "e.g. the developer's company name – leave empty for every DOCX file in the folder"
-    ),
+    # query_label/query_placeholder: no longer a separate key since
+    # 02.09.2026 - see merge_search.query_label/query_placeholder.
     "word_merge_search.status_done": "{matches} match(es) out of {scanned} DOCX file(s) searched.",
     "word_merge_search.status_done_with_errors": (
         "{matches} match(es) out of {scanned} DOCX file(s) searched ({errors} unreadable)."

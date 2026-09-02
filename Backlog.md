@@ -8575,3 +8575,83 @@ Status Aktiviert) und merkte an: "Das ist ganz schön kompliziert."
 diese Verwechslungsgefahr ergänzt, damit sie beim nächsten Mal (oder für
 andere Nutzer) nicht erneut auftritt. Reine Doku-Änderung, kein Code
 betroffen.
+
+## 02.09.2026 (Cowork-Sitzung, Fortsetzung 11) - Suchbereich in der Dokumentensuche jetzt frei kombinierbar (ICO Format/Header/Volltext), plus UND/ODER-Verknüpfung im Suchfeld
+
+Michael, direkt im Anschluss an den Abschluss der Google-Drive-Verbindung:
+"Wir haben ja nur 'Suchtext (nur ICO-Kopfbereich auf Seite 1)' als
+Suchbereich statisch zur Verfügung. Allerdings sollte das eine Option
+sein. Genauso wie die Option 'nur im Header'. Dann sollte es auch möglich
+sein im ganzen Text suchen zu können. Auch die Kombination, entweder alle
+Optionen, oder nur eine von Dreien und dann sollte im Suchfeld auch die
+Möglichkeit einer ODER und UND Verknüpfung der Suchbegriffe bestehen."
+
+Auf Rückfrage (zwei Runden AskUserQuestion plus, entscheidend, ein
+Screenshot des oberen Bereichs einer echten ICO-Seite 1) bestätigt:
+"Developer: StellarRussia" / "QSI ICO: AUREXIS" stehen im Kopfbereich
+oberhalb des bisherigen Metadaten-Blocks (der bei "Issuer Address"/
+"Asset Matrix" ansetzt) - eine Suche nach "Developer" fand bisher nichts,
+obwohl das Wort sichtbar auf Seite 1 stand. Root-Cause PDF: PyMuPDFs
+eigene Block-Segmentierung legt diesen optisch abgesetzten Kopfbereich in
+einen SEPARATEN, früheren `raw_block` - die bisherige Anker-Logik in
+`extract_ico_header_text()` (`pipeline/pdf/pymupdf_engine.py`) hat nur den
+EINEN Block mit dem Anker-Treffer durchsucht. Root-Cause DOCX: der
+Kopfbereich steht im echten Word-Header (`word/header2.xml`), den
+`extract_docx_ico_header_text()` (`pipeline/word/docx_engine.py`) bisher
+gar nicht einbezog (nur Body-Absätze vor der Trennlinie).
+
+**Neues Suchbereich-Modell** (drei unabhängig kombinierbare Checkboxen,
+Standard weiterhin nur "ICO Format" - wie vor diesem Feature):
+- **ICO Format**: Seite 1 only, Header UNION bisheriger Metadaten-Bereich,
+  jetzt inklusive Fix oben - für ICO-Dokumente, sonst kein Treffer.
+- **Header**: bei normalen (Nicht-ICO) Dokumenten der wiederkehrende
+  Header über ALLE Seiten (PDF: neue Kreuz-Seiten-Erkennung via
+  `detect_header_footer_zones()`, `pipeline/pdf/template.py` - teurer,
+  braucht jede Seite; DOCX: strukturell schon jede Seite, da Word-Header
+  ohnehin für den ganzen Abschnitt gilt - günstig, ein einziger
+  XML-Teil-Read).
+- **Volltext**: das ganze Dokument, bewusste Obermenge der beiden anderen.
+
+Neue Extraktions-Funktionen: `extract_pdf_header_text()`/
+`extract_pdf_full_text()` (PDF), `extract_docx_header_text()`/
+`extract_docx_full_text()` (DOCX) - `get_header_footer_paragraphs()` in
+`docx_engine.py` in `get_header_paragraphs()` (nur Header) + Footer-Teil
+zerlegt, ohne das öffentliche Verhalten von `get_header_footer_paragraphs()`
+selbst zu ändern (bestehende Aufrufer unangetastet).
+
+Kombination der Checkboxen: `ui/search_scopes.py` (neu) - Registry
+Scope-Name -> Extraktor-Funktion je Format, `combined_extractor()` baut
+aus den angehakten Scopes einen einzigen Extraktor (Texte werden
+verkettet), den `find_matching()`/`find_drive_matching()`
+(`ui/merge_search.py`/`ui/drive_search.py`) unverändert wie bisher als
+einzelnen `extractor`-Callable entgegennehmen - beide Funktionen selbst
+bleiben komplett scope-agnostisch. `find_pdfs_matching()`/
+`find_docx_files_matching()`/`find_drive_pdfs_matching()`/
+`find_drive_docx_matching()` haben einen neuen optionalen `scopes`-
+Parameter bekommen (Default `None` = unverändertes Alt-Verhalten, jeder
+bestehende Aufrufer/Test bleibt unangetastet).
+
+UND/ODER-Verknüpfung: `pipeline/search_query.py` (neu) -
+`matches_query()`/`split_query_terms()`. Bewusst einfach gehalten
+(Michael, AskUserQuestion): genau EIN Operator pro Suche, keine Klammern/
+Mischung. Erkennt sowohl deutsche (UND/ODER) als auch englische (AND/OR)
+Schlüsselwörter, wortgrenzen-sicher (case-insensitive `\b`-Regex - "Sandra"
+wird nicht an "and" aufgesplittet). Eine Suche ohne Operator verhält sich
+exakt wie vor diesem Feature (ein einzelner Teilstring-Treffer) - voll
+rückwärtskompatibel mit jeder bisherigen gespeicherten/eingegebenen Suche.
+
+UI: `ui/merge_search_dialog.py`/`ui/word_merge_search_dialog.py` bekommen
+drei Checkboxen zwischen "Inkl. Unterordner" und dem Suchfeld; mindestens
+eine muss angehakt sein (sonst Warnung, kein Suchstart). Die
+`word_merge_search.query_label`/`query_placeholder`-Schlüssel wurden
+entfernt (Formulierung unterschied sich bisher nur wegen des jetzt per
+Checkbox statt Label gesteuerten Suchbereichs) - beide Dialoge nutzen
+jetzt einheitlich `merge_search.query_label`/`query_placeholder`, jetzt
+mit Hinweis auf UND/ODER.
+
+Neue Tests: `tests/test_search_query.py`, `tests/test_search_scopes.py`,
+`tests/test_pdf_search_scopes.py`, `tests/test_docx_search_scopes.py`,
+`tests/test_ui_merge_search_scopes.py`, `tests/test_ui_drive_search_scopes.py`,
+`tests/test_ui_search_scope_checkboxes.py`. Komplette bestehende
+Testsuite (572 Tests) läuft weiterhin grün, inkl. aller bisherigen
+ICO-Kopfbereich-Tests unverändert.

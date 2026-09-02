@@ -24,7 +24,7 @@ from pipeline.pdf.base import (
     TextBlock,
     TextSpan,
 )
-from pipeline.pdf.template import DocumentTemplate, block_overlaps
+from pipeline.pdf.template import DocumentTemplate, block_overlaps, detect_header_footer_zones
 
 # PyMuPDF span "flags" bitfield: bit 1 = italic, bit 4 = bold.
 _ITALIC_FLAG = 1 << 1
@@ -2263,11 +2263,15 @@ def merge_pdfs(
 
 
 def extract_ico_header_text(path: str) -> str | None:
-    """Return page 0's ICO metadata-chunk text (the same "Issuer Address"/
-    "Asset Matrix"-anchored region ico_mode=True excludes from translation
-    - see PyMuPdfEngine.open()'s docstring), or None if page 0 has no
-    FIRST_PAGE_ANCHOR_TERMS match at all - most PDFs are not this internal
-    document type, and that's not an error.
+    """Return page 0's ICO header/metadata text - the "ICO Format" search
+    scope (02.09.2026, renamed/extended from this function's original,
+    metadata-only behavior): the same "Issuer Address"/"Asset Matrix"-
+    anchored region ico_mode=True excludes from translation (see
+    PyMuPdfEngine.open()'s docstring), PLUS - since 02.09.2026 - any block
+    appearing before it on the page (see the "02.09.2026" comment below
+    for why). Returns None if page 0 has no FIRST_PAGE_ANCHOR_TERMS match
+    at all - most PDFs are not this internal document type, and that's
+    not an error.
 
     Deliberately NOT built on PyMuPdfEngine/extract_blocks(): that class's
     open() snapshots EVERY page's link annotations up front (needed for
@@ -2293,18 +2297,127 @@ def extract_ico_header_text(path: str) -> str | None:
         if doc.page_count == 0:
             return None
         raw = doc[0].get_text("dict", flags=_EXTRACT_FLAGS)
+        raw_blocks = [b for b in raw.get("blocks", []) if b.get("type") == 0 and b.get("lines")]
+
         chunks: list[str] = []
-        for raw_block in raw.get("blocks", []):
-            if raw_block.get("type") != 0:
-                continue  # skip image blocks
-            lines = raw_block.get("lines", [])
-            if not lines:
-                continue
-            for group in _group_lines_by_x0(lines, _COLUMN_SPLIT_THRESHOLD):
+        first_anchor_block_index: int | None = None
+        for block_index, raw_block in enumerate(raw_blocks):
+            for group in _group_lines_by_x0(raw_block["lines"], _COLUMN_SPLIT_THRESHOLD):
                 subgroups = _split_first_page_metadata(group, FIRST_PAGE_ANCHOR_TERMS)
                 if len(subgroups) == 2:
+                    if first_anchor_block_index is None:
+                        first_anchor_block_index = block_index
                     metadata_part = subgroups[0]
                     chunks.append("\n".join(_line_text(line.get("spans", [])) for line in metadata_part))
-        return "\n".join(chunks) if chunks else None
+
+        if first_anchor_block_index is None:
+            return None  # no ICO document at all - unchanged contract
+
+        # 02.09.2026 (Michael, Screenshot vom oberen Bereich einer echten
+        # ICO-Seite 1: "Developer: StellarRussia" / "QSI ICO: AUREXIS" samt
+        # Logo): dieser Kopfbereich sitzt optisch abgesetzt (eigene
+        # Formatierung, größerer Abstand) VOR dem oben erfassten
+        # Metadaten-Block (der bei "Issuer Address"/"Asset Matrix" ansetzt)
+        # und ist deshalb PyMuPDFs eigener Block-Segmentierung nach ein
+        # SEPARATER, früherer raw_block - die bisherige Anker-Logik hat nur
+        # den EINEN Block/die eine Gruppe mit dem Anker durchsucht und
+        # diesen Header-Text nie gesehen ("Developer"-Suche schlug fehl,
+        # obwohl das Wort sichtbar auf Seite 1 stand). Alle Blöcke VOR dem
+        # ersten Anker-Treffer gehören laut Michael mit zum "oberen Bereich
+        # der 1. Seite inklusive des Headers" und werden hier vollständig
+        # (nicht nur ihr Metadaten-Teil - sie liegen ja bereits vor jeder
+        # Trennung) vorangestellt.
+        header_chunks: list[str] = []
+        for raw_block in raw_blocks[:first_anchor_block_index]:
+            for group in _group_lines_by_x0(raw_block["lines"], _COLUMN_SPLIT_THRESHOLD):
+                text = "\n".join(_line_text(line.get("spans", [])) for line in group).strip()
+                if text:
+                    header_chunks.append(text)
+
+        combined = header_chunks + chunks
+        return "\n".join(combined) if combined else None
     finally:
         doc.close()
+
+
+# --- "Header" (alle Seiten, normale Dokumente) und "Volltext" (02.09.2026) -
+#
+# Michael, im direkten Anschluss an obiges "ICO Format": "Genauso wie die
+# Option 'nur im Header'. Dann sollte es auch möglich sein im ganzen Text
+# suchen zu können." Auf Rückfrage bestätigt: bei normalen (nicht-ICO)
+# Dokumenten muss der wiederkehrende Header über ALLE Seiten durchsucht
+# werden, nicht nur Seite 1 (anders als "ICO Format" oben, das laut
+# Michaels Screenshot-Erklärung bewusst auf Seite 1 beschränkt bleibt).
+
+
+def extract_pdf_header_text(path: str) -> str | None:
+    """"Header" search scope (02.09.2026) for normal (non-ICO) documents -
+    Michael: "Bei normalen Dokumenten müssen es die Header aller Seiten
+    sein." Reuses PyMuPdfEngine + detect_header_footer_zones() (pipeline/
+    pdf/template.py) - the same cross-page text-repetition detection
+    already used to EXCLUDE a header from translation (see ui/pdf_job.py's
+    exclude_header option) - here it locates the header's own text
+    instead of blanking it out.
+
+    Unlike extract_ico_header_text() above (opens page 0 only, ~O(1) per
+    file), this scans every page of the document to find what actually
+    repeats - noticeably more expensive for large folders, an accepted
+    tradeoff (see Backlog.md 02.09.2026): "wiederkehrender Header über
+    alle Seiten" has no cheaper definition than looking at all the pages.
+
+    Returns None if no confident recurring header is detected at all -
+    most documents legitimately have none (see detect_header_footer_zones()'s
+    own docstring for the confidence threshold).
+
+    Raises ValueError (never a raw PyMuPDF exception) if `path` can't be
+    opened as a PDF at all - same contract as extract_ico_header_text().
+    """
+    engine = PyMuPdfEngine()
+    try:
+        engine.open(path)
+    except Exception as exc:  # noqa: BLE001 - re-raised as a clear, file-named ValueError below
+        raise ValueError(f'"{Path(path).name}" konnte nicht geöffnet werden: {exc}') from exc
+
+    header_bbox, _footer_bbox = detect_header_footer_zones(engine)
+    if header_bbox is None:
+        return None
+    for page in engine.get_pages():
+        texts = [
+            block.text.strip()
+            for block in engine.extract_blocks(page.index)
+            if block.text.strip() and block_overlaps(block.bbox, header_bbox)
+        ]
+        if texts:
+            return "\n".join(texts)
+    return None
+
+
+def extract_pdf_full_text(path: str) -> str | None:
+    """"Volltext" search scope (02.09.2026) - every page's text, in
+    reading order. Confirmed as the deliberate superset (Michael: "Wenn
+    ich also im ganzen Dokument suche ist alles inklusive Header und
+    oberer Bereich 1. Seite"), so this makes no attempt to exclude
+    anything extract_ico_header_text()/extract_pdf_header_text() above
+    already cover.
+
+    Cheaper than extract_pdf_header_text() (no cross-page repetition
+    detection, one open() + one extract_blocks() call per page) but still
+    O(pages) - noticeably more expensive than extract_ico_header_text()'s
+    page-0-only scan for large documents, same accepted tradeoff.
+
+    Raises ValueError (never a raw PyMuPDF exception) if `path` can't be
+    opened as a PDF at all - same contract as extract_ico_header_text().
+    """
+    engine = PyMuPdfEngine()
+    try:
+        engine.open(path)
+    except Exception as exc:  # noqa: BLE001 - re-raised as a clear, file-named ValueError below
+        raise ValueError(f'"{Path(path).name}" konnte nicht geöffnet werden: {exc}') from exc
+
+    chunks: list[str] = []
+    for page in engine.get_pages():
+        for block in engine.extract_blocks(page.index):
+            text = block.text.strip()
+            if text:
+                chunks.append(text)
+    return "\n".join(chunks) if chunks else None

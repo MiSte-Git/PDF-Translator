@@ -30,10 +30,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 
 from pipeline.pdf.pymupdf_engine import extract_ico_header_text
+from pipeline.search_query import matches_query
 from pipeline.word.docx_engine import extract_docx_ico_header_text
+from ui.search_scopes import DOCX_SCOPE_EXTRACTORS, PDF_SCOPE_EXTRACTORS, combined_extractor
 
 
 @dataclass
@@ -99,12 +101,16 @@ def find_matching(
     name" (a non-empty one), rather than being two separate features/
     buttons.
 
-    A non-empty query is matched as a case-insensitive substring against
-    ONLY `extractor`'s result for each file - never the whole first page/
-    first paragraphs or whole document (Michael's explicit choice,
+    A non-empty query is matched (see pipeline/search_query.py::
+    matches_query() - case-insensitive substring per term, with optional
+    UND/AND / ODER/OR combination since 02.09.2026) against ONLY
+    `extractor`'s result for each file - never the whole first page/first
+    paragraphs or whole document by default (Michael's explicit choice,
     01.09.2026 for PDF, carried over unchanged for DOCX): a document that
     merely MENTIONS another developer's name somewhere in its body text
-    must not match.
+    must not match UNLESS the caller explicitly widened `extractor` itself
+    to cover more (see find_pdfs_matching()'s `scopes` parameter,
+    02.09.2026, and ui/search_scopes.py).
 
     progress_callback, if given, is called once per file, right BEFORE
     that file is opened, as (files_done_so_far, total_files, filename) -
@@ -141,7 +147,7 @@ def find_matching(
                 errors.append(str(exc))
                 scanned += 1
                 continue
-            if header is not None and query.lower() in header.lower():
+            if matches_query(header, query):
                 matches.append(IcoSearchMatch(path, header))
         scanned += 1
 
@@ -159,13 +165,19 @@ def find_pdfs_matching(
     recursive: bool = True,
     progress_callback: Callable[[int, int, str], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    scopes: Iterable[str] | None = None,
 ) -> IcoSearchResult:
     """PDF wrapper over find_matching() - see that function's docstring
-    for the full contract. Unchanged behavior/signature from before this
-    module's 01.09.2026 generalization; the existing PDF test suite
-    (tests/test_ui_merge_search.py) covers it unchanged.
+    for the full contract.
+
+    `scopes` (02.09.2026, the new "ICO Format"/"Header"/"Volltext"
+    checkboxes - see ui/search_scopes.py): which scope(s) to combine.
+    None (the default) preserves this function's exact original
+    behavior - "ICO Format" only - unchanged for every caller/test that
+    predates this feature and doesn't pass it (tests/test_ui_merge_search.py).
     """
-    return find_matching(folder, ".pdf", extract_ico_header_text, query, recursive, progress_callback, should_cancel)
+    extractor = extract_ico_header_text if scopes is None else combined_extractor(PDF_SCOPE_EXTRACTORS, scopes)
+    return find_matching(folder, ".pdf", extractor, query, recursive, progress_callback, should_cancel)
 
 
 def find_docx_files(folder: Path, recursive: bool = True) -> list[Path]:
@@ -179,11 +191,15 @@ def find_docx_files_matching(
     recursive: bool = True,
     progress_callback: Callable[[int, int, str], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    scopes: Iterable[str] | None = None,
 ) -> IcoSearchResult:
     """DOCX wrapper over find_matching() (01.09.2026, Michael: "Jetzt noch
     das ganze für *.docx.") - see that function's docstring for the full
     contract, and find_pdfs_matching() for the PDF counterpart this
     mirrors exactly, extractor swapped for
-    pipeline.word.docx_engine.extract_docx_ico_header_text().
+    pipeline.word.docx_engine.extract_docx_ico_header_text() (or a
+    `scopes`-combined extractor, see find_pdfs_matching()'s docstring for
+    that parameter - identical contract here).
     """
-    return find_matching(folder, ".docx", extract_docx_ico_header_text, query, recursive, progress_callback, should_cancel)
+    extractor = extract_docx_ico_header_text if scopes is None else combined_extractor(DOCX_SCOPE_EXTRACTORS, scopes)
+    return find_matching(folder, ".docx", extractor, query, recursive, progress_callback, should_cancel)

@@ -56,11 +56,13 @@ import re
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Callable, Iterable, Protocol
 
 from pipeline.drive_auth import DOCX_MIME_TYPE, PDF_MIME_TYPE
 from pipeline.pdf.pymupdf_engine import extract_ico_header_text
+from pipeline.search_query import matches_query
 from pipeline.word.docx_engine import extract_docx_ico_header_text
+from ui.search_scopes import DOCX_SCOPE_EXTRACTORS, PDF_SCOPE_EXTRACTORS, combined_extractor
 
 _FOLDER_URL_RE = re.compile(r"/folders/([A-Za-z0-9_-]+)")
 _ID_QUERY_RE = re.compile(r"[?&]id=([A-Za-z0-9_-]+)")
@@ -178,9 +180,14 @@ def find_drive_matching(
     wrappers this is built for.
 
     query="" means every file found counts as a match (still downloaded,
-    see module docstring), a non-empty query is matched case-insensitively
-    against ONLY `extractor`'s result - never the rest of the document.
-    Per-file download/read errors are collected into result.errors rather
+    see module docstring), a non-empty query is matched (see
+    pipeline/search_query.py::matches_query() - case-insensitive
+    substring per term, with optional UND/AND / ODER/OR combination since
+    02.09.2026) against ONLY `extractor`'s result - never the rest of the
+    document by default, unless the caller explicitly widened `extractor`
+    itself (see find_drive_pdfs_matching()'s `scopes` parameter,
+    02.09.2026, and ui/search_scopes.py). Per-file download/read errors
+    are collected into result.errors rather
     than aborting the whole scan; is_cancelled() is checked between files
     so a long scan can be stopped promptly, and result.scanned always
     reflects files actually looked at even when cancelled partway through.
@@ -227,7 +234,7 @@ def find_drive_matching(
                     result.scanned += 1
                     continue
                 result.scanned += 1
-                if not header_text or query_normalized not in header_text.casefold():
+                if not matches_query(header_text, query):
                     continue
                 snippet = header_text
             else:
@@ -251,14 +258,19 @@ def find_drive_pdfs_matching(
     cache_dir: Path,
     progress: Callable[[int, int, str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
+    scopes: Iterable[str] | None = None,
 ) -> DriveSearchResult:
-    """PDF wrapper over find_drive_matching() - unchanged behavior/
-    signature from before this module's 01.09.2026 generalization; the
-    existing PDF test suite (tests/test_ui_drive_search.py) covers it
-    unchanged.
+    """PDF wrapper over find_drive_matching() - unchanged behavior for
+    every caller/test that predates the `scopes` parameter (02.09.2026,
+    the new "ICO Format"/"Header"/"Volltext" checkboxes - see
+    find_pdfs_matching() in ui/merge_search.py and ui/search_scopes.py):
+    None (the default) keeps this function's exact original, "ICO
+    Format"-only behavior (tests/test_ui_drive_search.py covers it
+    unchanged).
     """
+    extractor = extract_ico_header_text if scopes is None else combined_extractor(PDF_SCOPE_EXTRACTORS, scopes)
     return find_drive_matching(
-        client, root_folder_id, PDF_MIME_TYPE, extract_ico_header_text, ".pdf", query, recursive, cache_dir, progress, is_cancelled
+        client, root_folder_id, PDF_MIME_TYPE, extractor, ".pdf", query, recursive, cache_dir, progress, is_cancelled
     )
 
 
@@ -270,13 +282,16 @@ def find_drive_docx_matching(
     cache_dir: Path,
     progress: Callable[[int, int, str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
+    scopes: Iterable[str] | None = None,
 ) -> DriveSearchResult:
     """DOCX wrapper over find_drive_matching() (01.09.2026, Michael:
     "Jetzt noch das ganze für *.docx.") - the Drive counterpart of
     find_docx_files_matching() (ui/merge_search.py), mirroring
     find_drive_pdfs_matching() exactly with the DOCX mime type and
-    extractor swapped in.
+    extractor(s) swapped in - see that function's docstring for the
+    `scopes` parameter (02.09.2026).
     """
+    extractor = extract_docx_ico_header_text if scopes is None else combined_extractor(DOCX_SCOPE_EXTRACTORS, scopes)
     return find_drive_matching(
-        client, root_folder_id, DOCX_MIME_TYPE, extract_docx_ico_header_text, ".docx", query, recursive, cache_dir, progress, is_cancelled
+        client, root_folder_id, DOCX_MIME_TYPE, extractor, ".docx", query, recursive, cache_dir, progress, is_cancelled
     )

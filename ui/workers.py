@@ -484,13 +484,19 @@ class IcoSearchSignals(QObject):
 class IcoSearchWorker(QRunnable):
     """Runs one folder scan (ui/merge_search.py::find_pdfs_matching()) on a
     background thread - ui/merge_search_dialog.py's "Suchen" button. Same
-    cooperative cancel_event/between-files polling as MergeWorker above."""
+    cooperative cancel_event/between-files polling as MergeWorker above.
 
-    def __init__(self, folder: Path, query: str, recursive: bool) -> None:
+    `scopes` (02.09.2026, the "ICO Format"/"Header"/"Volltext" checkboxes -
+    see ui/search_scopes.py): which scope(s) the dialog had checked when
+    "Suchen" was clicked, passed straight through to find_pdfs_matching().
+    """
+
+    def __init__(self, folder: Path, query: str, recursive: bool, scopes) -> None:
         super().__init__()
         self.folder = folder
         self.query = query
         self.recursive = recursive
+        self.scopes = scopes
         self.signals = IcoSearchSignals()
         self._cancel_event = threading.Event()
 
@@ -506,6 +512,7 @@ class IcoSearchWorker(QRunnable):
                 recursive=self.recursive,
                 progress_callback=self.signals.progress.emit,
                 should_cancel=self._cancel_event.is_set,
+                scopes=self.scopes,
             )
         except Exception as exc:  # noqa: BLE001 - mirrors every other worker's catch-all above
             self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
@@ -535,13 +542,16 @@ class DriveSearchWorker(QRunnable):
     starts) and passes it in.
     """
 
-    def __init__(self, client: DriveClientProtocol, folder_id: str, query: str, recursive: bool, cache_dir: Path) -> None:
+    def __init__(
+        self, client: DriveClientProtocol, folder_id: str, query: str, recursive: bool, cache_dir: Path, scopes
+    ) -> None:
         super().__init__()
         self.client = client
         self.folder_id = folder_id
         self.query = query
         self.recursive = recursive
         self.cache_dir = cache_dir
+        self.scopes = scopes
         self.signals = DriveSearchSignals()
         self._cancel_event = threading.Event()
 
@@ -559,6 +569,7 @@ class DriveSearchWorker(QRunnable):
                 cache_dir=self.cache_dir,
                 progress=self.signals.progress.emit,
                 is_cancelled=self._cancel_event.is_set,
+                scopes=self.scopes,
             )
         except Exception as exc:  # noqa: BLE001 - mirrors every other worker's catch-all above
             self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
@@ -572,13 +583,15 @@ class WordIcoSearchWorker(QRunnable):
     background thread. Same IcoSearchSignals/cooperative-cancel contract
     (the result shape - IcoSearchResult - is already format-agnostic, see
     ui/merge_search.py's module docstring), so this only differs from
-    IcoSearchWorker in which matching function it calls."""
+    IcoSearchWorker in which matching function it calls. `scopes` - see
+    IcoSearchWorker's docstring (02.09.2026)."""
 
-    def __init__(self, folder: Path, query: str, recursive: bool) -> None:
+    def __init__(self, folder: Path, query: str, recursive: bool, scopes) -> None:
         super().__init__()
         self.folder = folder
         self.query = query
         self.recursive = recursive
+        self.scopes = scopes
         self.signals = IcoSearchSignals()
         self._cancel_event = threading.Event()
 
@@ -594,6 +607,7 @@ class WordIcoSearchWorker(QRunnable):
                 recursive=self.recursive,
                 progress_callback=self.signals.progress.emit,
                 should_cancel=self._cancel_event.is_set,
+                scopes=self.scopes,
             )
         except Exception as exc:  # noqa: BLE001 - mirrors every other worker's catch-all above
             self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
@@ -606,15 +620,19 @@ class WordDriveSearchWorker(QRunnable):
     Drive folder scan via ui/drive_search.py::find_drive_docx_matching()
     on a background thread. Same DriveSearchSignals/cooperative-cancel
     contract and already-authorized-`client` convention as DriveSearchWorker
-    (see that class's docstring); only the matching function differs."""
+    (see that class's docstring); only the matching function differs.
+    `scopes` - see IcoSearchWorker's docstring (02.09.2026)."""
 
-    def __init__(self, client: DriveClientProtocol, folder_id: str, query: str, recursive: bool, cache_dir: Path) -> None:
+    def __init__(
+        self, client: DriveClientProtocol, folder_id: str, query: str, recursive: bool, cache_dir: Path, scopes
+    ) -> None:
         super().__init__()
         self.client = client
         self.folder_id = folder_id
         self.query = query
         self.recursive = recursive
         self.cache_dir = cache_dir
+        self.scopes = scopes
         self.signals = DriveSearchSignals()
         self._cancel_event = threading.Event()
 
@@ -632,6 +650,7 @@ class WordDriveSearchWorker(QRunnable):
                 cache_dir=self.cache_dir,
                 progress=self.signals.progress.emit,
                 is_cancelled=self._cancel_event.is_set,
+                scopes=self.scopes,
             )
         except Exception as exc:  # noqa: BLE001 - mirrors every other worker's catch-all above
             self.signals.failed.emit(f"{type(exc).__name__}: {exc}")

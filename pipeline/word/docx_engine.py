@@ -502,6 +502,23 @@ class DocxEngine:
         """Return every paragraph in the document body, in reading order."""
         return self._paragraphs
 
+    def get_header_paragraphs(self) -> list[WordParagraph]:
+        """Just the header half of get_header_footer_paragraphs() below
+        (see that method's docstring for the translatable=False
+        rationale, unchanged here) - added 02.09.2026 for the new
+        "Header"/"ICO Format" search scopes (extract_docx_header_text()/
+        extract_docx_ico_header_text() below), which need the real
+        word/header2.xml text WITHOUT the footer. Kept as its own method
+        rather than filtering get_header_footer_paragraphs()'s combined
+        result: that result deliberately doesn't tag which paragraphs
+        came from which part, and re-deriving that here would be more
+        fragile than reading self._header_paragraph_elements directly.
+        """
+        return [
+            _build_paragraph(p, self._header_rels, translatable=False)
+            for p in self._header_paragraph_elements
+        ]
+
     def get_header_footer_paragraphs(self) -> list[WordParagraph]:
         """Return every paragraph from the active default header
         (word/header2.xml) followed by every paragraph from the active
@@ -515,15 +532,11 @@ class DocxEngine:
         planted error to check for during implementation - corrected to
         False here, which is the actually-required behavior.)
         """
-        header_paragraphs = [
-            _build_paragraph(p, self._header_rels, translatable=False)
-            for p in self._header_paragraph_elements
-        ]
         footer_paragraphs = [
             _build_paragraph(p, self._footer_rels, translatable=False)
             for p in self._footer_paragraph_elements
         ]
-        return header_paragraphs + footer_paragraphs
+        return self.get_header_paragraphs() + footer_paragraphs
 
     def replace_paragraph_runs(self, paragraph_index: int, new_runs: list[WordRun]) -> None:
         """Replace the paragraph_index-th <w:p>'s runs (same indexing as
@@ -645,13 +658,27 @@ class DocxEngine:
 
 
 def extract_docx_ico_header_text(path: str) -> str | None:
-    """Return the plain text of every body paragraph BEFORE the page-1
-    metadata separator shape (see _has_separator_shape()) - the DOCX
-    counterpart of extract_ico_header_text() in
-    pipeline/pdf/pymupdf_engine.py, same "only the protected metadata
-    region, never the rest of the document" contract. Returns None if no
-    separator shape is found at all (most .docx files are not this
-    internal document type - not an error).
+    """"ICO Format" search scope (02.09.2026, renamed/extended from this
+    function's original, body-only behavior) - the plain text of the
+    real Word header (word/header2.xml, see get_header_paragraphs())
+    PLUS every body paragraph BEFORE the page-1 metadata separator shape
+    (see _has_separator_shape()) - the DOCX counterpart of
+    extract_ico_header_text() in pipeline/pdf/pymupdf_engine.py, same
+    "only the protected header/metadata region, never the rest of the
+    document" contract. Returns None if no separator shape is found at
+    all (most .docx files are not this internal document type - not an
+    error) - regardless of whether the document happens to have header
+    text, since header text alone doesn't make a document this internal
+    type.
+
+    02.09.2026 (Michael, Screenshot vom oberen Bereich einer echten
+    ICO-Seite 1: "Developer: StellarRussia" / "QSI ICO: AUREXIS"): dieser
+    Text steht im echten Word-Header (word/header2.xml - siehe
+    tests/fixtures/representative_ico.docx, das genau so einen Header
+    bereits enthält), nicht im Body. Vor dieser Änderung durchsuchte diese
+    Funktion nur Body-Absätze - der Header wurde nie einbezogen, weshalb
+    eine Suche nach "Developer" hier fehlschlug, obwohl das Wort sichtbar
+    auf Seite 1 stand.
 
     Deliberately built on the full DocxEngine(ico_mode=True) rather than a
     bespoke, leaner parser the way extract_ico_header_text() is (see that
@@ -679,9 +706,81 @@ def extract_docx_ico_header_text(path: str) -> str | None:
         return None
 
     metadata_paragraphs = [p for p in engine.get_paragraphs() if not p.translatable]
+    all_paragraphs = engine.get_header_paragraphs() + metadata_paragraphs
     lines = [
         "".join(run.text for run in paragraph.runs).replace(BREAK_MARKER, " ").strip()
-        for paragraph in metadata_paragraphs
+        for paragraph in all_paragraphs
+    ]
+    lines = [line for line in lines if line]
+    return "\n".join(lines) if lines else None
+
+
+# --- "Header" (alle Seiten, normale Dokumente) und "Volltext" (02.09.2026) -
+#
+# Michael, im direkten Anschluss an obiges "ICO Format": "Genauso wie die
+# Option 'nur im Header'. Dann sollte es auch möglich sein im ganzen Text
+# suchen zu können." Auf Rückfrage bestätigt: bei normalen (nicht-ICO)
+# Dokumenten muss der Header über ALLE Seiten durchsucht werden - anders
+# als bei der PDF-Fassung braucht das hier KEINE eigene Erkennung: ein
+# Word-Header (word/header2.xml) gilt strukturell schon für jede Seite
+# eines Abschnitts, siehe get_header_paragraphs().
+
+
+def extract_docx_header_text(path: str) -> str | None:
+    """"Header" search scope (02.09.2026) for normal (non-ICO) documents -
+    Michael: "Bei normalen Dokumenten müssen es die Header aller Seiten
+    sein." Word's header applies structurally to every page in a section
+    (word/header2.xml, see get_header_paragraphs()'s docstring) - unlike
+    the PDF equivalent (extract_pdf_header_text() in pipeline/pdf/
+    pymupdf_engine.py), no cross-page repetition detection is needed
+    here, so this stays a cheap, single open() + one small XML-part read
+    regardless of document length. ico_mode is left at its default False:
+    the page-1 separator-shape scan is irrelevant to this scope.
+
+    Returns None if the document has no header part at all, or an empty
+    one - most .docx files legitimately don't use a Word header.
+
+    Raises ValueError (never a raw exception) if `path` can't be opened
+    as a .docx at all - same contract as extract_docx_ico_header_text().
+    """
+    engine = DocxEngine()
+    try:
+        engine.open(path)
+    except Exception as exc:  # noqa: BLE001 - re-raised as a clear, file-named ValueError below
+        raise ValueError(f'"{Path(path).name}" konnte nicht geöffnet werden: {exc}') from exc
+
+    lines = [
+        "".join(run.text for run in paragraph.runs).replace(BREAK_MARKER, " ").strip()
+        for paragraph in engine.get_header_paragraphs()
+    ]
+    lines = [line for line in lines if line]
+    return "\n".join(lines) if lines else None
+
+
+def extract_docx_full_text(path: str) -> str | None:
+    """"Volltext" search scope (02.09.2026) - every body paragraph plus
+    the header, in reading order (header first, matching how it visually
+    sits above the body). Confirmed as the deliberate superset (Michael:
+    "Wenn ich also im ganzen Dokument suche ist alles inklusive Header
+    und oberer Bereich 1. Seite"), so this makes no attempt to exclude
+    anything extract_docx_ico_header_text()/extract_docx_header_text()
+    above already cover. ico_mode is left at its default False: the
+    page-1 translatable/metadata split is irrelevant to a plain full-text
+    search.
+
+    Raises ValueError (never a raw exception) if `path` can't be opened
+    as a .docx at all - same contract as extract_docx_ico_header_text().
+    """
+    engine = DocxEngine()
+    try:
+        engine.open(path)
+    except Exception as exc:  # noqa: BLE001 - re-raised as a clear, file-named ValueError below
+        raise ValueError(f'"{Path(path).name}" konnte nicht geöffnet werden: {exc}') from exc
+
+    all_paragraphs = engine.get_header_paragraphs() + engine.get_paragraphs()
+    lines = [
+        "".join(run.text for run in paragraph.runs).replace(BREAK_MARKER, " ").strip()
+        for paragraph in all_paragraphs
     ]
     lines = [line for line in lines if line]
     return "\n".join(lines) if lines else None
