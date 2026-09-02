@@ -1301,7 +1301,16 @@ class MergeSearchDialog(QDialog):
         self.status_label.setText("")
 
         scopes = self._selected_scopes()
-        if not scopes:
+        # 02.09.2026 (Michael: "Wenn ich alle PDFs in einem Ordner haben
+        # möchte, ohne einen Suchbereich, gibt es einen Fehler.") - a scope
+        # is only ever READ when there's actually a text query to match
+        # against (see find_matching()'s docstring, ui/merge_search.py: "An
+        # empty/whitespace-only query matches EVERY file found - no file is
+        # even opened in that case"); requiring one unconditionally blocked
+        # the deliberately-supported "list every file in this folder" case
+        # (empty search field) for no reason - no scope is ever consulted
+        # for it, so none should be required either.
+        if self.query_edit.text().strip() and not scopes:
             QMessageBox.warning(self, self.windowTitle(), self.language.text("merge_search.error_missing_scope"))
             return
 

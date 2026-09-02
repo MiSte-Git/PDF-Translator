@@ -9386,3 +9386,53 @@ synthetischen PDF, die zwar nicht exakt Michaels PyMuPDF-Eigenheit
 trifft, aber dieselbe Form (Ausreißer-Leerzeile zwischen zwei echten
 Inhaltszeilen im selben Block) über die öffentliche Funktion abdeckt.
 Komplette Testsuite (759 Tests, 1 übersprungen) läuft grün.
+
+### Siebter Nachtrag (selbe Sitzung): "Suchbereich"-Pflichtfeld blockiert die leere "alle PDFs auflisten"-Suche
+
+Michael, beim Versuch alle 2248 PDFs eines Ordners ohne Textsuche zu
+listen (um sie später zusammenzuführen): "Wenn ich alle PDFs in einem
+Ordner haben möchte, ohne einen Suchbereich, gibt es einen Fehler."
+
+Root Cause: `_start_search()` (beide Suchdialoge) verlangte IMMER
+mindestens einen angehakten Suchbereich ("ICO Format"/"Header"/
+"Volltext"), auch wenn das Suchfeld komplett leer ist. Laut
+`find_matching()`s eigener Dokumentation (`ui/merge_search.py`) wird bei
+leerem Suchtext aber gar keine Datei geöffnet, um einen Bereich zu
+prüfen - "leeres Suchfeld = alle Dateien auflisten" ist ein
+ausdrücklich unterstützter Fall, der Bereichs-Checkboxen schlicht nie
+liest (`combined_extractor()` mit leeren `scopes` würde ohnehin nie
+aufgerufen). Die Pflichtfeld-Prüfung hat diesen Fall also grundlos
+blockiert.
+
+Fix: die Warnung "Bitte mindestens einen Suchbereich auswählen"
+erscheint jetzt nur noch, wenn das Suchfeld tatsächlich Text enthält.
+Bei leerem Suchfeld startet der Scan unverändert wie bisher (alle
+Dateien im Ordner, keine Bereichs-/Textfilterung). Gleiche Änderung in
+`ui/merge_search_dialog.py` und `ui/word_merge_search_dialog.py`.
+
+Bestehender Test `test_start_search_warns_and_does_not_start_a_worker_
+with_no_scope_selected` (`tests/test_ui_search_scope_checkboxes.py`)
+setzte bisher keinen Suchtext - musste auf einen nicht-leeren Text
+("Acme") umgestellt werden, um weiterhin den (unverändert bestehenden)
+Pflichtfeld-Fall bei ECHTER Textsuche zu testen. Neuer Test
+`test_start_search_with_an_empty_query_needs_no_scope_at_all` deckt den
+neu freigeschalteten Fall ab: leeres Suchfeld, kein Bereich angehakt,
+Suche startet trotzdem (worker.scopes == leere Menge). Komplette
+Testsuite (761 Tests, 1 übersprungen) läuft grün.
+
+Der zweite von Michael gemeldete Punkt in derselben Nachricht - die
+Ergebnisliste zeigt bei 2248 vorhandenen PDFs nur 999 an - ist NICHT
+behoben, da im eigenen Code kein Limit gefunden werden konnte: ein
+direkter Test mit 2500 synthetischen Dateien über
+`find_files_by_extension()` fand alle 2500 korrekt, keine Kappung.
+Offene Rückfrage an Michael (siehe Chat): Ist "Unterordner
+durchsuchen" angehakt, und liegen die 2248 PDFs alle direkt in einem
+Ordner oder verteilt über Unterordner? Falls unrecursive + Unterordner
+im Spiel sind, würde das die 999 ohne jeden Code-Bug erklären.
+`merge_pdfs()` selbst (`pipeline/pdf/pymupdf_engine.py`) schließt jede
+Quelldatei einzeln in einem `finally`-Block, bevor die nächste geöffnet
+wird - kein Datei-Handle-Leck über viele Dateien hinweg, 2248 Dateien
+sind aus dieser Sicht architektonisch unproblematisch; die
+Ausgabedatei wird aber komplett im Speicher aufgebaut, bis am Ende
+`output.save()` läuft, Laufzeit und Speicherbedarf skalieren also mit
+Seitenzahl/Dateigröße der Summe aller Quellen.

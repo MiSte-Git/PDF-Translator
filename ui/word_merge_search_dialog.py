@@ -920,7 +920,14 @@ class WordMergeSearchDialog(QDialog):
         self.status_label.setText("")
 
         scopes = self._selected_scopes()
-        if not scopes:
+        # 02.09.2026 (Michael: "Wenn ich alle PDFs in einem Ordner haben
+        # möchte, ohne einen Suchbereich, gibt es einen Fehler.") - see
+        # MergeSearchDialog._start_search()'s identical comment
+        # (ui/merge_search_dialog.py): a scope is only ever READ when
+        # there's actually a text query to match against, so none should
+        # be required for the deliberately-supported "list every file in
+        # this folder" case (empty search field) either.
+        if self.query_edit.text().strip() and not scopes:
             QMessageBox.warning(self, self.windowTitle(), self.language.text("merge_search.error_missing_scope"))
             return
 

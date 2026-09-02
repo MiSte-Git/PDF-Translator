@@ -79,6 +79,13 @@ def test_selected_scopes_reflects_arbitrary_checkbox_combinations(qapp, module_n
 def test_start_search_warns_and_does_not_start_a_worker_with_no_scope_selected(
     qapp, monkeypatch: pytest.MonkeyPatch, no_run_thread_pool: list[object], module_name, dialog_attr, tmp_path
 ) -> None:
+    # 02.09.2026 (Michael, real-world large-folder merge: "Wenn ich alle
+    # PDFs in einem Ordner haben möchte, ohne einen Suchbereich, gibt es
+    # einen Fehler.") - a scope is only ever consulted when there's an
+    # actual text query to check it against (find_matching()'s docstring,
+    # ui/merge_search.py); this warning is about "you typed something to
+    # search for but didn't say WHERE to look", so it must only fire with
+    # a non-empty query - see the empty-query counterpart test below.
     warnings: list[tuple] = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warnings.append(a))
 
@@ -87,12 +94,42 @@ def test_start_search_warns_and_does_not_start_a_worker_with_no_scope_selected(
     dialog = DialogClass(LanguageManager("de"), QSettings("PDF-Translator-Test", f"{dialog_attr}ScopeMissing"))
     try:
         dialog.scope_ico_format_checkbox.setChecked(False)  # uncheck the only default scope
+        dialog.query_edit.setText("Acme")
         dialog._folder = tmp_path  # a folder IS set - the scope check must still fire first
 
         dialog._start_search()
 
         assert len(no_run_thread_pool) == 0
         assert len(warnings) == 1
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_start_search_with_an_empty_query_needs_no_scope_at_all(
+    qapp, no_run_thread_pool: list[object], module_name, dialog_attr, tmp_path
+) -> None:
+    # 02.09.2026 (Michael: "Wenn ich alle PDFs in einem Ordner haben
+    # möchte, ohne einen Suchbereich, gibt es einen Fehler.") - "list
+    # every file in this folder" (empty search field) never opens a file
+    # to check any scope against (find_matching()'s docstring), so
+    # requiring one here used to block a deliberately-supported case for
+    # no reason. See test_start_search_warns_and_does_not_start_a_worker_
+    # with_no_scope_selected above for the still-enforced non-empty-query
+    # case.
+    dialog_module = importlib.import_module(module_name)
+    DialogClass = getattr(dialog_module, dialog_attr)
+    dialog = DialogClass(LanguageManager("de"), QSettings("PDF-Translator-Test", f"{dialog_attr}ScopeEmptyQuery"))
+    try:
+        dialog.scope_ico_format_checkbox.setChecked(False)  # uncheck the only default scope
+        assert dialog.query_edit.text().strip() == ""  # the "list everything" case
+        dialog._folder = tmp_path
+
+        dialog._start_search()
+
+        assert len(no_run_thread_pool) == 1
+        worker = no_run_thread_pool[0]
+        assert worker.scopes == set()
     finally:
         dialog.close()
 
