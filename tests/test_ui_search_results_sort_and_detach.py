@@ -214,6 +214,14 @@ def test_detach_shows_placeholder_and_moves_the_list_into_its_own_window(qapp, m
         assert dialog.results.parent() is dialog._detached_results_window
         assert dialog.detach_results_button.text() == dialog.language.text("merge_search.reattach_results_button")
         assert dialog.results.count() == 1  # the list itself, and its content, are untouched
+        # 02.09.2026 (Michael, after the parent=self fix: "Jetzt geht zwar
+        # ein Fenster auf, es wird aber keine Liste angezeigt.") -
+        # results_stack.setCurrentWidget() a few lines up in _detach_results()
+        # explicitly hide()s self.results as part of switching away from it;
+        # reparenting it into the new window's layout does NOT implicitly
+        # re-show it. Regression guard for the explicit self.results.show()
+        # call added there.
+        assert dialog.results.isVisible() is True
     finally:
         dialog.close()
 

@@ -9062,3 +9062,31 @@ und `test_query_label_mentions_symbol_operators_and_drops_the_confusing_empty_hi
 erweitert. i18n: keine neuen Schlüssel, nur zwei bestehende Werte
 geändert (`merge_search.query_label`, DE/EN, Parität geprüft, weiterhin
 371/371 Keys). Komplette Testsuite (703 Tests) läuft grün.
+
+### Nachtrag (selbe Sitzung): Fenster öffnet sich jetzt, zeigt aber keine Liste
+
+Michael, direkt nach dem Testen des `parent=self`-Fixes oben: "Jetzt geht
+zwar ein Fenster auf, es wird aber keine Liste angezeigt." Zweiter,
+unabhängiger Bug in derselben Methode: `results_stack.setCurrentWidget
+(self.results_placeholder_label)` (der Zeilenwechsel weg von der Liste,
+direkt vor dem Reparenting) ruft intern `self.results.hide()` auf - ein
+EXPLIZITES Verstecken (Qt merkt sich das über den Aufruf hinaus). Das
+Reparenting in `window_layout.addWidget(self.results)` und das
+anschließende `window.show()` heben dieses explizite Verstecken NICHT
+automatisch wieder auf - `self.results` blieb also unsichtbar, obwohl es
+korrekt im neuen (jetzt sichtbaren) Fenster hing. Von Hand nachgestellt
+und bestätigt: `isVisible()` bleibt nach Reparenting + `window.show()`
+`False`, bis `self.results.show()` explizit aufgerufen wird. Fix: genau
+dieser Aufruf, direkt nach dem Reparenting, in beiden Such-Dialogen.
+`_on_detached_results_closed()` (der Rückweg) hatte dieses Problem nie,
+weil `QStackedWidget.setCurrentIndex()` die neue aktuelle Seite bereits
+selbst explizit `show()`t.
+
+`tests/test_ui_search_results_sort_and_detach.py`s bestehender
+`test_detach_shows_placeholder_and_moves_the_list_into_its_own_window` um
+`assert dialog.results.isVisible() is True` erweitert (Regressionsschutz -
+im Gegensatz zum ersten Bug oben lässt sich DIESER hier unter
+`QT_QPA_PLATFORM=offscreen` zuverlässig nachstellen, da es reines
+Qt-Widget-Verhalten ist, kein natives Plattform-Modal-Verhalten).
+Komplette Testsuite (weiterhin 703 Tests, ein bestehender Fall erweitert
+statt ein neuer hinzugefügt) läuft grün.

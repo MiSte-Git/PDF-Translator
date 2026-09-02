@@ -836,6 +836,11 @@ class WordMergeSearchDialog(QDialog):
         )
         window_layout = QVBoxLayout(window)
         window_layout.addWidget(self.results)
+        # See MergeSearchDialog._detach_results()'s identical comment (this
+        # dialog duplicates that one's detach-results feature) - reparenting
+        # a widget that QStackedWidget just explicitly hide()'d does not
+        # implicitly re-show it, even into an already-visible window.
+        self.results.show()
         window.resize(420, 480)
         self._detached_results_window = window
         self.detach_results_button.setText(self.language.text("merge_search.reattach_results_button"))

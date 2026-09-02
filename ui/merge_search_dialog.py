@@ -1124,6 +1124,21 @@ class MergeSearchDialog(QDialog):
         )
         window_layout = QVBoxLayout(window)
         window_layout.addWidget(self.results)
+        # 02.09.2026 (Michael, after the parent=self fix above: "Jetzt geht
+        # zwar ein Fenster auf, es wird aber keine Liste angezeigt.") -
+        # results_stack.setCurrentWidget() a few lines up hides the widget
+        # it switches AWAY from via an explicit widget.hide() (that's how
+        # QStackedWidget/QStackedLayout work internally), which sets Qt's
+        # "explicitly hidden" state - reparenting a widget into a new,
+        # visible layout does NOT clear that state or implicitly re-show
+        # it, so self.results stayed invisible inside the otherwise-correct
+        # new window. Confirmed by hand: without this show(), a freshly
+        # reparented, explicitly-hidden widget's isVisible() stays False
+        # even after its new top-level window.show(). _on_detached_results_
+        # closed() below never had this problem the other way round,
+        # because QStackedWidget.setCurrentIndex() DOES explicitly show()
+        # whichever widget becomes the new current page.
+        self.results.show()
         window.resize(420, 480)
         self._detached_results_window = window
         self.detach_results_button.setText(self.language.text("merge_search.reattach_results_button"))
