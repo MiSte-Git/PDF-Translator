@@ -23,11 +23,13 @@ branch style into the dialog layer.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QThreadPool
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDateEdit,
     QDialog,
     QFileDialog,
@@ -67,9 +69,11 @@ from ui.merge_search_dialog import (
     _CurrentWidgetSizedStack,
     _DetachedResultsWindow,
     _configure_optional_date_edit,
+    _load_query_history,
     _match_path,
     _mtime_or_zero,
     _optional_date,
+    _record_query_history,
 )
 from ui.natural_sort import natural_sort_key
 from ui.search_scopes import (
@@ -134,10 +138,18 @@ class WordMergeSearchDialog(QDialog):
         self.date_filter_group = self._build_date_filter_group()
 
         self.query_label = QLabel()
-        self.query_edit = QLineEdit()
-        # 02.09.2026 - see MergeSearchDialog's identical block (this dialog
-        # duplicates that one's query field restore/persist).
-        self.query_edit.setText(str(self.settings.value("word_merge_search_last_query", "", type=str)))
+        # 02.09.2026 (Michael, "Eine Historie im Suchbereich hätte ich noch
+        # gern.") - see MergeSearchDialog's identical block/constructor
+        # comment (ui/merge_search_dialog.py) for the full reasoning; this
+        # dialog duplicates that one's query field history restore/persist.
+        self.query_edit = QComboBox()
+        self.query_edit.setEditable(True)
+        self.query_edit.setInsertPolicy(QComboBox.NoInsert)
+        self._query_history = _load_query_history(
+            self.settings, "word_merge_search_query_history", "word_merge_search_last_query"
+        )
+        self.query_edit.addItems(self._query_history)
+        self.query_edit.setCurrentText(self._query_history[0] if self._query_history else "")
 
         self.search_button = QPushButton()
         self.search_button.clicked.connect(self._start_search)
@@ -255,8 +267,9 @@ class WordMergeSearchDialog(QDialog):
             self.settings.setValue("word_merge_search_drive_folder_link", text)
         self.settings.setValue("word_merge_search_recursive", self.recursive_checkbox.isChecked())
         # 02.09.2026 - see MergeSearchDialog.done()'s identical comment
-        # (this dialog duplicates that one's query field restore/persist).
-        self.settings.setValue("word_merge_search_last_query", self.query_edit.text())
+        # (this dialog duplicates that one's query field history restore/
+        # persist).
+        self.settings.setValue("word_merge_search_query_history", json.dumps(self._query_history))
         # 02.09.2026 - see MergeSearchDialog.done()'s identical comment
         # (this dialog duplicates that one's detach-results feature).
         if self._detached_results_window is not None:
@@ -919,6 +932,7 @@ class WordMergeSearchDialog(QDialog):
         self.take_selected_button.setEnabled(False)
         self.status_label.setText("")
 
+        query_text = self.query_edit.currentText()
         scopes = self._selected_scopes()
         # 02.09.2026 (Michael: "Wenn ich alle PDFs in einem Ordner haben
         # möchte, ohne einen Suchbereich, gibt es einen Fehler.") - see
@@ -927,7 +941,7 @@ class WordMergeSearchDialog(QDialog):
         # there's actually a text query to match against, so none should
         # be required for the deliberately-supported "list every file in
         # this folder" case (empty search field) either.
-        if self.query_edit.text().strip() and not scopes:
+        if query_text.strip() and not scopes:
             QMessageBox.warning(self, self.windowTitle(), self.language.text("merge_search.error_missing_scope"))
             return
 
@@ -949,7 +963,7 @@ class WordMergeSearchDialog(QDialog):
                 QMessageBox.critical(self, self.language.text("merge_search.failed_title"), str(exc))
                 return
             self._worker = WordDriveSearchWorker(
-                client, self._drive_folder_id, self.query_edit.text(), self.recursive_checkbox.isChecked(),
+                client, self._drive_folder_id, query_text, self.recursive_checkbox.isChecked(),
                 self._drive_cache_dir, scopes, date_filter,
             )
         else:
@@ -957,8 +971,17 @@ class WordMergeSearchDialog(QDialog):
                 QMessageBox.warning(self, self.windowTitle(), self.language.text("merge_search.error_missing_folder"))
                 return
             self._worker = WordIcoSearchWorker(
-                self._folder, self.query_edit.text(), self.recursive_checkbox.isChecked(), scopes, date_filter
+                self._folder, query_text, self.recursive_checkbox.isChecked(), scopes, date_filter
             )
+
+        # 02.09.2026 - see MergeSearchDialog._start_search()'s identical
+        # comment (this dialog duplicates that one's query history record).
+        self._query_history = _record_query_history(self._query_history, query_text)
+        self.query_edit.blockSignals(True)
+        self.query_edit.clear()
+        self.query_edit.addItems(self._query_history)
+        self.query_edit.setCurrentText(query_text)
+        self.query_edit.blockSignals(False)
 
         self.progress.setRange(0, 0)
         self.progress.setVisible(True)

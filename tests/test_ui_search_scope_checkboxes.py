@@ -94,7 +94,7 @@ def test_start_search_warns_and_does_not_start_a_worker_with_no_scope_selected(
     dialog = DialogClass(LanguageManager("de"), QSettings("PDF-Translator-Test", f"{dialog_attr}ScopeMissing"))
     try:
         dialog.scope_ico_format_checkbox.setChecked(False)  # uncheck the only default scope
-        dialog.query_edit.setText("Acme")
+        dialog.query_edit.setCurrentText("Acme")
         dialog._folder = tmp_path  # a folder IS set - the scope check must still fire first
 
         dialog._start_search()
@@ -122,7 +122,7 @@ def test_start_search_with_an_empty_query_needs_no_scope_at_all(
     dialog = DialogClass(LanguageManager("de"), QSettings("PDF-Translator-Test", f"{dialog_attr}ScopeEmptyQuery"))
     try:
         dialog.scope_ico_format_checkbox.setChecked(False)  # uncheck the only default scope
-        assert dialog.query_edit.text().strip() == ""  # the "list everything" case
+        assert dialog.query_edit.currentText().strip() == ""  # the "list everything" case
         dialog._folder = tmp_path
 
         dialog._start_search()

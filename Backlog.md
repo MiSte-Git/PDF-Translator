@@ -9436,3 +9436,67 @@ sind aus dieser Sicht architektonisch unproblematisch; die
 Ausgabedatei wird aber komplett im Speicher aufgebaut, bis am Ende
 `output.save()` läuft, Laufzeit und Speicherbedarf skalieren also mit
 Seitenzahl/Dateigröße der Summe aller Quellen.
+
+Nachtrag: die 999 waren letztlich eine Folge des Suchbereich-Bugs selbst
+(vermutlich ein alter/hängengebliebener Listenstand vor dem Fix) - mit
+dem Fix werden jetzt alle 2248 korrekt angezeigt, von Michael bestätigt.
+Kein eigener Bug in der Ergebnisliste.
+
+### Achter Nachtrag (selbe Sitzung): Suchbegriff-Historie statt nur des letzten Begriffs
+
+Michael: "Eine Historie im Suchbereich hätte ich noch gern." - das
+Suchfeld persistierte bisher nur den EINEN zuletzt gesuchten Begriff
+(`merge_search_last_query`/`word_merge_search_last_query`), obwohl
+Michaels ursprüngliche Anfrage, die dieses Feature überhaupt erst
+brachte, schon "die letzten Suchbegriffe" (Plural) sagte - eine echte
+Historie war also von Anfang an gemeint, nur vereinfacht umgesetzt.
+
+Umsetzung: `query_edit` ist jetzt ein editierbares `QComboBox` statt
+eines `QLineEdit` - Freitext-Eingabe funktioniert unverändert genau wie
+vorher (`currentText()` statt `.text()`), zusätzlich zeigt das
+Dropdown alle vorherigen Suchbegriffe, neuester zuerst.
+`insertPolicy=NoInsert`, damit ein Begriff NICHT schon durch bloßes
+Tippen/Enter in die Liste wandert - nur ein tatsächlich ausgeführter
+Suchlauf (in `_start_search()`, nachdem alle Validierungen bestanden
+sind) zählt als "benutzt" und landet in der Historie; nur Tippen ohne
+zu suchen hinterlässt bewusst keine Spur. Ein bereits vorhandener
+Begriff wird beim erneuten Suchen an die Spitze verschoben statt
+dupliziert. Historie ist auf 20 Einträge gedeckelt (älteste fällt
+raus), großzügig für ein Dropdown, aber nicht unbegrenzt.
+
+Zwei neue geteilte Hilfsfunktionen in `ui/merge_search_dialog.py`
+(gleiches Muster wie `_configure_optional_date_edit()`/`_optional_date()`
+- pure Logik, nach `ui/word_merge_search_dialog.py` importiert statt
+dupliziert): `_load_query_history()` liest die Historie beim Öffnen aus
+den Settings (JSON-codiert unter neuem Schlüssel
+`merge_search_query_history`/`word_merge_search_query_history`, robust
+gegen kaputtes/fremdes JSON) - findet sie noch keinen neuen Schlüssel
+vor, wird EINMALIG aus dem alten Einzel-Wert-Schlüssel migriert, damit
+Michaels zuletzt gesuchter Begriff beim ersten Start nach diesem
+Update nicht einfach verschwindet. `_record_query_history()` baut die
+neue Liste (neuer/beförderter Begriff vorne, Dedupe, Deckel).
+Persistiert wird weiterhin in `done()` (JSON-Dump der Liste), exakt wie
+vorher der Einzelwert.
+
+Bestehender Test `test_last_query_text_is_restored_on_the_next_open`
+(`tests/test_ui_search_results_sort_and_detach.py`) musste umgestellt
+werden (`.text()`/`.setText()` gibt's auf `QComboBox` nicht, und reines
+Tippen zählt jetzt bewusst nicht mehr als "benutzt" - simuliert jetzt
+einen echten Suchlauf über `_record_query_history()` direkt). Zwei
+Tests in `tests/test_ui_search_scope_checkboxes.py` ebenso angepasst
+(`.setText`/`.text` → `.setCurrentText`/`.currentText`). Neue,
+dedizierte Datei `tests/test_ui_query_history.py` (22 Fälle): die
+beiden reinen Hilfsfunktionen direkt (neuer Begriff vorne, Beförderung
+statt Duplikat, leerer/nur-Leerzeichen-Text bleibt wirkungslos,
+Trimmen, Deckel bei 20, Laden ohne jeden Schlüssel, Laden einer
+gespeicherten Historie, Migration vom alten Schlüssel, neuer Schlüssel
+hat Vorrang sobald beide existieren, kaputtes JSON wird wie "keine
+Historie" behandelt) sowie die Dialog-Verdrahtung parametrisiert über
+beide Dialoge (leer beim ersten Start, Tippen ohne Suchen hinterlässt
+keine Spur, ein echter Suchlauf zeichnet auf und befüllt das Dropdown
+neu ohne den aktuellen Text zu verändern, leere Suche zeichnet nichts
+auf, erneutes Suchen eines vorhandenen Begriffs befördert statt
+dupliziert, und Historie übersteht Schließen+Neuöffnen). Komplette
+Testsuite (783 Tests, 1 übersprungen) läuft grün. i18n unverändert
+(379/379 Parität weiterhin bestätigt - keine neuen Texte nötig,
+Placeholder/Tooltip funktionieren auf QComboBox identisch zu vorher).

@@ -344,22 +344,37 @@ def test_source_stack_size_hint_tracks_the_current_page_not_the_largest(qapp, mo
 
 @pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
 def test_last_query_text_is_restored_on_the_next_open(qapp, module_name, dialog_attr) -> None:
+    # 02.09.2026, grown into a full search-history dropdown (Michael: "Eine
+    # Historie im Suchbereich hätte ich noch gern.") - query_edit is now an
+    # editable QComboBox (see tests/test_ui_query_history.py for that
+    # feature's own dedicated coverage: recording only once a search
+    # actually runs, dedup/promote, the cap, legacy-key migration). This
+    # one test stays here since it's what this module's "last-used text
+    # remembered" feedback thread (see the section comment above) was
+    # actually about - restore-on-reopen still works the same way, just
+    # via _query_history/_record_query_history() instead of a single
+    # QLineEdit value.
     settings = QSettings("PDF-Translator-Test", f"{dialog_attr}LastQuery")
     dialog_module = importlib.import_module(module_name)
     DialogClass = getattr(dialog_module, dialog_attr)
     from ui.i18n import LanguageManager
+    from ui.merge_search_dialog import _record_query_history
 
     first = DialogClass(LanguageManager("de"), settings)
     try:
-        assert first.query_edit.text() == ""  # nothing remembered yet
-        first.query_edit.setText("Acme UND Vertrag")
+        assert first.query_edit.currentText() == ""  # nothing remembered yet
+        # Only typing it, with no search actually run, must NOT be enough
+        # to persist it (see test_ui_query_history.py) - simulate an
+        # actually-run search directly against the history list instead of
+        # driving the full _start_search()/worker machinery here.
+        first._query_history = _record_query_history(first._query_history, "Acme UND Vertrag")
         first.done(0)  # QDialog.reject()/accept() both route through done()
     finally:
         first.close()
 
     second = DialogClass(LanguageManager("de"), settings)
     try:
-        assert second.query_edit.text() == "Acme UND Vertrag"
+        assert second.query_edit.currentText() == "Acme UND Vertrag"
     finally:
         second.close()
 

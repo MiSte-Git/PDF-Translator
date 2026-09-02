@@ -49,12 +49,14 @@ siehe dort).
 """
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 
 from PySide6.QtCore import QDate, QSettings, Qt, QThreadPool, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDateEdit,
     QDialog,
     QFileDialog,
@@ -212,6 +214,54 @@ def _optional_date(edit: QDateEdit) -> date | None:
     return date(value.year(), value.month(), value.day())
 
 
+# 02.09.2026 (Michael: "Eine Historie im Suchbereich hätte ich noch gern.")
+# - the search field used to persist only the single LAST query (see
+# query_edit's constructor comment below) even though Michael's original
+# request the same day already said "die letzten Suchbegriffe" (plural).
+# Kept as free functions (not dialog methods) so both search dialogs share
+# one implementation, same as _configure_optional_date_edit()/_optional_date()
+# above - purely QSettings/list bookkeeping, nothing PDF- or DOCX-specific.
+_QUERY_HISTORY_MAX = 20  # generous but bounded - this is a dropdown, not a log
+
+
+def _load_query_history(settings: QSettings, key: str, legacy_key: str) -> list[str]:
+    """The persisted query history for `key` (newest first), or - the
+    first time this runs after the history feature shipped, when `key`
+    has never been written yet - a one-entry history seeded from the
+    OLD single-value key (`legacy_key`, e.g. "merge_search_last_query")
+    so Michael's most recent search isn't just dropped. Corrupt/foreign
+    JSON (should never happen, but this is user-editable-by-hand-editing
+    the registry/plist territory) is treated the same as "no history yet"
+    rather than crashing the dialog on startup.
+    """
+    raw = settings.value(key, None, type=str)
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, list) and all(isinstance(item, str) for item in parsed):
+            return parsed
+    legacy = str(settings.value(legacy_key, "", type=str)).strip()
+    return [legacy] if legacy else []
+
+
+def _record_query_history(history: list[str], text: str) -> list[str]:
+    """`history` (newest first) with `text` moved to the front - a fresh
+    entry if it's new, or an existing one promoted rather than
+    duplicated if Michael re-runs a search he's already done before.
+    Blank/whitespace-only text leaves `history` unchanged (nothing
+    useful to remember) - callers only call this once a search actually
+    ran, not on every keystroke, so "used this term" and "typed this
+    term" stay the same thing. Capped at _QUERY_HISTORY_MAX, oldest
+    entries fall off first.
+    """
+    text = text.strip()
+    if not text:
+        return history
+    return [text] + [entry for entry in history if entry != text][: _QUERY_HISTORY_MAX - 1]
+
+
 def _mtime_or_zero(path: Path) -> float:
     """Same defensive pattern as MergeDialog._mtime() (ui/merge_dialog.py)
     - a result whose file vanished between the scan and a "Nach Datum
@@ -359,12 +409,26 @@ class MergeSearchDialog(QDialog):
         self.date_filter_group = self._build_date_filter_group()
 
         self.query_label = QLabel()
-        self.query_edit = QLineEdit()
         # 02.09.2026 (Michael: "Es sollte noch die letzten Suchbegriffe im
-        # Suchfeld angezeigt werden.") - restored the same way as the last
-        # folder/recursive-checkbox state (_restore_local_folder_state()),
-        # persisted in done() below.
-        self.query_edit.setText(str(self.settings.value("merge_search_last_query", "", type=str)))
+        # Suchfeld angezeigt werden." - then, once only the single last
+        # query was actually kept: "Eine Historie im Suchbereich hätte ich
+        # noch gern.") - an editable QComboBox: the field itself stays a
+        # free-text box (typing/pasting anything works exactly as before,
+        # currentText() reads it the same way .text() used to), and its
+        # dropdown additionally offers every past search term, newest
+        # first. NoInsert: a term is only ever added to the list by
+        # _record_query_history() below (once a search actually RUNS, see
+        # _start_search()), never automatically just because Enter was
+        # pressed in the field - typing something and never searching it
+        # shouldn't pollute the history.
+        self.query_edit = QComboBox()
+        self.query_edit.setEditable(True)
+        self.query_edit.setInsertPolicy(QComboBox.NoInsert)
+        self._query_history = _load_query_history(
+            self.settings, "merge_search_query_history", "merge_search_last_query"
+        )
+        self.query_edit.addItems(self._query_history)
+        self.query_edit.setCurrentText(self._query_history[0] if self._query_history else "")
 
         self.search_button = QPushButton()
         self.search_button.clicked.connect(self._start_search)
@@ -522,10 +586,12 @@ class MergeSearchDialog(QDialog):
         # recursive checkbox is remembered the same way the Drive folder
         # link above already was, on every path that closes this dialog.
         self.settings.setValue("merge_search_recursive", self.recursive_checkbox.isChecked())
-        # 02.09.2026 (Michael: "Es sollte noch die letzten Suchbegriffe im
-        # Suchfeld angezeigt werden.") - see query_edit's constructor
-        # comment above.
-        self.settings.setValue("merge_search_last_query", self.query_edit.text())
+        # 02.09.2026 (Michael, "Eine Historie im Suchbereich hätte ich noch
+        # gern.") - see query_edit's constructor comment above; the
+        # history itself is already updated (in memory) by
+        # _record_query_history() whenever a search actually runs, this
+        # just persists whatever it currently holds.
+        self.settings.setValue("merge_search_query_history", json.dumps(self._query_history))
         # 02.09.2026 - a still-open detached results window (see
         # _DetachedResultsWindow) must not outlive this dialog: closing it
         # here reparents self.results back before this dialog itself is
@@ -1039,7 +1105,8 @@ class MergeSearchDialog(QDialog):
     def _selected_scopes(self) -> set[str]:
         """Which of the three scope checkboxes are checked right now - see
         ui/search_scopes.py for what each scope key means. Read fresh on
-        every "Suchen" click rather than cached, same as query_edit.text().
+        every "Suchen" click rather than cached, same as
+        query_edit.currentText().
         """
         scopes: set[str] = set()
         if self.scope_ico_format_checkbox.isChecked():
@@ -1300,6 +1367,7 @@ class MergeSearchDialog(QDialog):
         self.take_selected_button.setEnabled(False)
         self.status_label.setText("")
 
+        query_text = self.query_edit.currentText()
         scopes = self._selected_scopes()
         # 02.09.2026 (Michael: "Wenn ich alle PDFs in einem Ordner haben
         # möchte, ohne einen Suchbereich, gibt es einen Fehler.") - a scope
@@ -1310,7 +1378,7 @@ class MergeSearchDialog(QDialog):
         # the deliberately-supported "list every file in this folder" case
         # (empty search field) for no reason - no scope is ever consulted
         # for it, so none should be required either.
-        if self.query_edit.text().strip() and not scopes:
+        if query_text.strip() and not scopes:
             QMessageBox.warning(self, self.windowTitle(), self.language.text("merge_search.error_missing_scope"))
             return
 
@@ -1332,7 +1400,7 @@ class MergeSearchDialog(QDialog):
                 QMessageBox.critical(self, self.language.text("merge_search.failed_title"), str(exc))
                 return
             self._worker = DriveSearchWorker(
-                client, self._drive_folder_id, self.query_edit.text(), self.recursive_checkbox.isChecked(),
+                client, self._drive_folder_id, query_text, self.recursive_checkbox.isChecked(),
                 self._drive_cache_dir, scopes, date_filter,
             )
         else:
@@ -1340,8 +1408,22 @@ class MergeSearchDialog(QDialog):
                 QMessageBox.warning(self, self.windowTitle(), self.language.text("merge_search.error_missing_folder"))
                 return
             self._worker = IcoSearchWorker(
-                self._folder, self.query_edit.text(), self.recursive_checkbox.isChecked(), scopes, date_filter
+                self._folder, query_text, self.recursive_checkbox.isChecked(), scopes, date_filter
             )
+
+        # 02.09.2026 (Michael, "Eine Historie im Suchbereich hätte ich noch
+        # gern.") - recorded here, not on every keystroke: every validation
+        # check above has passed and the worker is about to actually run,
+        # so this is the point a query genuinely counts as "used". Rebuilds
+        # the dropdown (blockSignals: repopulating must not itself fire a
+        # currentText change and stomp on what the user just typed/is about
+        # to search).
+        self._query_history = _record_query_history(self._query_history, query_text)
+        self.query_edit.blockSignals(True)
+        self.query_edit.clear()
+        self.query_edit.addItems(self._query_history)
+        self.query_edit.setCurrentText(query_text)
+        self.query_edit.blockSignals(False)
 
         self.progress.setRange(0, 0)  # indeterminate until the first progress signal reports a real total
         self.progress.setVisible(True)
