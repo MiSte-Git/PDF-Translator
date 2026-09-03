@@ -81,6 +81,27 @@ class WordParagraph:
     """Whether this paragraph should be sent to translation. False for the
     page-1 metadata block that precedes the document's separator-line
     shape (see DocxEngine.get_paragraphs())."""
+    mark_rpr: object = None
+    """This paragraph's own <w:pPr>/<w:rPr> ("paragraph mark run
+    properties"), if present - a deep copy, independent of the live
+    document tree. Many real Word documents set a paragraph's font/size
+    once here rather than repeating it on every individual <w:r> - a run
+    with no <w:rPr> of its own inherits from this (then from the
+    paragraph's style, then the document's defaults). See WordRun.
+    source_rpr's docstring for the run-level equivalent, and
+    ParagraphHtml.base_rpr in pipeline/word/html_bridge.py for how this is
+    used as a fallback when no individual run has its own formatting to
+    reuse.
+
+    03.09.2026 (Michael, side-by-side output: "Dann hat der Originale
+    Body Text 11 pt und der Übersetzte 12 pt"): before this field existed,
+    a paragraph whose runs carried no rPr of their own (relying entirely
+    on this paragraph-mark-level size) produced translated runs with
+    nothing to base their rPr on at all - they silently fell back to the
+    document's raw default size (commonly 12pt) instead of the
+    paragraph's actual, pPr-level size (11pt here), even though the
+    reused-verbatim "Original" column (which never rebuilds its runs)
+    kept rendering at the correct size."""
 
 
 @runtime_checkable

@@ -173,11 +173,27 @@ def paragraph_to_html(paragraph: WordParagraph) -> ParagraphHtml:
 
         parts.append(escaped)
 
+    # Priority for the paragraph's "ordinary text" base rPr:
+    # 1. a non-hyperlink run's own rPr (base_rpr) - the most specific.
+    # 2. the paragraph mark's own rPr (paragraph.mark_rpr) - many real
+    #    documents set font/size once here rather than repeating it on
+    #    every run (03.09.2026, Michael: "Dann hat der Originale Body Text
+    #    11 pt und der Übersetzte 12 pt" - exactly this case, a paragraph
+    #    whose runs carried no rPr of their own at all).
+    # 3. any run's rPr regardless of kind (fallback_base_rpr), so a
+    #    paragraph that's ENTIRELY one hyperlink still has something.
+    if base_rpr is not None:
+        resolved_base_rpr = base_rpr
+    elif paragraph.mark_rpr is not None:
+        resolved_base_rpr = paragraph.mark_rpr
+    else:
+        resolved_base_rpr = fallback_base_rpr
+
     return ParagraphHtml(
         html="".join(parts),
         image_runs=image_runs,
         hyperlink_targets=hyperlink_targets,
-        base_rpr=base_rpr if base_rpr is not None else fallback_base_rpr,
+        base_rpr=resolved_base_rpr,
         hyperlink_source_rpr=hyperlink_source_rpr,
     )
 

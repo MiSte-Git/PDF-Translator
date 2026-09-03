@@ -70,6 +70,49 @@ def _has_separator_shape(paragraph: etree._Element) -> bool:
     return False
 
 
+def _inline_section_break(paragraph: etree._Element) -> etree._Element | None:
+    """The <w:sectPr> nested in `paragraph`'s <w:pPr>, if this paragraph IS
+    a section-break paragraph (every section but the LAST one in a
+    multi-section document - see pipeline/word/merge.py, which inserts one
+    such break per merged source). None for an ordinary paragraph.
+
+    03.09.2026: moved here from pipeline/word/side_by_side.py (which still
+    uses it for its own per-section table rebuild) so DocxEngine.open()
+    can also use it - see _section_ranges() and open()'s ico_mode
+    docstring for why: a merged multi-ICO document needs its page-1
+    metadata block detected PER SECTION (per original source document),
+    not just once for the whole merged file.
+    """
+    p_pr = paragraph.find(_w("pPr"))
+    return p_pr.find(_w("sectPr")) if p_pr is not None else None
+
+
+def _section_ranges(
+    paragraph_elements: list[etree._Element],
+) -> list[tuple[list[int], etree._Element | None]]:
+    """Split `paragraph_elements`'s indices into consecutive sections, at
+    every inline section-break paragraph. Each entry is
+    (indices_in_this_section, inline_sect_pr) - inline_sect_pr is that
+    section-BREAK paragraph's own <w:sectPr> for every section but the
+    last, always None for the trailing entry (whose section end is the
+    document's own body-level <w:sectPr> instead - the caller already has
+    that one separately, or doesn't need it at all - see open()'s use
+    below, which only cares about the index grouping). The trailing entry
+    is always appended, even with an empty index list, so callers always
+    have somewhere to attach the final, body-level section terminator.
+    """
+    sections: list[tuple[list[int], etree._Element | None]] = []
+    current: list[int] = []
+    for index, element in enumerate(paragraph_elements):
+        current.append(index)
+        inline_sect_pr = _inline_section_break(element)
+        if inline_sect_pr is not None:
+            sections.append((current, inline_sect_pr))
+            current = []
+    sections.append((current, None))
+    return sections
+
+
 def _walk_run(run: etree._Element) -> tuple[list[str], bool]:
     """Walk a run's content, skipping any mc:Fallback subtree entirely
     (e.g. the legacy VML branch of a drawing's mc:AlternateContent
@@ -284,6 +327,10 @@ def _build_paragraph(
     that wraps one or more <w:r> children (standard OOXML) - not nested
     inside a run - so it's handled as its own case, not via _walk_run().
     """
+    p_pr = paragraph.find(_w("pPr"))
+    mark_rpr_element = p_pr.find(_w("rPr")) if p_pr is not None else None
+    mark_rpr = _copy_rpr(mark_rpr_element)
+
     runs: list[WordRun] = []
     for child in paragraph:
         if child.tag == _w("r"):
@@ -309,7 +356,7 @@ def _build_paragraph(
                         source_rpr=run_element.find(_w("rPr")),
                     )
                 )
-    return WordParagraph(runs=runs, translatable=translatable)
+    return WordParagraph(runs=runs, translatable=translatable, mark_rpr=mark_rpr)
 
 
 def _build_break_run() -> etree._Element:
@@ -605,6 +652,24 @@ class DocxEngine:
         get_header_footer_paragraphs() for why header/footer paragraphs
         are always translatable=False, unconditionally (independent of
         ico_mode).
+
+        03.09.2026 (Michael, a merged multi-ICO document: "der obere Teil,
+        der ja im einzelnen Dokument die erste Seite ist, wird im
+        zusammengefügten Dokument als normale Seite gehandhabt"): the
+        separator-shape scan used to run ONCE across the whole document and
+        anchor on the FIRST match only - fine for a single document, but
+        pipeline/word/merge.py joins several source .docx files with a real
+        section break per source, and each source has its OWN page-1
+        metadata block (with its OWN separator shape). Only the first
+        source's metadata block sat "before" that single anchor; every
+        later source's metadata block came AFTER it and was therefore
+        wrongly left translatable=True. The scan now runs PER SECTION (see
+        _section_ranges()) - each section gets its own local anchor, so
+        every merged source's own page-1 metadata block is recognized and
+        excluded independently. self.separator_found is True if ANY
+        section had a separator shape (unchanged meaning for the ui/
+        word_job.py warning: "was the expected ICO structure found at
+        all").
         """
         with zipfile.ZipFile(path) as archive:
             self._archive_entries = [
@@ -625,17 +690,20 @@ class DocxEngine:
             entries_by_name, _FOOTER_PATH, _FOOTER_RELS_PATH, body_tag=None
         )
 
-        anchor_index = (
-            next((i for i, p in enumerate(self._paragraph_elements) if _has_separator_shape(p)), None)
-            if ico_mode
-            else None
-        )
-        self.separator_found = anchor_index is not None
+        non_translatable_indices: set[int] = set()
+        self.separator_found = False
+        if ico_mode:
+            for indices, _unused_sect_pr in _section_ranges(self._paragraph_elements):
+                local_anchor = next(
+                    (i for i in indices if _has_separator_shape(self._paragraph_elements[i])), None
+                )
+                if local_anchor is None:
+                    continue
+                self.separator_found = True
+                non_translatable_indices.update(i for i in indices if i < local_anchor)
 
         self._paragraphs = [
-            _build_paragraph(
-                p, self._rels, translatable=(anchor_index is None or i >= anchor_index)
-            )
+            _build_paragraph(p, self._rels, translatable=(i not in non_translatable_indices))
             for i, p in enumerate(self._paragraph_elements)
         ]
 

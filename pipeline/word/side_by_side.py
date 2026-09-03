@@ -96,6 +96,8 @@ from pipeline.word.docx_engine import (
     _build_break_run,
     _build_hyperlink_element,
     _build_text_run,
+    _inline_section_break,
+    _section_ranges,
     _w,
     _walk_run,
 )
@@ -170,41 +172,6 @@ def _paragraph_is_empty(paragraph: etree._Element) -> bool:
     carry real text is still shown normally.
     """
     return paragraph.find(_w("r")) is None and paragraph.find(_w("hyperlink")) is None
-
-
-def _inline_section_break(paragraph: etree._Element) -> etree._Element | None:
-    """The <w:sectPr> nested in `paragraph`'s <w:pPr>, if this paragraph
-    IS a section-break paragraph (every section but the LAST one - see
-    this module's 03.09.2026 multi-section fix in its docstring). None
-    for an ordinary paragraph.
-    """
-    p_pr = paragraph.find(_w("pPr"))
-    return p_pr.find(_w("sectPr")) if p_pr is not None else None
-
-
-def _section_ranges(
-    original_paragraph_elements: list[etree._Element],
-) -> list[tuple[list[int], etree._Element | None]]:
-    """Split `original_paragraph_elements`'s indices into consecutive
-    sections, at every inline section-break paragraph. Each entry is
-    (indices_in_this_section, inline_sect_pr) - inline_sect_pr is that
-    section-BREAK paragraph's own <w:sectPr> for every section but the
-    last, always None for the trailing entry (whose section end is the
-    document's own body-level <w:sectPr> instead - the caller already has
-    that one separately). The trailing entry is always appended, even
-    with an empty index list, so callers always have somewhere to attach
-    the final, body-level section terminator.
-    """
-    sections: list[tuple[list[int], etree._Element | None]] = []
-    current: list[int] = []
-    for index, element in enumerate(original_paragraph_elements):
-        current.append(index)
-        inline_sect_pr = _inline_section_break(element)
-        if inline_sect_pr is not None:
-            sections.append((current, inline_sect_pr))
-            current = []
-    sections.append((current, None))
-    return sections
 
 
 def _renumber_doc_pr_ids(body: etree._Element) -> None:
