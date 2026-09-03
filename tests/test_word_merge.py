@@ -321,3 +321,38 @@ def test_progress_callback_reports_file_and_batch_messages(tmp_path: Path) -> No
     assert any("Batch" in m for m in messages)
     assert any("f0.docx" in m for m in messages)
     assert any("Zwischenergebnisse" in m for m in messages)
+
+
+def test_partial_append_failure_leaves_nothing_of_the_skipped_document_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """03.09.2026 (Michael: "Das sind solche Fehler die nicht so gut
+    auffallen."): docxcompose inserts paragraph by paragraph and can fail
+    halfway through a document. The warning says "übersprungen", so the
+    result must not contain the first half of that document either - the
+    body is rolled back to its exact state before the failed append."""
+    a = _make_docx_with_header(tmp_path / "a.docx", "Doc A", "Header A")
+    b = _make_docx_with_header(tmp_path / "b.docx", "Half of B", "Header B")
+    c = _make_docx_with_header(tmp_path / "c.docx", "Doc C", "Header C")
+    destination = tmp_path / "out.docx"
+
+    from docxcompose.composer import Composer
+
+    original_append = Composer.append
+    calls = {"n": 0}
+
+    def half_then_fail(self, doc, remove_property_fields=True):
+        calls["n"] += 1
+        original_append(self, doc, remove_property_fields=remove_property_fields)  # content IS inserted ...
+        if calls["n"] == 1:
+            raise RuntimeError("simulated failure after the content was already inserted")
+
+    monkeypatch.setattr(Composer, "append", half_then_fail)
+
+    stats = merge_docx_files([a, b, c], destination)
+
+    texts = [t for t in _paragraph_texts(destination) if t]
+    assert texts == ["Doc A", "Doc C"]
+    assert stats.segments == 2
+    assert len(stats.warnings) == 1 and "b.docx" in stats.warnings[0]
+    assert [h for h, _ in _section_headers_and_footers(destination)] == ["Header A", "Header C"]

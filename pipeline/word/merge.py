@@ -297,6 +297,19 @@ def _append_as_own_section(composer, doc) -> None:
         section_type.set(qn("w:val"), "nextPage")
 
 
+def _restore_body(body, children_before) -> None:
+    """Put `body`'s children back to exactly `children_before` (same
+    elements, same order) after a failed append - see _merge_sequential().
+    lxml moves an element on append, so re-appending the snapshot also
+    pulls back an original that a partial append had detached (the
+    body-level sectPr _append_as_own_section() relocates, for instance).
+    """
+    for element in list(body):
+        body.remove(element)
+    for element in children_before:
+        body.append(element)
+
+
 def _merge_sequential(
     sources: Sequence[Path],
     total_for_progress: int,
@@ -351,12 +364,24 @@ def _merge_sequential(
             appended += 1
             continue
 
+        # Was composer.doc.add_page_break() + composer.append(doc) until
+        # 03.09.2026 - see _append_as_own_section() for why that lost
+        # every appended document's header/footer.
+        body = composer.doc.element.body
+        body_before = list(body)
         try:
-            # Was composer.doc.add_page_break() + composer.append(doc) until
-            # 03.09.2026 - see _append_as_own_section() for why that lost
-            # every appended document's header/footer.
             _append_as_own_section(composer, doc)
         except Exception as exc:  # noqa: BLE001 - soft-fail, see docstring above
+            # docxcompose inserts element by element and can fail halfway
+            # (e.g. on a SmartArt part of the 5th paragraph) - without this
+            # rollback the first half of the "skipped" document silently
+            # stayed in the result while the warning claimed it was
+            # skipped (Michael, 03.09.2026: "Das sind solche Fehler die
+            # nicht so gut auffallen."). Restoring the body's exact
+            # previous child list drops everything the failed append
+            # inserted; parts/styles it may have added to the package stay
+            # behind unreferenced, which is harmless to the content.
+            _restore_body(body, body_before)
             warnings.append(f'"{path.name}" konnte nicht angehängt werden und wurde übersprungen ({exc}).')
             continue
         appended += 1
