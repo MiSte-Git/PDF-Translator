@@ -1,0 +1,8 @@
+# Pakete, die AUSSCHLIESSLICH mit --no-deps installiert werden dürfen:
+#   pip install --no-deps -r requirements-gpu-nodeps.txt
+# Voraussetzung: requirements.txt, requirements-ocr.txt und
+# requirements-gpu.txt sind bereits installiert (liefern torch, numpy,
+# Pillow, opencv-python-headless - alles, was unten zur Laufzeit gebraucht
+# wird). Hintergrund und Begründung: Kopfkommentar in requirements-gpu.txt.
+# bootstrap/installer.py behandelt diese Datei automatisch mit --no-deps.
+simple-lama-inpainting

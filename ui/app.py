@@ -8,14 +8,15 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, QThreadPool, QTimer, QUrl, Qt
-from PySide6.QtGui import QColor, QDesktopServices, QPalette
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
-    QFormLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
-    QMessageBox, QProgressBar, QPushButton, QSpinBox, QTextEdit, QVBoxLayout, QWidget,
+    QFormLayout, QFrame, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
+    QMessageBox, QProgressBar, QPushButton, QScrollArea, QSpinBox, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from _version import __version__
+from bootstrap.desktop_integration import APP_WM_CLASS
 from bootstrap.release_source import UpdateInfo
 from pipeline.app_logging import LOG_FILE, configure_logging
 from pipeline.images.inpainting import GPU_MIN_VRAM_GB, gpu_vram_gb
@@ -52,6 +53,11 @@ from ui.workers import (
 )
 
 log = logging.getLogger(__name__)
+
+# Window/taskbar icon - assets/icon.png next to the source tree (generated
+# from assets/icon.svg by tools/build_icon.py). QIcon of a missing file is
+# simply empty, so an older checkout without assets/ still starts.
+APP_ICON_PATH = Path(__file__).resolve().parent.parent / "assets" / "icon.png"
 
 MODE_KEYS = {
     TranslationMode.PDF: "mode.pdf",
@@ -310,9 +316,24 @@ class HardwareCheckDialog(QDialog):
             self.status.setText(t("hw_check.not_found", checked_at=checked_at))
             return
         key = "hw_check.found_ok" if result.meets_recommendation else "hw_check.found_below_recommended"
-        self.status.setText(
-            t(key, name=result.name, vram_gb=result.vram_gb, min_gb=result.min_vram_gb, checked_at=checked_at)
-        )
+        text = t(key, name=result.name, vram_gb=result.vram_gb, min_gb=result.min_vram_gb, checked_at=checked_at)
+        # 03.09.2026: the marker now also records the driver's maximum
+        # CUDA version (bootstrap/gpu_check.py) - shown as a second line so
+        # a "found, enough VRAM, but torch still says no GPU" situation is
+        # explainable from this dialog alone. Older markers (no
+        # cuda_version) simply get no second line.
+        if result.cuda_version:
+            from bootstrap.gpu_check import driver_supported, torch_index_url
+            from bootstrap.gpu_check import GpuInfo as _GpuInfo
+
+            probe = _GpuInfo(name=result.name or "", vram_gb=result.vram_gb or 0.0, cuda_version=result.cuda_version)
+            if driver_supported(probe):
+                index_url = torch_index_url(result.cuda_version)
+                torch_variant = index_url.rsplit("/", 1)[-1] if index_url else "PyPI"
+                text += "\n" + t("hw_check.driver_cuda_ok", cuda_version=result.cuda_version, torch_variant=torch_variant)
+            else:
+                text += "\n" + t("hw_check.driver_cuda_too_old", cuda_version=result.cuda_version)
+        self.status.setText(text)
 
 
 def _bootstrap_language_marker() -> str | None:
@@ -646,7 +667,26 @@ class MainWindow(QMainWindow):
         settings_row.addWidget(self.settings_button)
         root.addLayout(settings_row)
         root.addStretch()
-        widget = QWidget(); widget.setLayout(root); self.setCentralWidget(widget)
+        widget = QWidget(); widget.setLayout(root)
+        # 03.09.2026 (Michael: "das UI [geht] über die Höhe des Bildschirms
+        # leicht hinaus und [ist] nur in der Breite einstellbar und nicht in
+        # der Höhe. Der Button unten rechts ist dadurch nicht sichtbar.") -
+        # with the cards stacked directly as central widget, the window's
+        # minimum height was the SUM of every card's minimum height, which
+        # after the 02.09. "Dateien zusammenführen" card grew past a
+        # 768/800px screen: Qt then refuses to shrink the window vertically
+        # and the settings row at the bottom falls off-screen. Wrapping the
+        # stack in a QScrollArea decouples the window's minimum from the
+        # content's: the window shrinks freely, and only when it is really
+        # too small does a vertical scrollbar appear. Frameless + no
+        # horizontal bar so it is invisible on a large screen.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(widget)
+        self.setCentralWidget(scroll)
+        self._fit_initial_size_to_screen()
         self.language.changed.connect(self.retranslate)
         self.retranslate()
         # Self-update: fired once, shortly after the window is up rather
@@ -734,6 +774,20 @@ class MainWindow(QMainWindow):
         # Python-/Qt-Aufraeumroutine.
         self.settings.sync()
         super().closeEvent(event)
+
+    def _fit_initial_size_to_screen(self) -> None:
+        """Clamp the 880x760 default to the available screen area (minus a
+        margin for the window frame/taskbar), so the first launch on a small
+        display never opens taller than the screen - see the QScrollArea
+        comment in __init__ for the same bug's other half."""
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        width = min(self.width(), max(600, available.width() - 40))
+        height = min(self.height(), max(480, available.height() - 80))
+        if (width, height) != (self.width(), self.height()):
+            self.resize(width, height)
 
     def retranslate(self) -> None:
         t = self.language.text
@@ -1013,6 +1067,18 @@ class MainWindow(QMainWindow):
         # docstring), so this hint stays empty/hidden for them.
         is_images = self.mode.currentData() == TranslationMode.IMAGES
         backend = self.inpainting_backend.currentData()
+        # 03.09.2026 (Michael: the torch CUDA warning appeared before the
+        # window did): inpainting_backend_available("gpu_inpainting") and
+        # gpu_vram_gb() below import torch - several hundred MB and a CUDA
+        # probe - and this hint is refreshed on every start/retranslate/
+        # mode change, so a saved "gpu_inpainting" backend selection made
+        # torch load for a PDF/Word/PPTX session that never needs it. Only
+        # probe while the Bilder mode is actually selected; for every other
+        # mode the hint is hidden anyway.
+        if not is_images:
+            self.inpainting_backend_hint.setText("")
+            self.inpainting_backend_hint.setVisible(False)
+            return
         available = backend is None or inpainting_backend_available(backend)
         hint_text = "" if available else self.language.text("inpainting_backend.unavailable")
         # 01.09.2026 (Michael: "GPU Schwelle auf den realistischen Wert
@@ -1728,6 +1794,15 @@ def main() -> int:
     # ganz am Anfang von MainWindow.__init__() noch in der Datei landet.
     configure_logging()
     app = QApplication(sys.argv)
+    # 03.09.2026 (Michael: "... über die angeheftete App in der Taskleiste")
+    # - applicationName is what Qt reports as X11 WM_CLASS / Wayland app_id;
+    # it must match StartupWMClass in the .desktop entry written by
+    # bootstrap/desktop_integration.py (APP_WM_CLASS), otherwise the desktop
+    # cannot associate the running window with the pinned launcher and shows
+    # a second, generic "python" icon. Safe for QSettings: MainWindow passes
+    # organization/application explicitly and does not rely on this name.
+    app.setApplicationName(APP_WM_CLASS)
+    app.setWindowIcon(QIcon(str(APP_ICON_PATH)))
     apply_explicit_palette(app)
     window = MainWindow(); window.show()
     return app.exec()

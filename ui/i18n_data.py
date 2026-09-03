@@ -302,6 +302,15 @@ DE = {
         "{min_gb:.0f} GB - läuft eventuell, aber ohne Gewähr, besonders "
         "bei großen Bildern oder vielen Textstellen gleichzeitig."
     ),
+    "hw_check.driver_cuda_ok": (
+        "Treiber unterstützt CUDA {cuda_version} - passende PyTorch-Variante: "
+        "{torch_variant}."
+    ),
+    "hw_check.driver_cuda_too_old": (
+        "Treiber unterstützt nur CUDA {cuda_version} - zu alt für lokales "
+        "KI-Inpainting (mindestens 11.8 nötig). Bitte den Grafiktreiber "
+        "aktualisieren."
+    ),
     "settings.button": "Einstellungen …",
     "settings.title": "Einstellungen",
     "settings.language": "Oberflächensprache",
@@ -668,6 +677,12 @@ DE = {
         "Keine unterstützte NVIDIA-Grafikkarte gefunden. Lokal ist auf "
         "diesem Rechner nicht sinnvoll nutzbar."
     ),
+    "bootstrap.gpu_driver_too_old": (
+        "Gefunden: {name}, aber der NVIDIA-Treiber ist zu alt (unterstützt "
+        "nur CUDA {cuda_version}, nötig ist mindestens 11.8). Bitte den "
+        "Grafiktreiber aktualisieren und den Assistenten erneut starten, "
+        "oder stattdessen Online wählen."
+    ),
     "bootstrap.gpu_mac_unsupported": (
         "Der lokale Modus wird auf dem Mac aktuell nicht unterstützt. "
         "Bitte stattdessen Online wählen."
@@ -962,6 +977,15 @@ EN = {
         "{min_gb:.0f} GB - may still work, but without guarantee, "
         "especially with large images or many text regions at once."
     ),
+    "hw_check.driver_cuda_ok": (
+        "Driver supports CUDA {cuda_version} - matching PyTorch build: "
+        "{torch_variant}."
+    ),
+    "hw_check.driver_cuda_too_old": (
+        "Driver supports only CUDA {cuda_version} - too old for local AI "
+        "inpainting (at least 11.8 required). Please update the graphics "
+        "driver."
+    ),
     "settings.button": "Settings …",
     "settings.title": "Settings",
     "settings.language": "Interface language",
@@ -1249,6 +1273,12 @@ EN = {
     "bootstrap.gpu_not_found": (
         "No supported NVIDIA graphics card found. Local mode isn't "
         "practically usable on this computer."
+    ),
+    "bootstrap.gpu_driver_too_old": (
+        "Found: {name}, but the NVIDIA driver is too old (supports only "
+        "CUDA {cuda_version}; at least 11.8 is required). Please update "
+        "the graphics driver and run this setup again, or choose Online "
+        "instead."
     ),
     "bootstrap.gpu_mac_unsupported": (
         "Local mode isn't supported on Mac yet. Please choose Online "

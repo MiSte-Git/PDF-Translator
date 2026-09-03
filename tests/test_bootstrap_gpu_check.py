@@ -210,3 +210,109 @@ def test_detect_and_save_gpu_check_probes_hardware_exactly_once(monkeypatch, tmp
     monkeypatch.setattr(gpu_check, "detect_nvidia_gpu", fake_detect)
     gpu_check.detect_and_save_gpu_check(marker_path=marker)
     assert len(calls) == 1
+
+
+# --- 03.09.2026: driver CUDA version -> torch wheel index --------------------
+
+_SMI_BANNER = (
+    "Thu Sep  3 10:00:00 2026\n"
+    "+-----------------------------------------------------------------------------------------+\n"
+    "| NVIDIA-SMI 550.163.01             Driver Version: 550.163.01     CUDA Version: 12.4     |\n"
+)
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        (_SMI_BANNER, (12, 4)),
+        ("CUDA Version: 13.0", (13, 0)),
+        ("CUDA Version:11.8", (11, 8)),
+        ("no cuda here", None),
+        ("", None),
+    ],
+)
+def test_parse_cuda_version(text, expected):
+    assert gpu_check.parse_cuda_version(text) == expected
+
+
+def test_detect_driver_cuda_version_parses_banner(monkeypatch):
+    monkeypatch.setattr(gpu_check.subprocess, "run", lambda *a, **k: _FakeCompletedProcess(_SMI_BANNER))
+    assert gpu_check.detect_driver_cuda_version() == "12.4"
+
+
+def test_detect_driver_cuda_version_never_raises(monkeypatch):
+    def fake_run(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(gpu_check.subprocess, "run", fake_run)
+    assert gpu_check.detect_driver_cuda_version() is None
+
+
+def test_detect_nvidia_gpu_includes_driver_cuda_version(monkeypatch):
+    def fake_run(cmd, **kwargs):
+        if "--query-gpu=name,memory.total" in cmd:
+            return _FakeCompletedProcess("NVIDIA GeForce RTX 4070, 12282\n")
+        return _FakeCompletedProcess(_SMI_BANNER)
+
+    monkeypatch.setattr(gpu_check.subprocess, "run", fake_run)
+    gpu = gpu_check.detect_nvidia_gpu()
+    assert gpu is not None
+    assert gpu.cuda_version == "12.4"
+
+
+@pytest.mark.parametrize(
+    "cuda_version, expected",
+    [
+        ("12.4", "https://download.pytorch.org/whl/cu128"),
+        ("12.8", "https://download.pytorch.org/whl/cu128"),
+        ("11.8", "https://download.pytorch.org/whl/cu118"),
+        ("13.0", None),
+        ("14.1", None),
+        (None, None),
+        ("garbage", None),
+    ],
+)
+def test_torch_index_url(cuda_version, expected):
+    assert gpu_check.torch_index_url(cuda_version) == expected
+
+
+@pytest.mark.parametrize(
+    "gpu, expected",
+    [
+        (GpuInfo(name="RTX 4070", vram_gb=12.0, cuda_version="12.4"), True),
+        (GpuInfo(name="RTX 4070", vram_gb=12.0, cuda_version="11.8"), True),
+        (GpuInfo(name="GTX 1080", vram_gb=8.0, cuda_version="11.4"), False),
+        (GpuInfo(name="GTX 1080", vram_gb=8.0, cuda_version="10.2"), False),
+        (GpuInfo(name="RTX 4070", vram_gb=12.0, cuda_version=None), True),
+        (None, True),
+    ],
+)
+def test_driver_supported(gpu, expected):
+    assert gpu_check.driver_supported(gpu) is expected
+
+
+def test_save_and_read_marker_round_trips_cuda_version(tmp_path):
+    marker = tmp_path / "gpu_check.json"
+    gpu_check.save_gpu_check_result(GpuInfo(name="RTX 4070", vram_gb=12.0, cuda_version="12.4"), marker_path=marker)
+    result = gpu_check.read_gpu_check_marker(marker_path=marker)
+    assert result is not None and result.cuda_version == "12.4"
+
+
+def test_read_marker_without_cuda_version_field_still_loads(tmp_path):
+    # Markers written before 03.09.2026 have no cuda_version key.
+    marker = tmp_path / "gpu_check.json"
+    marker.write_text(
+        json.dumps(
+            {
+                "checked_at": "2026-09-01T00:00:00+00:00",
+                "found": True,
+                "name": "RTX 4070",
+                "vram_gb": 12.0,
+                "meets_recommendation": True,
+                "min_vram_gb": 8.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = gpu_check.read_gpu_check_marker(marker_path=marker)
+    assert result is not None and result.cuda_version is None

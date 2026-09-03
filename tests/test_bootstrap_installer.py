@@ -26,6 +26,47 @@ def test_requirements_files_for_mode_local_includes_gpu_if_present(tmp_path):
     assert names == ["requirements.txt", "requirements-gpu.txt"]
 
 
+def test_requirements_files_for_mode_local_puts_nodeps_file_after_gpu(tmp_path):
+    (tmp_path / "requirements.txt").write_text("PyMuPDF\n")
+    (tmp_path / "requirements-gpu.txt").write_text("torch\n")
+    (tmp_path / "requirements-gpu-nodeps.txt").write_text("simple-lama-inpainting\n")
+    names = [p.name for p in installer.requirements_files_for_mode(InstallMode.LOCAL, tmp_path)]
+    assert names == ["requirements.txt", "requirements-gpu.txt", "requirements-gpu-nodeps.txt"]
+
+
+def test_pip_install_adds_no_deps_flag(monkeypatch, tmp_path):
+    req_file = tmp_path / "requirements-gpu-nodeps.txt"
+    req_file.write_text("simple-lama-inpainting\n")
+    captured = {}
+
+    class _Result:
+        returncode = 0
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _Result()
+
+    monkeypatch.setattr(installer.subprocess, "run", fake_run)
+    installer.pip_install(tmp_path / "python", req_file, no_deps=True)
+    assert "--no-deps" in captured["cmd"]
+    installer.pip_install(tmp_path / "python", req_file)
+    assert "--no-deps" not in captured["cmd"]
+
+
+def test_run_install_uses_no_deps_for_nodeps_file(monkeypatch, tmp_path):
+    dev_source = tmp_path / "dev-source"
+    dev_source.mkdir()
+    (dev_source / "requirements.txt").write_text("PyMuPDF\n")
+    (dev_source / "requirements-gpu-nodeps.txt").write_text("simple-lama-inpainting\n")
+    seen = []
+    monkeypatch.setattr(installer, "create_venv", lambda vdir: vdir.mkdir(parents=True, exist_ok=True))
+    monkeypatch.setattr(installer, "install_torch", lambda *a: None)  # 03.09.2026: LOCAL installs torch first
+    monkeypatch.setattr(installer, "pip_install", lambda py, req, no_deps=False: seen.append((req.name, no_deps)))
+    monkeypatch.setattr(installer.desktop_integration, "create_desktop_entry", lambda *a, **k: tmp_path / "s")
+    installer.run_install(tmp_path / "venv", tmp_path / "app", InstallMode.LOCAL, dev_source_override=str(dev_source))
+    assert seen == [("requirements.txt", False), ("requirements-gpu-nodeps.txt", True)]
+
+
 def test_requirements_files_for_mode_skips_missing_optional_files(tmp_path):
     (tmp_path / "requirements.txt").write_text("PyMuPDF\n")
     result = installer.requirements_files_for_mode(InstallMode.LOCAL, tmp_path)
@@ -83,7 +124,7 @@ def test_run_install_full_sequence_reports_progress_in_order(monkeypatch, tmp_pa
 
     installed_reqs = []
 
-    def fake_pip_install(venv_python, requirements_file):
+    def fake_pip_install(venv_python, requirements_file, no_deps=False):
         installed_reqs.append(requirements_file.name)
 
     def fake_create_desktop_entry(app_dir, venv_python, icon_path=None):
@@ -116,3 +157,70 @@ def test_run_install_wraps_release_source_error(monkeypatch, tmp_path):
     monkeypatch.setattr(installer.release_source, "download_app_source", fake_download)
     with pytest.raises(InstallError):
         installer.run_install(tmp_path / "venv", tmp_path / "app", InstallMode.ONLINE)
+
+
+# --- 03.09.2026: driver-matched torch wheel index -----------------------------
+
+
+@pytest.mark.parametrize(
+    "cuda_version, expected_index",
+    [
+        ("12.4", "https://download.pytorch.org/whl/cu128"),
+        ("11.8", "https://download.pytorch.org/whl/cu118"),
+        ("13.0", None),
+        (None, None),
+    ],
+)
+def test_torch_install_command_picks_index(tmp_path, cuda_version, expected_index):
+    cmd = installer.torch_install_command(tmp_path / "python", cuda_version)
+    assert cmd[:4] == [str(tmp_path / "python"), "-m", "pip", "install"]
+    assert "torch" in cmd and "torchvision" in cmd
+    if expected_index:
+        assert cmd[-2:] == ["--index-url", expected_index]
+    else:
+        assert "--index-url" not in cmd
+
+
+def test_install_torch_wraps_errors(monkeypatch, tmp_path):
+    def fake_run(cmd, **kwargs):
+        raise subprocess.CalledProcessError(returncode=1, cmd=cmd, stderr="no wheel")
+
+    monkeypatch.setattr(installer.subprocess, "run", fake_run)
+    with pytest.raises(InstallError, match="no wheel"):
+        installer.install_torch(tmp_path / "python", "12.4")
+
+
+def test_run_install_local_installs_torch_before_requirements(monkeypatch, tmp_path):
+    dev_source = tmp_path / "dev-source"
+    dev_source.mkdir()
+    (dev_source / "requirements.txt").write_text("PyMuPDF\n")
+    (dev_source / "requirements-gpu.txt").write_text("torch\n")
+    order = []
+    monkeypatch.setattr(installer, "create_venv", lambda vdir: vdir.mkdir(parents=True, exist_ok=True))
+    monkeypatch.setattr(installer, "install_torch", lambda py, cuda: order.append(("torch", cuda)))
+    monkeypatch.setattr(installer, "pip_install", lambda py, req, no_deps=False: order.append((req.name, no_deps)))
+    monkeypatch.setattr(installer.desktop_integration, "create_desktop_entry", lambda *a, **k: tmp_path / "s")
+    progress = []
+    installer.run_install(
+        tmp_path / "venv",
+        tmp_path / "app",
+        InstallMode.LOCAL,
+        dev_source_override=str(dev_source),
+        progress_cb=progress.append,
+        cuda_version="12.4",
+    )
+    assert order == [("torch", "12.4"), ("requirements.txt", False), ("requirements-gpu.txt", False)]
+    assert any(p.step is InstallStep.DEPS and p.detail == "torch (cu128)" for p in progress)
+
+
+def test_run_install_online_never_installs_torch(monkeypatch, tmp_path):
+    dev_source = tmp_path / "dev-source"
+    dev_source.mkdir()
+    (dev_source / "requirements.txt").write_text("PyMuPDF\n")
+    called = []
+    monkeypatch.setattr(installer, "create_venv", lambda vdir: vdir.mkdir(parents=True, exist_ok=True))
+    monkeypatch.setattr(installer, "install_torch", lambda *a: called.append(a))
+    monkeypatch.setattr(installer, "pip_install", lambda *a, **k: None)
+    monkeypatch.setattr(installer.desktop_integration, "create_desktop_entry", lambda *a, **k: tmp_path / "s")
+    installer.run_install(tmp_path / "venv", tmp_path / "app", InstallMode.ONLINE, dev_source_override=str(dev_source))
+    assert called == []

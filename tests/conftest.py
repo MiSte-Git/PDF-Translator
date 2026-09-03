@@ -41,6 +41,21 @@ to also be an .ini-style file but is a DIFFERENT Format enum value with
 its own, separately-configured path; redirecting only IniFormat (a natural
 first guess) silently does nothing for it.
 
+Keyring isolation (03.09.2026): pipeline/credentials.py falls back to the
+OS keyring (Secret Service / Credential Locker / Keychain) whenever no
+environment variable is set. On a developer machine where the real app has
+stored real credentials there - Michael's, after setting up the Google-
+Drive-Ordnersuche - tests that only clear env vars and then expect "not
+configured" (tests/test_drive_auth.py) read the REAL stored Client-ID/
+project ID and fail with those real values in the assertion output. The
+suite was written in a sandbox without any keyring backend, where the
+fallback silently returned None. _no_real_keyring below makes every test
+behave like that sandbox: _keyring_module() returns None, so only env vars
+count. Tests that want a keyring install their own fake by monkeypatching
+_keyring_module themselves (tests/test_credentials.py) - a later
+monkeypatch.setattr in the test body overrides this fixture's, so nothing
+there needs to change.
+
 (webapp/settings_store.py's own isolation - Task #14, 27.08.2026 - lives
 as a file-local autouse fixture in tests/test_webapp_jobs_api.py instead
 of here: unlike QSettings, tests/test_webapp_settings_store.py's own
@@ -65,4 +80,12 @@ def _isolated_qsettings(tmp_path: Path):
     QSettings.setPath(QSettings.Format.NativeFormat, QSettings.Scope.SystemScope, str(tmp_path))
     QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path))
     QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.SystemScope, str(tmp_path))
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _no_real_keyring(monkeypatch: pytest.MonkeyPatch):
+    from pipeline import credentials as credentials_module
+
+    monkeypatch.setattr(credentials_module, "_keyring_module", lambda: None)
     yield

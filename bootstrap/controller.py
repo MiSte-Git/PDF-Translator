@@ -80,6 +80,11 @@ class BootstrapController:
     def gpu_meets_recommendation(self) -> bool:
         return gpu_check.meets_recommendation(self.gpu_info)
 
+    def gpu_driver_supported(self) -> bool:
+        """False when the NVIDIA driver is too old for any torch wheel we
+        can install (03.09.2026) - LOCAL is then not offered."""
+        return gpu_check.driver_supported(self.gpu_info)
+
     # --- install -----------------------------------------------------------
 
     def run_install(
@@ -97,6 +102,7 @@ class BootstrapController:
                 self.mode,
                 dev_source_override=dev_source_override,
                 progress_cb=progress_cb,
+                cuda_version=self.gpu_info.cuda_version if self.gpu_info is not None else None,
             )
         except installer.InstallError as exc:
             self.install_error = str(exc)

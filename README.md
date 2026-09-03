@@ -72,12 +72,20 @@ Ein Eintrag im Anwendungsmenü ist überall das Ergebnis, kein `.deb`/`.rpm`/
 ```bash
 git clone https://github.com/MiSte-Git/PDF-Translator.git
 cd PDF-Translator
-python3 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+
+# Python 3.10–3.13 – egal ob venv, pyenv oder System-Python, Hauptsache die
+# Abhängigkeiten landen in dem Interpreter, mit dem du die App startest.
+# Beispiel venv:   python3 -m venv .venv && source .venv/bin/activate
+# Beispiel pyenv:  pyenv local 3.13   (Empfehlung: 3.13 - höchste Version, die PaddleOCR unterstützt)
 
 pip install -r requirements.txt
 # optional, für Bildübersetzung/OCR:
 pip install -r requirements-ocr.txt
+# optional, lokales GPU-Inpainting (NVIDIA) - zwei Schritte, Reihenfolge wichtig:
+pip install -r requirements-gpu.txt
+pip install --no-deps -r requirements-gpu-nodeps.txt
+# für Tests/Entwicklung:
+pip install -r requirements-dev.txt
 ```
 
 Start der Desktop-Oberfläche (PySide6/Qt):
@@ -92,6 +100,27 @@ Alternativ die lokale Server-/Browser-Variante:
 python -m webapp
 ```
 
+Wer die App lieber aus dem Anwendungsmenü bzw. angeheftet in der Taskleiste
+startet statt aus der Shell, legt sich einmalig einen Entwickler-Eintrag an.
+Den Befehl in genau der Shell-Umgebung ausführen, in der auch
+`python -m ui.app` funktioniert – der Eintrag übernimmt diesen Interpreter:
+
+```bash
+python -m bootstrap.desktop_integration --dev
+# oder explizit: python -m bootstrap.desktop_integration --dev --python /pfad/zu/python
+```
+
+Das schreibt denselben Menüeintrag, den auch der geführte Assistent anlegt
+(`.desktop` unter Linux, `.lnk` unter Windows, `.app` unter macOS) – nur
+unter dem Namen „PDF-Translator (dev)" und mit Verweis auf dieses Checkout
+statt auf die versteckte Installation im Benutzerprofil, beide können also
+nebeneinander existieren. Danach im Anwendungsmenü suchen und von dort an
+die Taskleiste/das Dock heften. Falls der gewählte Interpreter PySide6 nicht
+importieren kann, warnt der Befehl. Nach einem Wechsel des Interpreters oder
+des Checkout-Pfads den Befehl einfach erneut ausführen. Das App-Icon liegt
+als `assets/icon.svg` im Repo; `tools/build_icon.py` erzeugt daraus die
+PNG-/ICO-/ICNS-Varianten.
+
 API-Schlüssel für die Übersetzungs-Provider werden entweder als
 Umgebungsvariable gesetzt (`DEEPL_API_KEY`, `GOOGLE_TRANSLATE_API_KEY`,
 `OPENAI_API_KEY`, `GROK_API_KEY`/`XAI_API_KEY`) oder – bequemer – über den
@@ -99,7 +128,7 @@ Einstellungen-Dialog der App im OS-Schlüsselbund gespeichert (Windows
 Credential Locker/macOS Keychain/Linux Secret Service, via
 `pipeline/credentials.py`).
 
-Tests ausführen:
+Tests ausführen (`pytest` kommt aus `requirements-dev.txt`):
 
 ```bash
 python -m pytest

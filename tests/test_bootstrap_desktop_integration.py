@@ -129,3 +129,120 @@ def test_create_desktop_entry_raises_for_unsupported_platform(tmp_path):
             di.create_desktop_entry(tmp_path / "app", tmp_path / "venv" / "python")
     finally:
         di_module.platform.system = original
+
+
+# --- 03.09.2026: icon, StartupWMClass, developer entry ------------------------
+
+
+def _make_assets(root: Path) -> Path:
+    assets = root / "assets"
+    assets.mkdir(parents=True)
+    for name in ("icon.png", "icon.ico", "icon.icns"):
+        (assets / name).write_bytes(b"x")
+    return assets
+
+
+def test_default_icon_path_picks_platform_file(tmp_path):
+    assets = _make_assets(tmp_path / "app")
+    assert di.default_icon_path(tmp_path / "app", "Linux") == assets / "icon.png"
+    assert di.default_icon_path(tmp_path / "app", "Windows") == assets / "icon.ico"
+    assert di.default_icon_path(tmp_path / "app", "Darwin") == assets / "icon.icns"
+
+
+def test_default_icon_path_is_none_without_assets(tmp_path):
+    assert di.default_icon_path(tmp_path / "app", "Linux") is None
+    assert di.default_icon_path(tmp_path / "app", "BeOS") is None
+
+
+def test_linux_desktop_entry_content_has_startup_wm_class(tmp_path):
+    content = di._linux_desktop_entry_content(tmp_path / "app", tmp_path / "venv" / "bin" / "python", None)
+    assert f"StartupWMClass={di.APP_WM_CLASS}" in content
+
+
+def test_create_linux_desktop_entry_uses_repo_icon_by_default(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    assets = _make_assets(tmp_path / "app")
+    entry = di.create_linux_desktop_entry(tmp_path / "app", tmp_path / "venv" / "bin" / "python")
+    assert f"Icon={assets / 'icon.png'}" in entry.read_text()
+
+
+def test_create_linux_desktop_entry_dev_variant_has_own_name_and_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    entry = di.create_linux_desktop_entry(
+        tmp_path / "app",
+        tmp_path / "venv" / "bin" / "python",
+        display_name=di.DEV_DISPLAY_NAME,
+        entry_slug=di.DEV_ENTRY_SLUG,
+    )
+    assert entry.name == "pdf-translator-dev.desktop"
+    assert f"Name={di.DEV_DISPLAY_NAME}" in entry.read_text()
+
+
+def test_create_desktop_entry_dev_flag_on_linux(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setattr(di.platform, "system", lambda: "Linux")
+    entry = di.create_desktop_entry(tmp_path / "app", tmp_path / "venv" / "bin" / "python", dev=True)
+    assert entry.name == "pdf-translator-dev.desktop"
+    # the regular entry is untouched / separate
+    assert not (entry.parent / "pdf-translator.desktop").exists()
+
+
+def test_windows_shortcut_script_uses_repo_icon_by_default(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "AppData" / "Roaming"))
+    assets = _make_assets(tmp_path / "app")
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["script"] = cmd[-1]
+
+    monkeypatch.setattr(di.subprocess, "run", fake_run)
+    di.create_windows_shortcut(tmp_path / "app", tmp_path / "venv" / "python.exe")
+    assert str(assets / "icon.ico") in captured["script"]
+
+
+def test_macos_bundle_copies_icon_and_references_it_in_plist(monkeypatch, tmp_path):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    _make_assets(tmp_path / "app")
+    bundle = di.create_macos_app_bundle(tmp_path / "app", tmp_path / "venv" / "bin" / "python")
+    assert (bundle / "Contents" / "Resources" / "icon.icns").is_file()
+    plist = (bundle / "Contents" / "Info.plist").read_text()
+    assert "<key>CFBundleIconFile</key>" in plist
+    assert "<string>icon.icns</string>" in plist
+
+
+def test_macos_info_plist_without_icon_has_no_icon_key():
+    assert "CFBundleIconFile" not in di._macos_info_plist_content("PDF-Translator")
+
+
+def test_resolve_dev_python_rejects_missing_interpreter(tmp_path):
+    with pytest.raises(di.DesktopIntegrationError):
+        di.resolve_dev_python(str(tmp_path / "nope"))
+
+
+def test_resolve_dev_python_defaults_to_running_interpreter():
+    import sys
+
+    assert di.resolve_dev_python() == Path(sys.executable).resolve()
+
+
+def test_cli_requires_dev_flag(capsys):
+    with pytest.raises(SystemExit):
+        di.main([])
+
+
+def test_cli_dev_creates_entry(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setattr(di.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(di, "repo_root", lambda: tmp_path / "repo")
+    (tmp_path / "repo").mkdir()
+    assert di.main(["--dev"]) == 0
+    entry = tmp_path / "xdg" / "applications" / "pdf-translator-dev.desktop"
+    assert entry.is_file()
+    assert f"Path={tmp_path / 'repo'}" in entry.read_text()
+    assert "Created" in capsys.readouterr().out
+
+
+def test_app_icon_assets_exist_in_repo():
+    repo = di.repo_root()
+    for name in ("icon.svg", "icon.png", "icon.ico", "icon.icns"):
+        assert (repo / "assets" / name).is_file(), name

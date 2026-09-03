@@ -1,0 +1,7 @@
+# Nur für Entwicklung/Tests, nicht Teil der App-Laufzeit - der Bootstrapper
+# installiert diese Datei bewusst nicht.
+#   pip install -r requirements-dev.txt
+pytest
+# Nur zum Neu-Erzeugen der App-Icons aus assets/icon.svg (tools/build_icon.py):
+cairosvg
+Pillow

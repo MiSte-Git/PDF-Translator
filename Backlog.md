@@ -9500,3 +9500,213 @@ dupliziert, und Historie übersteht Schließen+Neuöffnen). Komplette
 Testsuite (783 Tests, 1 übersprungen) läuft grün. i18n unverändert
 (379/379 Parität weiterhin bestätigt - keine neuen Texte nötig,
 Placeholder/Tooltip funktionieren auf QComboBox identisch zu vorher).
+
+## 03.09.2026 (Cowork-Sitzung) - Entwickler-Eintrag fürs Anwendungsmenü/Taskleiste + App-Icon
+
+Michael: "Ich als Entwickler möchte aber auch nicht immer die App aus der
+Shell starten, sondern über die angeheftete App in der Taskleiste. Wie
+bekomme ich das hin und war nicht noch das icon offen?" - beides umgesetzt.
+
+**Entwickler-Eintrag:** `python -m bootstrap.desktop_integration --dev`
+(neue CLI in `bootstrap/desktop_integration.py`) schreibt denselben
+Launcher-Eintrag, den der Bootstrapper für Laien anlegt, nur als
+`pdf-translator-dev.desktop` / "PDF-Translator (dev)" mit `Exec=` auf den
+gerade laufenden Interpreter (also das aktivierte Repo-venv; `--python`
+als Override, Hinweis auf stderr, wenn es kein venv-Python ist) und
+`Path=` auf das Checkout. Eigener Slug/Name, damit Bootstrapper-Install
+und Dev-Eintrag auf einer Maschine nebeneinander existieren. Anheften
+selbst bleibt wie dokumentiert Handarbeit (Menü → Rechtsklick).
+
+**StartupWMClass:** neu in jeder `.desktop`-Datei
+(`StartupWMClass=PDF-Translator`, Konstante `APP_WM_CLASS`), und
+`ui/app.py::main()` setzt jetzt `app.setApplicationName(APP_WM_CLASS)` -
+daraus leitet Qt X11-WM_CLASS bzw. Wayland-app_id ab. Ohne diese Paarung
+zeigt die Taskleiste bei laufender App ein zweites, generisches
+"python"-Symbol neben dem angehefteten. QSettings ist davon unberührt
+(MainWindow übergibt Organisation/App explizit).
+
+**Icon (bisher offener Punkt der 01.09-Doku):** `assets/icon.svg` als
+Quelle (Dokument mit Eselsohr + Übersetzungs-Badge), daraus per
+`tools/build_icon.py` (cairosvg + Pillow, nur bei Änderung am SVG
+auszuführen) `icon.png` (256), `icon.ico` (16-256), `icon.icns`
+(16-512) - alle vier im Repo eingecheckt, damit zur Laufzeit kein
+SVG-Rasterizer nötig ist. `desktop_integration.default_icon_path()` wählt
+je Plattform die passende Datei aus `assets/` des App-Quellcodes; alle
+`create_*`-Funktionen nutzen sie automatisch, wenn kein `icon_path`
+übergeben wird (`installer.py` daher unverändert im Aufruf). macOS-Bundle
+schreibt jetzt `CFBundleIconFile` in die Info.plist. `ui/app.py` setzt
+`app.setWindowIcon(QIcon(assets/icon.png))` - fehlende Datei ergibt ein
+leeres QIcon, altes Checkout startet weiterhin. CI
+(`build-bootstrap.yml`): `--icon assets/icon.ico`/`.icns` für die
+Windows-/macOS-Bootstrapper-Executables (Linux hat keinen Icon-Slot im
+Binary, dort trägt die `.desktop`-Datei das Icon).
+
+**Tests:** `tests/test_bootstrap_desktop_integration.py` +14 Fälle
+(Icon-Auswahl je Plattform / None ohne assets, StartupWMClass, Dev-Slug
+und -Name, Dev-Flag legt den regulären Eintrag nicht an, Windows-Skript
+und macOS-Plist mit Icon, Plist ohne Icon ohne Key, `resolve_dev_python`,
+CLI ohne `--dev` bricht ab, CLI mit `--dev` schreibt Eintrag, Icon-Assets
+existieren im Repo) - 28/28 grün. `ui/app.py` nur per `py_compile`
+geprüft (kein PySide6 in der Cowork-Umgebung) - **bitte einmal lokal
+starten und prüfen, dass Fenster-Icon und Taskleisten-Zuordnung
+stimmen.**
+
+**Weiterhin offen:** Fenster-Icon des tkinter-Bootstrappers selbst (nur
+das Executable-Icon ist gesetzt); Bootstrapper-Update-Mechanik; echter
+Windows-/macOS-Testlauf.
+
+Nachtrag (gleiche Sitzung): Michael nutzt kein `.venv`, sondern pyenv
+(`~/.pyenv/versions/3.10.13`) - die erste Fassung hat deshalb fälschlich
+"kein venv-Interpreter" gewarnt. `resolve_dev_python()` prüft jetzt statt
+der venv-Heuristik, ob der Ziel-Interpreter `PySide6` importieren kann
+(Subprozess), und warnt nur dann. README-Entwicklerabschnitt entsprechend
+neutral formuliert (venv/pyenv/System-Python gleichwertig, Befehl in der
+Shell ausführen, in der `python -m ui.app` läuft).
+
+## 03.09.2026 (Cowork-Sitzung, Fortsetzung) - Python 3.13 + GPU-Requirements ohne Pillow-Quellbuild
+
+Michael hat pyenv auf 3.13.3 gehoben (Empfehlung: 3.13 ist das Maximum,
+das PaddlePaddle 3.3.1 unterstützt; PySide6 6.11 und Torch 2.14 können
+3.14, Paddle nicht). Dabei zwei Stolperer:
+
+1. `pip install -r requirements-gpu.txt` scheiterte mit "Failed to build
+   'pillow'": simple-lama-inpainting pinnt pillow<10 / numpy<2, für die es
+   auf 3.13 keine Wheels gibt, pip versucht einen Quellbuild eines uralten
+   Pillow. Das war im Kopfkommentar zwar als "nicht ohne --no-deps"
+   dokumentiert, aber **der Bootstrapper selbst hat im Modus "Lokal" genau
+   diesen Aufruf gemacht** (`installer.py` → `pip install -r
+   requirements-gpu.txt` ohne --no-deps) - wäre für jede Laien-Installation
+   mit Python ≥3.13 fehlgeschlagen. Fix: `simple-lama-inpainting` in neue
+   Datei `requirements-gpu-nodeps.txt` ausgelagert; `requirements-gpu.txt`
+   (torch, torchvision) ist damit wieder gefahrlos normal installierbar.
+   `bootstrap/installer.py`: `NO_DEPS_REQUIREMENTS`-Set, `pip_install(...,
+   no_deps=)` hängt `--no-deps` an, `requirements_files_for_mode()` reiht
+   die nodeps-Datei im LOCAL-Modus NACH requirements-gpu.txt ein. Drei
+   neue Tests in `tests/test_bootstrap_installer.py` (Reihenfolge, Flag,
+   run_install-Durchreichung); 39/39 der Bootstrap-Tests grün.
+2. `python -m pytest` → "No module named pytest": pytest stand in keiner
+   requirements-Datei. Neue `requirements-dev.txt` (pytest, cairosvg,
+   Pillow für tools/build_icon.py). README-Entwicklerabschnitt um GPU-
+   Zweischritt und dev-Requirements ergänzt.
+
+Offen: `python-version` in `build-bootstrap.yml` von 3.11 auf 3.13 heben
+(geschützte Datei, manuell); `.python-version` (pyenv local) einchecken
+oder ignorieren - Michaels Entscheidung.
+
+Nachtrag (Testlauf auf 3.13.3 bei Michael, 1101 passed / 9 failed): alle
+neun Fehler in `tests/test_drive_auth.py`, keiner hat mit Python 3.13 zu
+tun - die Tests löschen nur die `GOOGLE_DRIVE_*`-Umgebungsvariablen,
+`pipeline/credentials.py` fällt dann aber auf den echten OS-Schlüsselbund
+zurück, in dem seit dem 02.09. Michaels echte Drive-Client-ID/Projekt-ID
+liegen. In der Cowork-Sandbox (kein Keyring-Backend) war dieser Fallback
+immer leer, deshalb fiel es dort nie auf. Fix: autouse-Fixture
+`_no_real_keyring` in `tests/conftest.py` patcht
+`credentials._keyring_module` auf `None` - die Suite verhält sich damit
+überall wie in der Sandbox; Tests mit eigenem Fake-Keyring
+(`test_credentials.py`) überschreiben das per eigenem monkeypatch wie
+bisher. Kein Produktionscode angefasst.
+
+## 03.09.2026 (Cowork-Sitzung, Fortsetzung) - Hauptfenster passt nicht mehr auf kleine Bildschirme
+
+Michael: "das UI [geht] über die Höhe des Bildschirms leicht hinaus und
+[ist] nur in der Breite einstellbar und nicht in der Höhe. Der Button
+unten rechts ist dadurch nicht sichtbar."
+
+Ursache: `MainWindow` hatte den Karten-Stapel (merge_box/config_box/
+cost_box/job_box + Einstellungen-Zeile) direkt als Central-Widget. Die
+Mindesthöhe des Fensters ist dann die SUMME aller Karten-Mindesthöhen -
+seit der neuen "Dateien zusammenführen"-Karte (02.09.) mehr als ein
+768/800px-Bildschirm hergibt. Qt lässt ein Fenster nicht unter seine
+Layout-Mindestgröße schrumpfen, daher "nur in der Breite einstellbar",
+und die unterste Zeile mit dem Einstellungen-Button rutschte aus dem
+Bild. `self.resize(880, 760)` allein war nicht das Problem, sondern das
+Minimum.
+
+Fix (`ui/app.py`): der Stapel liegt jetzt in einer rahmenlosen
+`QScrollArea` (`setWidgetResizable(True)`, horizontaler Balken aus) -
+damit ist die Fenster-Mindesthöhe vom Inhalt entkoppelt, das Fenster
+lässt sich frei verkleinern, und nur wenn es wirklich zu klein ist,
+erscheint ein vertikaler Scrollbalken; auf großen Bildschirmen ist die
+ScrollArea unsichtbar. Zusätzlich `_fit_initial_size_to_screen()`:
+880x760 wird beim ersten Start auf `availableGeometry()` (minus Rand für
+Rahmen/Taskleiste) gekappt. Neue Datei
+`tests/test_ui_window_fits_screen.py` (3 Fälle: ScrollArea-Eigenschaften,
+Fenster-Minimum < Inhalts-Minimum und < 400px, Startgröße ≤ Bildschirm).
+Nicht in der Sandbox ausgeführt (kein PySide6) - Michael lässt die Suite
+lokal laufen.
+
+## 03.09.2026 (Cowork-Sitzung, Fortsetzung) - Bootstrapper wählt das torch-Wheel passend zum NVIDIA-Treiber
+
+Michael (Treiber 550.163.01, CUDA 12.4) beim App-Start: "UserWarning: CUDA
+initialization: The NVIDIA driver on your system is too old (found version
+12040)". Ursache: `pip install torch` von PyPI liefert das gegen die
+NEUESTE CUDA-Version gebaute Wheel (CUDA 13 bei PyTorch 2.14), das einen
+Treiber ≥ 580 braucht. Auf allem Älteren meldet `torch.cuda` "keine GPU",
+und die "Lokal"-Installation des Bootstrappers wäre für genau diese Nutzer
+still nutzlos gewesen - der GPU-Check prüfte nur VRAM, nie die CUDA-Version
+des Treibers. Michaels Frage "Ist das dann nicht ein Problem mit der
+requirements.txt?" - ja.
+
+Manuelle Abhilfe bei Michael (verifiziert: `2.11.0+cu128 True`):
+`pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128`.
+CUDA hat Minor-Version-Kompatibilität, ein cu128-Build läuft auf jedem
+12.x-Treiber. Die dabei von pip gemeldeten Konflikte (simple-lama-
+inpainting will fire/opencv-python/numpy<2/pillow<10) sind der bekannte,
+in requirements-gpu.txt dokumentierte --no-deps-Fall, kein Fehler.
+
+Umsetzung:
+- `bootstrap/gpu_check.py`: `detect_driver_cuda_version()` liest
+  "CUDA Version: 12.4" aus dem nvidia-smi-Banner (zweiter Aufruf, never
+  raises); `GpuInfo.cuda_version` (Default None, rückwärtskompatibel);
+  `parse_cuda_version()`, `driver_supported()` (False nur bei BEKANNTER
+  Version < 11.8 - unparsebar zählt als unterstützt, damit ein
+  Banner-Format-Wechsel nie eine Installation blockiert),
+  `torch_index_url()` mit `TORCH_INDEX_BY_CUDA_MAJOR` (12 → cu128,
+  11 → cu118, 13+/unbekannt → PyPI-Standard). `GpuCheckResult.cuda_version`
+  (Default None, alte Marker laden weiter).
+- `bootstrap/installer.py`: `install_torch()`/`torch_install_command()`;
+  `run_install(..., cuda_version=)` installiert im LOCAL-Modus torch/
+  torchvision mit passendem Index VOR den requirements-Dateien, sodass die
+  nackten `torch`/`torchvision`-Zeilen in requirements-gpu.txt bereits
+  erfüllt sind und pip nichts ersetzt. Fortschrittstext "torch (cu128)".
+- `bootstrap/controller.py`: `gpu_driver_supported()`, reicht
+  `gpu_info.cuda_version` an `run_install` durch.
+- `bootstrap/app.py` GPU-Schritt: neuer Zweig "Treiber zu alt" (nur
+  Online/Zurück, wie beim Mac). Neuer i18n-Key
+  `bootstrap.gpu_driver_too_old` DE/EN (380/380 Parität).
+- `requirements-gpu.txt`: Kopfkommentar Schritt 1 neu - erst `nvidia-smi`
+  lesen, dann Index wählen (Tabelle), plus Prüfbefehl.
+- Tests: +16 in `test_bootstrap_gpu_check.py` (Banner-Parsing, Index-Wahl,
+  driver_supported, Marker-Roundtrip alt/neu), +7 in
+  `test_bootstrap_installer.py` (Kommando je CUDA, Fehlerwrapping,
+  LOCAL installiert torch zuerst, ONLINE nie), +2 in
+  `test_bootstrap_controller.py`. Bootstrap-Suite 107/107 grün.
+
+Offen: `ui/app.py::HardwareCheckDialog` zeigt die gespeicherte
+`cuda_version` noch nicht an (Marker enthält sie jetzt) - kleiner
+Folgeschritt. Nebenbefund von vorhin bleibt: torch wird beim App-Start
+importiert (Warnung erscheint vor dem Fenster), obwohl lazy vorgesehen.
+
+## 03.09.2026 (Cowork-Sitzung, Fortsetzung) - Hardware-Test zeigt CUDA-Treiberversion, kein torch-Import mehr außerhalb des Bilder-Modus
+
+Die zwei offenen Punkte aus dem vorigen Eintrag:
+
+1. `ui/app.py::HardwareCheckDialog._render_status()`: wenn der Marker eine
+   `cuda_version` enthält, kommt eine zweite Zeile - "Treiber unterstützt
+   CUDA 12.4 - passende PyTorch-Variante: cu128." bzw. bei < 11.8 "zu alt
+   ... Grafiktreiber aktualisieren" (`hw_check.driver_cuda_ok` /
+   `hw_check.driver_cuda_too_old`, DE/EN, 382/382 Parität). Alte Marker
+   ohne Feld bekommen keine Zeile. Wiederverwendet
+   `bootstrap.gpu_check.driver_supported()`/`torch_index_url()`, keine
+   zweite Logik.
+2. Nebenbefund "torch-Warnung erscheint vor dem Fenster":
+   `_update_inpainting_backend_hint()` läuft bei Start/retranslate/
+   Moduswechsel und rief `inpainting_backend_available(backend)` +
+   `gpu_vram_gb()` auch dann auf, wenn der Modus gar nicht "Bilder" war -
+   bei gespeicherter Auswahl "gpu_inpainting" also in jeder PDF-/Word-/
+   PPTX-Sitzung ein kompletter torch-Import samt CUDA-Probe. Jetzt: außerhalb
+   des Bilder-Modus Hinweis leeren/verstecken und sofort zurück, keine
+   Probe. Im Bilder-Modus unverändert (dort wird torch gebraucht).
+   Tests: +4 in `tests/test_ui_hardware_check_dialog.py` (CUDA-Zeile,
+   zu alt, alter Marker ohne Zeile, keine Probe außerhalb Bilder-Modus).
+   Nicht in der Sandbox ausgeführt (kein PySide6).

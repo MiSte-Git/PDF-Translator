@@ -206,3 +206,62 @@ def test_about_uses_current_language_and_version(qapp, monkeypatch, tmp_path):
         assert app_module.__version__ in captured["text"]
     finally:
         window.close()
+
+
+# --- 03.09.2026: driver CUDA version line -------------------------------------
+
+
+def test_dialog_shows_driver_cuda_line_when_recorded(qapp, monkeypatch, tmp_path):
+    marker = _patch_marker_path(monkeypatch, tmp_path)
+    save_gpu_check_result(GpuInfo(name="RTX 4070", vram_gb=12.0, cuda_version="12.4"), marker_path=marker)
+    dialog = HardwareCheckDialog(LanguageManager("de"))
+    try:
+        assert "CUDA 12.4" in dialog.status.text()
+        assert "cu128" in dialog.status.text()
+    finally:
+        dialog.close()
+
+
+def test_dialog_flags_too_old_driver(qapp, monkeypatch, tmp_path):
+    marker = _patch_marker_path(monkeypatch, tmp_path)
+    save_gpu_check_result(GpuInfo(name="GTX 1080", vram_gb=8.0, cuda_version="11.4"), marker_path=marker)
+    dialog = HardwareCheckDialog(LanguageManager("de"))
+    try:
+        assert "zu alt" in dialog.status.text()
+    finally:
+        dialog.close()
+
+
+def test_dialog_has_no_driver_line_for_old_marker_without_cuda_version(qapp, monkeypatch, tmp_path):
+    marker = _patch_marker_path(monkeypatch, tmp_path)
+    save_gpu_check_result(GpuInfo(name="RTX 4090", vram_gb=24.0), marker_path=marker)
+    dialog = HardwareCheckDialog(LanguageManager("de"))
+    try:
+        assert "CUDA" not in dialog.status.text()
+    finally:
+        dialog.close()
+
+
+# --- 03.09.2026: no torch probe outside Bilder mode ---------------------------
+
+
+def test_main_window_does_not_probe_gpu_backend_outside_images_mode(qapp, monkeypatch, tmp_path):
+    _patch_marker_path(monkeypatch, tmp_path)
+    calls = []
+    monkeypatch.setattr(app_module, "inpainting_backend_available", lambda backend: calls.append(backend) or True)
+    monkeypatch.setattr(app_module, "gpu_vram_gb", lambda: calls.append("vram") or None)
+    window = MainWindow()
+    try:
+        from ui.models import TranslationMode
+
+        idx = window.mode.findData(TranslationMode.PDF)
+        window.mode.setCurrentIndex(idx)
+        calls.clear()
+        gpu_idx = window.inpainting_backend.findData("gpu_inpainting")
+        if gpu_idx >= 0:
+            window.inpainting_backend.setCurrentIndex(gpu_idx)
+        window._update_inpainting_backend_hint()
+        assert calls == []
+        assert not window.inpainting_backend_hint.isVisible()
+    finally:
+        window.close()

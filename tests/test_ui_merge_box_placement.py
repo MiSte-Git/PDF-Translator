@@ -51,7 +51,10 @@ def test_merge_box_is_titled_and_placed_above_config_box(qapp) -> None:
     try:
         assert window.merge_box.title() == window.language.text("merge_box.group")
 
-        root = window.centralWidget().layout()
+        # 03.09.2026: the card stack now sits inside a QScrollArea (see
+        # tests/test_ui_window_fits_screen.py); the root layout is the
+        # scroll area's inner widget's, not the central widget's own.
+        root = window.centralWidget().widget().layout()
         positions = {}
         for i in range(root.count()):
             widget = root.itemAt(i).widget()

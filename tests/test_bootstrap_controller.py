@@ -87,7 +87,7 @@ def test_run_install_requires_mode_first(controller):
 def test_run_install_delegates_and_stores_venv_python(controller, monkeypatch, tmp_path):
     expected = tmp_path / "venv" / "bin" / "python"
 
-    def fake_run_install(venv_dir, app_source_dir, mode, dev_source_override=None, progress_cb=None):
+    def fake_run_install(venv_dir, app_source_dir, mode, dev_source_override=None, progress_cb=None, cuda_version=None):
         assert mode is InstallMode.ONLINE
         if progress_cb:
             progress_cb(None)
@@ -161,3 +161,43 @@ def test_launch_app_falls_back_to_paths_venv_python(controller, monkeypatch):
     monkeypatch.setattr("bootstrap.controller.subprocess.Popen", lambda cmd, cwd: cmd)
     result = controller.launch_app()
     assert str(controller.venv_dir) in result[0]
+
+
+# --- 03.09.2026: driver CUDA version reaches run_install ----------------------
+
+
+def test_run_install_passes_cuda_version_from_gpu_check(monkeypatch, tmp_path):
+    from bootstrap.controller import BootstrapController
+    from bootstrap.installer import InstallMode
+
+    controller = BootstrapController(venv_dir=tmp_path / "venv", app_source_dir=tmp_path / "app")
+    monkeypatch.setattr(
+        "bootstrap.controller.gpu_check.detect_nvidia_gpu",
+        lambda: GpuInfo(name="RTX 4070", vram_gb=12.0, cuda_version="12.4"),
+    )
+    monkeypatch.setattr("bootstrap.gpu_check.paths.gpu_check_marker_file", lambda: tmp_path / "gpu.json")
+    controller.check_gpu()
+    assert controller.gpu_driver_supported() is True
+    seen = {}
+
+    def fake_run_install(venv_dir, app_source_dir, mode, dev_source_override=None, progress_cb=None, cuda_version=None):
+        seen["cuda_version"] = cuda_version
+        return tmp_path / "venv" / "bin" / "python"
+
+    monkeypatch.setattr("bootstrap.controller.installer.run_install", fake_run_install)
+    controller.set_mode(InstallMode.LOCAL)
+    controller.run_install()
+    assert seen["cuda_version"] == "12.4"
+
+
+def test_gpu_driver_supported_false_for_old_driver(monkeypatch, tmp_path):
+    from bootstrap.controller import BootstrapController
+
+    controller = BootstrapController(venv_dir=tmp_path / "venv", app_source_dir=tmp_path / "app")
+    monkeypatch.setattr(
+        "bootstrap.controller.gpu_check.detect_nvidia_gpu",
+        lambda: GpuInfo(name="GTX 1080", vram_gb=8.0, cuda_version="11.4"),
+    )
+    monkeypatch.setattr("bootstrap.gpu_check.paths.gpu_check_marker_file", lambda: tmp_path / "gpu.json")
+    controller.check_gpu()
+    assert controller.gpu_driver_supported() is False

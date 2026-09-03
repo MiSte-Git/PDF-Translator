@@ -175,6 +175,14 @@ class BootstrapApp(tk.Tk):
                 if gpu is None:
                     status_var.set(self.controller.text("bootstrap.gpu_not_found"))
                     self._render_gpu_buttons(button_row, ok=False, mac=False)
+                elif not self.controller.gpu_driver_supported():
+                    # 03.09.2026: driver older than CUDA 11.8 - no torch
+                    # wheel we could install would see this GPU. Same
+                    # buttons as "not found": Online, or Back.
+                    status_var.set(
+                        self.controller.text("bootstrap.gpu_driver_too_old", name=gpu.name, cuda_version=gpu.cuda_version)
+                    )
+                    self._render_gpu_buttons(button_row, ok=False, mac=True)
                 elif self.controller.gpu_meets_recommendation():
                     status_var.set(self.controller.text("bootstrap.gpu_ok", name=gpu.name, vram_gb=gpu.vram_gb))
                     self._nav_row(frame, back=self._show_mode, next_=self._show_install)

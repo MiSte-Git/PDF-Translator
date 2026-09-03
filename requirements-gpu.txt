@@ -33,12 +33,19 @@
 # Installation (in der Kommandozeile, im selben Python/venv wie die App -
 # in dieser Reihenfolge):
 #
-#   1) torch + torchvision - WICHTIG: die generische PyPI-Version ist
-#      häufig die reine CPU-Variante. Für echte GPU-Nutzung die zur
-#      eigenen CUDA-Treiberversion passende Variante über die offizielle
-#      Installationsanleitung installieren
-#      (https://pytorch.org/get-started/locally/), z. B. für CUDA 12.1:
-#        pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#   1) torch + torchvision - WICHTIG: das generische PyPI-Wheel ist gegen
+#      die NEUESTE CUDA-Version gebaut (CUDA 13 bei PyTorch 2.14) und
+#      braucht einen entsprechend neuen Treiber; auf älteren Treibern
+#      meldet torch "The NVIDIA driver on your system is too old" und
+#      sieht die GPU nicht. Erst `nvidia-smi` aufrufen - oben rechts steht
+#      "CUDA Version: 12.4" o. ä. - und dann den passenden Index wählen
+#      (CUDA hat Minor-Kompatibilität, cu128 läuft auf jedem 12.x-Treiber):
+#        CUDA 12.x:  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#        CUDA 11.8+: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+#        CUDA 13.x:  pip install torch torchvision          (PyPI-Standard reicht)
+#      Der Bootstrapper macht genau diese Wahl automatisch
+#      (bootstrap/gpu_check.py::torch_index_url()). Prüfen:
+#        python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 #
 #   2) requirements.txt und requirements-ocr.txt müssen bereits
 #      installiert sein (liefern numpy, Pillow, opencv-python-headless -
@@ -66,7 +73,14 @@
 # --no-deps-Weg oben empfohlen.
 torch
 torchvision
-simple-lama-inpainting
+# simple-lama-inpainting steht bewusst NICHT hier, sondern in
+# requirements-gpu-nodeps.txt (03.09.2026): seine Pins pillow<10.0.0 /
+# numpy<2.0.0 zwingen pip auf neueren Python-Versionen (3.13+) zu einem
+# Quell-Build eines uralten Pillow, der scheitert ("Failed to build
+# 'pillow'"). Diese Datei ist deshalb wieder gefahrlos per
+# "pip install -r requirements-gpu.txt" installierbar; danach
+#   pip install --no-deps -r requirements-gpu-nodeps.txt
+# (der Bootstrapper macht im Modus "Lokal" genau diese zwei Schritte).
 
 # Troubleshooting:
 #

@@ -37,6 +37,7 @@ than being intentionally different.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -47,12 +48,85 @@ from bootstrap import paths
 GPU_MIN_VRAM_GB = 8.0
 
 _NVIDIA_SMI_TIMEOUT_SECONDS = 10
+_CUDA_VERSION_RE = re.compile(r"CUDA Version:\s*(\d+)\.(\d+)")
+
+# 03.09.2026 (Michael, driver 550 / CUDA 12.4: "UserWarning: CUDA
+# initialization: The NVIDIA driver on your system is too old (found
+# version 12040)"): a plain `pip install torch` from PyPI ships the wheel
+# built against the NEWEST CUDA (13.x as of PyTorch 2.14), which needs a
+# driver from the last few months - on anything older torch.cuda simply
+# reports "no GPU" and the whole LOCAL install is silently useless. The
+# driver's maximum CUDA version is printed by nvidia-smi, so the
+# bootstrapper reads it BEFORE installing and picks the pytorch.org wheel
+# index built for that CUDA generation instead. CUDA guarantees minor-
+# version compatibility within a major release (a cu128 build runs on any
+# 12.x driver), so one index per major is enough. Oldest driver with
+# cu118 wheels is CUDA 11.8; anything older is out of scope for LOCAL.
+TORCH_INDEX_BY_CUDA_MAJOR = {
+    12: "https://download.pytorch.org/whl/cu128",
+    11: "https://download.pytorch.org/whl/cu118",
+}
+MIN_SUPPORTED_CUDA = (11, 8)
 
 
 @dataclass(frozen=True)
 class GpuInfo:
     name: str
     vram_gb: float
+    # Driver's maximum supported CUDA version as "major.minor" (e.g. "12.4"),
+    # None when nvidia-smi's banner could not be parsed. Defaulted so every
+    # existing GpuInfo(name=..., vram_gb=...) construction keeps working.
+    cuda_version: str | None = None
+
+
+def parse_cuda_version(text: str) -> tuple[int, int] | None:
+    """(major, minor) from a "CUDA Version: 12.4" string, else None."""
+    if not text:
+        return None
+    match = _CUDA_VERSION_RE.search(text)
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def detect_driver_cuda_version() -> str | None:
+    """Driver's maximum CUDA version ("12.4") from nvidia-smi's plain
+    banner output, or None if unavailable/unparseable. Never raises, for
+    the same reason as detect_nvidia_gpu()."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi"],
+            capture_output=True,
+            text=True,
+            timeout=_NVIDIA_SMI_TIMEOUT_SECONDS,
+            check=True,
+        )
+        parsed = parse_cuda_version(result.stdout)
+        return f"{parsed[0]}.{parsed[1]}" if parsed else None
+    except Exception:
+        return None
+
+
+def driver_supported(gpu: GpuInfo | None) -> bool:
+    """False only when the driver's CUDA version is KNOWN and below
+    MIN_SUPPORTED_CUDA - an unparseable version counts as supported so a
+    cosmetic nvidia-smi banner change never blocks an install (the torch
+    step then falls back to the PyPI default, exactly the pre-03.09.2026
+    behaviour)."""
+    if gpu is None or gpu.cuda_version is None:
+        return True
+    parsed = parse_cuda_version(f"CUDA Version: {gpu.cuda_version}")
+    return parsed is None or parsed >= MIN_SUPPORTED_CUDA
+
+
+def torch_index_url(cuda_version: str | None) -> str | None:
+    """pytorch.org wheel index matching the driver's CUDA major, or None for
+    "use PyPI's default wheel" (unknown version, or a driver new enough for
+    the newest CUDA that PyPI's default is built against)."""
+    parsed = parse_cuda_version(f"CUDA Version: {cuda_version}") if cuda_version else None
+    if parsed is None:
+        return None
+    return TORCH_INDEX_BY_CUDA_MAJOR.get(parsed[0])
 
 
 def detect_nvidia_gpu() -> GpuInfo | None:
@@ -109,7 +183,7 @@ def detect_nvidia_gpu() -> GpuInfo | None:
         # GiB-ish unit consumer GPU marketing uses (e.g. "8 GB" card ->
         # ~8192 MiB reported), so divide by 1024 rather than 1000 to match
         # what a user reads on the box.
-        return GpuInfo(name=name, vram_gb=vram_mib / 1024)
+        return GpuInfo(name=name, vram_gb=vram_mib / 1024, cuda_version=detect_driver_cuda_version())
     except (OSError, subprocess.SubprocessError):
         # OSError: nvidia-smi not on PATH (no NVIDIA driver installed - no
         # NVIDIA GPU, or an AMD/Intel GPU, or a Mac). SubprocessError
@@ -153,6 +227,9 @@ class GpuCheckResult:
     vram_gb: float | None
     meets_recommendation: bool
     min_vram_gb: float
+    # 03.09.2026 - defaulted so markers written before this field existed
+    # still load via GpuCheckResult(**data) in read_gpu_check_marker().
+    cuda_version: str | None = None
 
 
 def save_gpu_check_result(gpu: GpuInfo | None, marker_path: Path | None = None) -> GpuCheckResult:
@@ -176,6 +253,7 @@ def save_gpu_check_result(gpu: GpuInfo | None, marker_path: Path | None = None) 
         vram_gb=gpu.vram_gb if gpu is not None else None,
         meets_recommendation=meets_recommendation(gpu),
         min_vram_gb=GPU_MIN_VRAM_GB,
+        cuda_version=gpu.cuda_version if gpu is not None else None,
     )
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(json.dumps(asdict(result)), encoding="utf-8")

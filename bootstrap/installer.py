@@ -26,7 +26,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Optional
 
-from bootstrap import desktop_integration, paths, release_source
+from bootstrap import desktop_integration, gpu_check, paths, release_source
 
 _PIP_INSTALL_TIMEOUT_SECONDS = 60 * 30  # large ML wheels (torch, etc.) are slow to fetch
 
@@ -43,6 +43,13 @@ class InstallStep(str, Enum):
     VENV = "venv"
     DEPS = "deps"
     SHORTCUT = "shortcut"
+
+
+# requirements files that must be installed with `pip install --no-deps`
+# (03.09.2026): simple-lama-inpainting's own pins (pillow<10, numpy<2) would
+# otherwise force pip into a doomed source build of an ancient Pillow on
+# Python 3.13+ - see the header comments of requirements-gpu.txt.
+NO_DEPS_REQUIREMENTS = frozenset({"requirements-gpu-nodeps.txt"})
 
 
 class InstallError(RuntimeError):
@@ -74,6 +81,9 @@ def requirements_files_for_mode(mode: InstallMode, app_source_dir: Path) -> list
     candidates = [app_source_dir / "requirements.txt", app_source_dir / "requirements-ocr.txt"]
     if mode is InstallMode.LOCAL:
         candidates.append(app_source_dir / "requirements-gpu.txt")
+        # Must come AFTER requirements-gpu.txt: installed with --no-deps,
+        # so torch etc. have to be there already (NO_DEPS_REQUIREMENTS).
+        candidates.append(app_source_dir / "requirements-gpu-nodeps.txt")
     return [path for path in candidates if path.is_file()]
 
 
@@ -84,10 +94,14 @@ def create_venv(venv_dir: Path) -> None:
         raise InstallError(f"Could not create the virtual environment: {exc}") from exc
 
 
-def pip_install(venv_python: Path, requirements_file: Path) -> None:
+def pip_install(venv_python: Path, requirements_file: Path, no_deps: bool = False) -> None:
+    command = [str(venv_python), "-m", "pip", "install"]
+    if no_deps:
+        command.append("--no-deps")
+    command += ["-r", str(requirements_file)]
     try:
         subprocess.run(
-            [str(venv_python), "-m", "pip", "install", "-r", str(requirements_file)],
+            command,
             capture_output=True,
             text=True,
             timeout=_PIP_INSTALL_TIMEOUT_SECONDS,
@@ -101,14 +115,52 @@ def pip_install(venv_python: Path, requirements_file: Path) -> None:
         raise InstallError(f"Installing {requirements_file.name} failed: {exc}") from exc
 
 
+_TORCH_PACKAGES = ["torch", "torchvision"]
+
+
+def torch_install_command(venv_python: Path, cuda_version: str | None) -> list[str]:
+    """pip command installing torch/torchvision from the wheel index that
+    matches the driver's CUDA generation (see gpu_check.torch_index_url());
+    plain PyPI when no specific index applies."""
+    command = [str(venv_python), "-m", "pip", "install", *_TORCH_PACKAGES]
+    index_url = gpu_check.torch_index_url(cuda_version)
+    if index_url:
+        command += ["--index-url", index_url]
+    return command
+
+
+def install_torch(venv_python: Path, cuda_version: str | None) -> None:
+    """LOCAL mode only. Runs BEFORE requirements-gpu.txt so that its bare
+    `torch`/`torchvision` lines are already satisfied and pip does not
+    replace the driver-matched wheels with PyPI's newest-CUDA default
+    (03.09.2026 - see gpu_check.TORCH_INDEX_BY_CUDA_MAJOR)."""
+    try:
+        subprocess.run(
+            torch_install_command(venv_python, cuda_version),
+            capture_output=True,
+            text=True,
+            timeout=_PIP_INSTALL_TIMEOUT_SECONDS,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise InstallError(f"Installing torch failed: {exc.stderr.strip() if exc.stderr else exc}") from exc
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise InstallError(f"Installing torch failed: {exc}") from exc
+
+
 def run_install(
     venv_dir: Path,
     app_source_dir: Path,
     mode: InstallMode,
     dev_source_override: str | None = None,
     progress_cb: Optional[ProgressCallback] = None,
+    cuda_version: str | None = None,
 ) -> Path:
-    """Runs the full Stage 2 sequence and returns the venv's python path."""
+    """Runs the full Stage 2 sequence and returns the venv's python path.
+
+    `cuda_version` (LOCAL mode, from the GPU-check step's GpuInfo) selects
+    the torch wheel index - see install_torch().
+    """
     _report(progress_cb, InstallStep.SOURCE)
     try:
         release_source.download_app_source(app_source_dir, dev_source_override=dev_source_override)
@@ -119,12 +171,19 @@ def run_install(
     create_venv(venv_dir)
     venv_python = paths.venv_python(venv_dir)
 
+    if mode is InstallMode.LOCAL:
+        index_url = gpu_check.torch_index_url(cuda_version)
+        _report(progress_cb, InstallStep.DEPS, detail=f"torch ({index_url.rsplit('/', 1)[-1] if index_url else 'PyPI'})")
+        install_torch(venv_python, cuda_version)
+
     for requirements_file in requirements_files_for_mode(mode, app_source_dir):
         _report(progress_cb, InstallStep.DEPS, detail=requirements_file.name)
-        pip_install(venv_python, requirements_file)
+        pip_install(venv_python, requirements_file, no_deps=requirements_file.name in NO_DEPS_REQUIREMENTS)
 
     _report(progress_cb, InstallStep.SHORTCUT)
     try:
+        # Icon is resolved inside create_desktop_entry() from the downloaded
+        # app source's assets/ (03.09.2026) - nothing to pass explicitly.
         desktop_integration.create_desktop_entry(app_source_dir, venv_python)
     except desktop_integration.DesktopIntegrationError as exc:
         raise InstallError(str(exc)) from exc
