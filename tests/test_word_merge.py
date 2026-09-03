@@ -18,7 +18,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import docx
+import docx.oxml.ns
 import pytest
+from docx.enum.section import WD_SECTION
 
 from pipeline.word.merge import DEFAULT_BATCH_SIZE, WordMergeStats, merge_docx_files
 
@@ -47,7 +49,12 @@ def test_merge_preserves_source_order(tmp_path: Path) -> None:
     assert stats == WordMergeStats(segments=3, files_processed=3, batches=0, cancelled=False, warnings=[])
 
 
-def test_merge_inserts_a_page_break_between_sources(tmp_path: Path) -> None:
+def test_merge_inserts_a_new_page_section_break_between_sources(tmp_path: Path) -> None:
+    """Since 03.09.2026 a SECTION break (new page), not a plain page break -
+    see _append_as_own_section(): headers/footers are section properties,
+    so every source needs its own section to keep them. No explicit
+    <w:br w:type="page"/> any more either, or there would be an empty page
+    between the two."""
     a = _make_docx(tmp_path / "a.docx", "First document")
     b = _make_docx(tmp_path / "b.docx", "Second document")
     destination = tmp_path / "out.docx"
@@ -55,19 +62,107 @@ def test_merge_inserts_a_page_break_between_sources(tmp_path: Path) -> None:
     merge_docx_files([a, b], destination)
 
     document = docx.Document(str(destination))
-    xml = document.element.body.xml
-    assert 'w:type="page"' in xml  # the <w:br w:type="page"/> from add_page_break()
+    assert len(document.sections) == 2
+    assert all(section.start_type == WD_SECTION.NEW_PAGE for section in document.sections)
+    assert 'w:type="page"' not in document.element.body.xml
 
 
-def test_single_source_has_no_page_break(tmp_path: Path) -> None:
+def test_single_source_has_a_single_section(tmp_path: Path) -> None:
     a = _make_docx(tmp_path / "a.docx", "Only document")
     destination = tmp_path / "out.docx"
 
     merge_docx_files([a], destination)
 
     document = docx.Document(str(destination))
-    assert 'w:type="page"' not in document.element.body.xml
+    assert len(document.sections) == 1
     assert [p.text for p in document.paragraphs if p.text] == ["Only document"]
+
+
+def _make_docx_with_header(
+    path: Path, text: str, header: str, footer: str | None = None, second_section_header: str | None = None,
+) -> Path:
+    document = docx.Document()
+    document.add_paragraph(text)
+    document.sections[0].header.paragraphs[0].text = header
+    if footer is not None:
+        document.sections[0].footer.paragraphs[0].text = footer
+    if second_section_header is not None:
+        section = document.add_section(WD_SECTION.NEW_PAGE)
+        section.header.is_linked_to_previous = False
+        section.header.paragraphs[0].text = second_section_header
+        document.add_paragraph(text + " (part 2)")
+    document.save(str(path))
+    return path
+
+
+def _section_headers_and_footers(path: Path) -> list[tuple[str, str]]:
+    document = docx.Document(str(path))
+    return [(s.header.paragraphs[0].text, s.footer.paragraphs[0].text) for s in document.sections]
+
+
+def test_every_source_keeps_its_own_header_and_footer(tmp_path: Path) -> None:
+    """Regression guard for 03.09.2026 (Michael: "Beim Zusammenführen der
+    Worddokumente wird [...] der Header des ersten Dokuments übernommen.
+    Auf jeden Fall ist dort auf jeder Seite der gleiche Header."): plain
+    docxcompose drops every appended document's section properties, so
+    the first file's header/footer ended up on every page."""
+    a = _make_docx_with_header(tmp_path / "a.docx", "Doc A", "Header A", "Footer A")
+    b = _make_docx_with_header(tmp_path / "b.docx", "Doc B", "Header B", "Footer B")
+    c = _make_docx_with_header(tmp_path / "c.docx", "Doc C", "Header C")
+    destination = tmp_path / "out.docx"
+
+    merge_docx_files([a, b, c], destination)
+
+    # Doc C has no footer of its own: it must get a BLANK one, not inherit
+    # Footer B from the section before it (OOXML's default for a section
+    # without a footer reference).
+    assert _section_headers_and_footers(destination) == [
+        ("Header A", "Footer A"), ("Header B", "Footer B"), ("Header C", ""),
+    ]
+
+
+def test_multi_section_source_keeps_all_of_its_headers(tmp_path: Path) -> None:
+    a = _make_docx_with_header(tmp_path / "a.docx", "Doc A", "Header A")
+    b = _make_docx_with_header(tmp_path / "b.docx", "Doc B", "Header B", second_section_header="Header B / 2")
+    destination = tmp_path / "out.docx"
+
+    merge_docx_files([a, b], destination)
+
+    assert [h for h, _ in _section_headers_and_footers(destination)] == ["Header A", "Header B", "Header B / 2"]
+    texts = [t for t in _paragraph_texts(destination) if t]
+    assert texts == ["Doc A", "Doc B", "Doc B (part 2)"]
+
+
+def test_header_images_are_copied_with_the_header(tmp_path: Path) -> None:
+    from PIL import Image
+
+    logo = tmp_path / "logo.png"
+    Image.new("RGB", (40, 20), "red").save(logo)
+    a = _make_docx_with_header(tmp_path / "a.docx", "Doc A", "Header A")
+    b = docx.Document()
+    b.add_paragraph("Doc B")
+    b.sections[0].header.paragraphs[0].add_run("Header B ").add_picture(str(logo))
+    b.save(str(tmp_path / "b.docx"))
+    destination = tmp_path / "out.docx"
+
+    merge_docx_files([a, tmp_path / "b.docx"], destination)
+
+    merged = docx.Document(str(destination))
+    header = merged.sections[1].header
+    blips = header._element.xpath(".//a:blip")
+    assert len(blips) == 1
+    rid = blips[0].get(docx.oxml.ns.qn("r:embed"))
+    assert rid in header.part.rels  # the image relationship was carried over, not left dangling
+
+
+def test_headers_survive_two_level_batching(tmp_path: Path) -> None:
+    sources = [_make_docx_with_header(tmp_path / f"d{i}.docx", f"Doc {i}", f"Header {i}") for i in range(5)]
+    destination = tmp_path / "out.docx"
+
+    stats = merge_docx_files(sources, destination, batch_size=2)
+
+    assert stats.batches == 3
+    assert [h for h, _ in _section_headers_and_footers(destination)] == [f"Header {i}" for i in range(5)]
 
 
 def test_same_file_listed_twice_counts_once_in_files_processed(tmp_path: Path) -> None:

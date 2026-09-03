@@ -24,9 +24,12 @@ concept doesn't have a DOCX equivalent; MergeSourceSpec's PDF-only
 
 Two behaviors deliberately differ from merge_pdfs(), both explained where
 they happen below:
-1. A page break is inserted between every two merged documents (DOCX has
-   no page concept as noted above, so nothing does this automatically the
-   way PDF's own page boundaries do).
+1. A section break (new page) is inserted between every two merged
+   documents (DOCX has no page concept as noted above, so nothing does
+   this automatically the way PDF's own page boundaries do) - a SECTION
+   break rather than a plain page break since 03.09.2026, because each
+   document must keep its own header/footer, and in OOXML those are
+   section properties (see _append_as_own_section()).
 2. A single source that fails to APPEND (as opposed to fails to OPEN) is
    skipped with a warning rather than aborting the whole run - see
    _merge_sequential()'s docstring for why this is not simply
@@ -98,6 +101,202 @@ def _open_docx(path: Path):
         raise ValueError(f'"{path.name}" konnte nicht geöffnet werden: {exc}') from exc
 
 
+def _copy_header_footer_part(composer, relationship) -> str:
+    """Copy the header/footer part behind `relationship` (from an appended
+    document) into the composer's master package and return the new rId
+    the master document part refers to it by.
+
+    Not delegated to Composer.add_relationship(): that creates a generic
+    opc Part (blob only), but docxcompose's own renumber_docpr_ids()/
+    renumber_nvpicpr_ids() later iterate every header/footer part of the
+    master expecting a real python-docx HeaderPart/FooterPart with an
+    `.element` - a generic Part there raises AttributeError inside
+    append(). So the part is recreated as the proper class with a deep
+    copy of its XML; the parts IT references (a logo image in the header,
+    for instance) are copied with add_relationship() and their rIds
+    rewritten inside the copied XML explicitly, rather than relying on
+    the "same insertion order gives the same rIds" assumption docxcompose
+    makes for itself.
+    """
+    from copy import deepcopy
+
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    from docx.opc.packuri import PackURI
+    from docx.oxml.ns import nsmap
+    from docx.parts.hdrftr import FooterPart, HeaderPart
+
+    source_part = relationship.target_part
+    package = composer.doc.part.package
+    if relationship.reltype == RT.HEADER:
+        part_class, prefix = HeaderPart, "/word/header"
+    else:
+        part_class, prefix = FooterPart, "/word/footer"
+
+    existing = {str(part.partname) for part in package.iter_parts()}
+    number = 1
+    while f"{prefix}{number}.xml" in existing:
+        number += 1
+    new_part = part_class(
+        PackURI(f"{prefix}{number}.xml"), source_part.content_type, deepcopy(source_part.element), package
+    )
+
+    inner_rid_map: dict[str, str] = {}
+    for rid, inner_rel in source_part.rels.items():
+        inner_rid_map[rid] = composer.add_relationship(source_part, new_part, inner_rel).rId
+    if inner_rid_map:
+        r_ns = nsmap["r"]
+        for element in new_part.element.iter():
+            for attribute, value in list(element.attrib.items()):
+                if attribute.startswith("{%s}" % r_ns) and value in inner_rid_map:
+                    element.set(attribute, inner_rid_map[value])
+
+    return composer.doc.part.relate_to(new_part, relationship.reltype)
+
+
+def _ensure_blank_header_footer(composer, sectpr) -> None:
+    """Give `sectpr` an explicit (empty) default header and footer where it
+    has none, so nothing is inherited from the section before it - see
+    _append_as_own_section(). Even-page/first-page variants are left
+    alone: they only apply when the section itself asks for them."""
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.parts.hdrftr import FooterPart, HeaderPart
+
+    package = composer.doc.part.package
+    for tag, part_class, reltype in (
+        ("w:headerReference", HeaderPart, RT.HEADER),
+        ("w:footerReference", FooterPart, RT.FOOTER),
+    ):
+        if sectpr.xpath(f"{tag}[@w:type='default']"):
+            continue
+        rid = composer.doc.part.relate_to(part_class.new(package), reltype)
+        reference = OxmlElement(tag)
+        reference.set(qn("w:type"), "default")
+        reference.set(qn("r:id"), rid)
+        # schema order: headerReference* first, then footerReference*
+        anchors = sectpr.xpath("w:footerReference" if tag == "w:footerReference" else "w:headerReference")
+        if anchors:
+            anchors[-1].addnext(reference)
+        elif tag == "w:footerReference" and sectpr.xpath("w:headerReference"):
+            sectpr.xpath("w:headerReference")[-1].addnext(reference)
+        else:
+            sectpr.insert(0, reference)
+
+
+def _append_as_own_section(composer, doc) -> None:
+    """Append `doc` to `composer` so that it keeps ITS OWN header/footer
+    (03.09.2026, Michael: "Beim Zusammenführen der Worddokumente wird [...]
+    der Header des ersten Dokuments übernommen. Auf jeden Fall ist dort auf
+    jeder Seite der gleiche Header.").
+
+    Why docxcompose alone gets this wrong: Composer.append() copies only
+    the body CONTENT of the appended document. Its body-level <w:sectPr>
+    (page size, margins - and the header/footer references) is dropped,
+    and every headerReference/footerReference inside inner sections is
+    stripped (remove_header_and_footer_references()). Headers/footers are
+    section properties in OOXML, so all appended content silently falls
+    under the master document's single section - i.e. the FIRST file's
+    header on every page. docxcompose's own comment calls the situation
+    "really messy" and leaves it at that.
+
+    What this does instead, per appended document:
+    1. Copies every header/footer part the document references (with the
+       images etc. those parts reference, via Composer.add_relationship())
+       into the master package and remembers old rId -> new rId.
+    2. Calls Composer.append() with its header-reference stripping and its
+       "inherit the master's headers into the first new section" fix-up
+       disabled (both are instance-level overrides, nothing global).
+    3. Turns the boundary into a real section break: the master's current
+       body-level sectPr (which describes the PREVIOUS document's last
+       section) moves into a new paragraph placed right before the
+       appended content - that is how OOXML ends a section - and a copy of
+       the appended document's own body-level sectPr becomes the new
+       body-level sectPr. The appended document's first section is forced
+       to start on a new page (w:type nextPage), which also replaces the
+       explicit page-break paragraph the merge used to insert: a page
+       break followed by a nextPage section break would leave an empty
+       page in between.
+    4. Remaps the header/footer rIds in the appended content's inner
+       sectPrs and in the new body-level sectPr to the copied parts.
+
+    Nothing about the master document is touched until append() has
+    succeeded, so a docxcompose append failure (see _merge_sequential())
+    still leaves the composed document exactly as it was.
+    """
+    from copy import deepcopy
+
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    body = composer.doc.element.body
+    r_id = qn("r:id")
+    ref_xpath = ".//w:headerReference|.//w:footerReference"
+
+    # 1. header/footer parts -> master package
+    rid_map: dict[str, str] = {}
+    for ref in doc.element.body.xpath(ref_xpath):
+        old_rid = ref.get(r_id)
+        if old_rid in rid_map or old_rid not in doc.part.rels:
+            continue
+        rid_map[old_rid] = _copy_header_footer_part(composer, doc.part.rels[old_rid])
+
+    # 2. append with docxcompose's header handling switched off (this
+    #    composer instance only)
+    old_body_sectpr = body.find(qn("w:sectPr"))
+    insert_at = composer.append_index()
+    composer.remove_header_and_footer_references = lambda _doc, _element: None
+    composer.first_section_properties_added = True
+    composer.append(doc)
+
+    # 3. section break at the boundary, appended document's sectPr at the end
+    source_sectpr = doc.element.body.find(qn("w:sectPr"))
+    if old_body_sectpr is not None:
+        break_paragraph = OxmlElement("w:p")
+        break_ppr = OxmlElement("w:pPr")
+        break_ppr.append(deepcopy(old_body_sectpr))
+        break_paragraph.append(break_ppr)
+        body.insert(insert_at, break_paragraph)
+        body.remove(old_body_sectpr)
+        insert_at += 1
+    new_body_sectpr = deepcopy(source_sectpr if source_sectpr is not None else old_body_sectpr)
+    if new_body_sectpr is not None:
+        body.append(new_body_sectpr)
+
+    # 4. remap header/footer references of the appended content only
+    #    (master rIds could coincidentally share the same strings)
+    new_elements = list(body)[insert_at:]
+    first_boundary_sectpr = None
+    for element in new_elements:
+        for sectpr in element.xpath(".//w:sectPr|self::w:sectPr"):
+            if first_boundary_sectpr is None:
+                first_boundary_sectpr = sectpr
+            for ref in sectpr.xpath(ref_xpath):
+                mapped = rid_map.get(ref.get(r_id))
+                if mapped is not None:
+                    ref.set(r_id, mapped)
+
+    if first_boundary_sectpr is not None:
+        # A section without its own default header/footer reference
+        # INHERITS the previous section's in OOXML - i.e. the previous
+        # document's. Standalone, that document had a blank one, so give
+        # it an explicit empty part to keep the merge faithful.
+        _ensure_blank_header_footer(composer, first_boundary_sectpr)
+        section_type = first_boundary_sectpr.find(qn("w:type"))
+        if section_type is None:
+            section_type = OxmlElement("w:type")
+            # schema order: headerReference*, footerReference*, footnotePr?,
+            # endnotePr?, type?, pgSz?, ...
+            predecessors = first_boundary_sectpr.xpath(
+                "w:headerReference|w:footerReference|w:footnotePr|w:endnotePr"
+            )
+            if predecessors:
+                predecessors[-1].addnext(section_type)
+            else:
+                first_boundary_sectpr.insert(0, section_type)
+        section_type.set(qn("w:val"), "nextPage")
+
+
 def _merge_sequential(
     sources: Sequence[Path],
     total_for_progress: int,
@@ -153,8 +352,10 @@ def _merge_sequential(
             continue
 
         try:
-            composer.doc.add_page_break()
-            composer.append(doc)
+            # Was composer.doc.add_page_break() + composer.append(doc) until
+            # 03.09.2026 - see _append_as_own_section() for why that lost
+            # every appended document's header/footer.
+            _append_as_own_section(composer, doc)
         except Exception as exc:  # noqa: BLE001 - soft-fail, see docstring above
             warnings.append(f'"{path.name}" konnte nicht angehängt werden und wurde übersprungen ({exc}).')
             continue
@@ -174,11 +375,12 @@ def merge_docx_files(
     `destination` - the DOCX counterpart of merge_pdfs(), whole-file only
     (see module docstring for why there is no page-range equivalent).
 
-    A page break is inserted between every two sources' content (DOCX has
-    no inherent page boundary the way PDF pages give merge_pdfs() one for
-    free) so the merged result reads as distinct documents joined at page
-    boundaries rather than paragraphs from different sources running
-    together.
+    A section break (new page) is inserted between every two sources'
+    content (DOCX has no inherent page boundary the way PDF pages give
+    merge_pdfs() one for free) so the merged result reads as distinct
+    documents joined at page boundaries rather than paragraphs from
+    different sources running together - and every source keeps its own
+    header/footer and page setup (see _append_as_own_section()).
 
     Batching (Michael, 01.09.2026 - "automatisch batchen" confirmed): if
     `sources` fits within one `batch_size` (default 100), it is merged in
