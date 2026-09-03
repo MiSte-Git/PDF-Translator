@@ -784,6 +784,15 @@ class MainWindow(QMainWindow):
         image_mode = self.image_mode.currentData()
         if image_mode is not None:
             settings.setValue("form.image_mode", EmbeddedImageMode(image_mode).value)
+        # 03.09.2026 (Michael: "Der Übersetzungsanbieter wird sich nicht
+        # gemerkt. Geht verloren nach Neustart."): self.provider liest
+        # den "provider"-Settings-Key zwar bei jedem Start (siehe __init__
+        # oben), aber eine Auswahl HIER im Hauptformular wurde nie
+        # zurückgeschrieben - nur der Umweg über den Einstellungen-Dialog
+        # (siehe dessen eigenes settings.setValue("provider", ...) beim
+        # Speichern) hat den Wert je dauerhaft gemacht. Gleicher Key wie
+        # dort, damit beide Stellen sich weiterhin denselben Wert teilen.
+        settings.setValue("provider", self.provider.currentText())
         settings.setValue("form.source_lang", self.source_lang.text())
         settings.setValue("form.target_lang", self.target_lang.text())
         settings.setValue("form.protected_terms", self.protected.toPlainText())

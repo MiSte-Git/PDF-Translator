@@ -76,6 +76,31 @@ def test_closing_and_reopening_restores_form_fields(qapp: QApplication) -> None:
         reopened.close()
 
 
+def test_provider_choice_in_the_main_form_survives_a_restart(qapp: QApplication) -> None:
+    """03.09.2026 regression (Michael: "Der Übersetzungsanbieter wird sich
+    nicht gemerkt. Geht verloren nach Neustart."): self.provider read the
+    "provider" settings key on construction, but a selection made directly
+    in the main form's own dropdown was never written back anywhere -
+    only going through the separate Settings dialog (which has its own
+    save-on-accept for the same key) ever persisted it. Uses the exact
+    same "provider" key both write and read from, independent of
+    form.*-prefixed fields covered by the other tests in this file."""
+    window = MainWindow()
+    window.show()
+    try:
+        assert window.provider.currentText() == "deepl"  # the shipped default
+        window.provider.setCurrentText("google")
+    finally:
+        window.close()
+
+    reopened = MainWindow()
+    reopened.show()
+    try:
+        assert reopened.provider.currentText() == "google"
+    finally:
+        reopened.close()
+
+
 def test_restoring_an_old_mode_specific_flag_does_not_survive_a_mode_that_no_longer_supports_it(
     qapp: QApplication,
 ) -> None:
