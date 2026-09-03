@@ -17,6 +17,7 @@ from docx.enum.section import WD_ORIENT
 
 from pipeline.translation.base import TranslationResult
 from pipeline.word.docx_engine import DocxEngine
+from pipeline.word.merge import merge_docx_files
 from pipeline.word.side_by_side import build_side_by_side_body, capture_original_paragraph_elements
 from pipeline.word.translate_document import translate_document
 
@@ -148,3 +149,87 @@ def test_side_by_side_is_opt_in_normal_mode_untouched(tmp_path: Path) -> None:
     result = docx.Document(str(destination))
     assert result.tables == []
     assert result.paragraphs[0].text == "[DE] Only paragraph."
+
+
+def _make_docx_with_own_header_footer(path: Path, label: str, paragraphs: list[str]) -> Path:
+    """Like _make_docx(), but with its own, distinguishable header/footer
+    text - needed to prove per-SECTION header/footer association (rather
+    than one leaking across every section) after a merge."""
+    document = docx.Document()
+    section = document.sections[0]
+    section.header.is_linked_to_previous = False
+    section.header.paragraphs[0].text = f"Header {label}"
+    section.footer.is_linked_to_previous = False
+    section.footer.paragraphs[0].text = f"Footer {label}"
+    for text in paragraphs:
+        document.add_paragraph(text)
+    document.save(str(path))
+    return path
+
+
+def test_side_by_side_on_a_merged_multi_section_document(tmp_path: Path) -> None:
+    """03.09.2026 regression (Michael, from a real merged multi-ICO
+    document): "Wenn 'Nebeneinander' ausgewählt ist, ist das Dokument
+    nicht im Landscape Modus. Die erste Seite wird komischer weise auf
+    der 2. Noch mal wiederholt und der Header ist wieder bei allen
+    gleich." pipeline.word.merge joins several .docx files with a real
+    section break per source (see merge_docx_files() - each section keeps
+    its own header/footer), and the first build_side_by_side_body() only
+    handled a SINGLE section correctly - every earlier section's break
+    ended up trapped inside a table cell (structurally invalid), which is
+    exactly what produced all three symptoms above. Reproduces the bug
+    with a real merge_docx_files() call (not a hand-rolled multi-section
+    fixture), so this exercises the actual section-break shape merge.py
+    produces.
+    """
+    a = _make_docx_with_own_header_footer(tmp_path / "a.docx", "A", ["First doc, paragraph one."])
+    b = _make_docx_with_own_header_footer(tmp_path / "b.docx", "B", ["Second doc, paragraph one."])
+    c = _make_docx_with_own_header_footer(tmp_path / "c.docx", "C", ["Third doc, paragraph one."])
+    merged = tmp_path / "merged.docx"
+    merge_docx_files([a, b, c], merged)
+
+    destination = tmp_path / "result.docx"
+    engine = DocxEngine()
+    engine.open(str(merged))
+    original_elements = capture_original_paragraph_elements(engine)
+    translated_runs: dict[int, list] = {}
+    translate_document(engine, _FakeProvider(), [], "DE", "en", translated_runs=translated_runs)
+    build_side_by_side_body(engine, original_elements, translated_runs, "DE")
+    engine.save(str(destination))
+
+    result = docx.Document(str(destination))
+
+    # One table PER ORIGINAL SECTION, not one giant table spanning all
+    # three - the actual structural fix.
+    assert len(result.tables) == 3
+
+    # Every section landscape, not just the last one.
+    assert len(result.sections) == 3
+    for section in result.sections:
+        assert section.orientation == WD_ORIENT.LANDSCAPE
+
+    # Each section still shows its OWN header/footer - not one leaking
+    # across all three (the reported "Header ist wieder bei allen
+    # gleich").
+    labels = ["A", "B", "C"]
+    for section, table, label in zip(result.sections, result.tables, labels):
+        assert section.header.paragraphs[0].text == f"Header {label}"
+        assert section.footer.paragraphs[0].text == f"Footer {label}"
+        # header row + exactly one content row (the empty section-break
+        # paragraph must NOT show up as a spurious extra row - see
+        # test_side_by_side_empty_paragraph_becomes_a_spanning_row_not_duplicated
+        # for when it legitimately should).
+        assert len(table.rows) == 2
+        assert table.rows[1].cells[0].text == f"{('First' if label == 'A' else 'Second' if label == 'B' else 'Third')} doc, paragraph one."
+
+    # And nothing duplicated/repeated across pages (the reported "erste
+    # Seite wird auf der 2. nochmal wiederholt") - each section's table
+    # content is distinct.
+    all_left_cell_texts = [table.rows[1].cells[0].text for table in result.tables]
+    assert len(set(all_left_cell_texts)) == 3
+
+    # A structurally valid .docx - python-docx parses every part it
+    # touches on construction/attribute access, and a section break
+    # trapped inside a table cell (the actual bug) reliably produced a
+    # document LibreOffice/Word flagged for repair in manual testing.
+    assert docx.Document(str(destination)) is not None

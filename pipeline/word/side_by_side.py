@@ -50,6 +50,38 @@ tauchen deshalb auch im Nebeneinander-Layout nicht auf - wie im
 normalen Modus bleiben sie im XML-Baum stehen, werden hier aber beim
 Body-Ersatz mit entfernt. Für ein reines Fließtext-Dokument (der
 Regelfall laut anforderungen_word_pfad.md) hat das keine Auswirkung.
+
+03.09.2026, Regression an einem echten, zuvor gemergten Mehrfach-ICO-
+Dokument (Michael: "Wenn 'Nebeneinander' ausgewählt ist, ist das
+Dokument nicht im Landscape Modus. Die erste Seite wird komischer
+weise auf der 2. Noch mal wiederholt und der Header ist wieder bei
+allen gleich."): pipeline.word.merge fügt mehrere Quelldokumente per
+Abschnittsumbruch zusammen (siehe merge.py), jedes mit einer eigenen
+<w:sectPr> (und damit eigenem Header/Footer) - ein solcher
+Abschnittsumbruch sitzt als <w:sectPr> im <w:pPr> GENAU des Absatzes,
+an dem der Abschnitt endet (nur der ALLERLETZTE Abschnitt hat seine
+<w:sectPr> stattdessen direkt als Kind von <w:body>, siehe OOXML-
+Schema). Die erste Version dieses Moduls kannte nur DIESEN einen,
+körpernahen <w:body>->sectPr-Fall und behandelte jeden Absatz
+gleich - das verschob jede Abschnittsumbruch-<w:sectPr> in eine
+Tabellenzelle hinein, wo ein Abschnittsumbruch strukturell ungültig
+ist (Word/LibreOffice reagieren darauf mit genau den gemeldeten
+Symptomen: nur der letzte Abschnitt wurde tatsächlich Querformat, die
+Seiten-1-Inhalte tauchten doppelt/verschoben auf, und da keine echte
+Abschnittsgrenze mehr existierte, griff für alle Seiten derselbe
+Header). Behoben durch _section_ranges()/die Section-für-Section-
+Schleife in build_side_by_side_body() unten: JEDE Abschnittsgrenze
+bekommt jetzt ihre eigene, echte, körperständige (nicht in einer
+Tabellenzelle liegende) <w:sectPr> - eine eigene Tabelle pro
+Originalabschnitt, jeweils gefolgt vom (jetzt quer gestellten)
+Abschnittsumbruch an genau der Stelle, wo er vorher stand. Ergänzend
+_renumber_doc_pr_ids(): an demselben Dokument fielen zudem doppelte
+wp:docPr-Ids in word/document.xml auf (vermutlich vorbestehend aus
+merge.py - jede gemergte Quelle scheint ihre Trennlinien-Form-Id
+unabhängig bei 1 zu beginnen; von dieser Änderung hier unberührt,
+da nichts hier Absätze dupliziert) - defensiv neu durchnummeriert,
+damit ein Nebeneinander-Rebuild dieses Symptom zumindest nicht
+weiterträgt.
 """
 from __future__ import annotations
 
@@ -77,6 +109,11 @@ _XML_SPACE_ATTR = "{http://www.w3.org/XML/1998/namespace}space"
 _FALLBACK_USABLE_WIDTH_TWIPS = 13_600
 
 _HEADER_SHADE = "D9E2F3"
+
+_WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+
+# Start offset for _renumber_doc_pr_ids() - see this module's docstring.
+_DOC_PR_ID_START = 900_000
 
 
 def _set_landscape(sect_pr: etree._Element) -> None:
@@ -122,6 +159,107 @@ def _usable_width_twips(sect_pr: etree._Element | None) -> int:
         return usable if usable > 1000 else _FALLBACK_USABLE_WIDTH_TWIPS
     except (TypeError, ValueError):
         return _FALLBACK_USABLE_WIDTH_TWIPS
+
+
+def _paragraph_is_empty(paragraph: etree._Element) -> bool:
+    """Whether `paragraph` has no <w:r>/<w:hyperlink> content at all - used
+    to skip emitting a visible (empty, spanning) row for a section-break
+    paragraph that carries nothing but the break itself (the common case:
+    pipeline.word.merge inserts a dedicated, otherwise-empty paragraph to
+    hold each section break). A section-break paragraph that DOES also
+    carry real text is still shown normally.
+    """
+    return paragraph.find(_w("r")) is None and paragraph.find(_w("hyperlink")) is None
+
+
+def _inline_section_break(paragraph: etree._Element) -> etree._Element | None:
+    """The <w:sectPr> nested in `paragraph`'s <w:pPr>, if this paragraph
+    IS a section-break paragraph (every section but the LAST one - see
+    this module's 03.09.2026 multi-section fix in its docstring). None
+    for an ordinary paragraph.
+    """
+    p_pr = paragraph.find(_w("pPr"))
+    return p_pr.find(_w("sectPr")) if p_pr is not None else None
+
+
+def _section_ranges(
+    original_paragraph_elements: list[etree._Element],
+) -> list[tuple[list[int], etree._Element | None]]:
+    """Split `original_paragraph_elements`'s indices into consecutive
+    sections, at every inline section-break paragraph. Each entry is
+    (indices_in_this_section, inline_sect_pr) - inline_sect_pr is that
+    section-BREAK paragraph's own <w:sectPr> for every section but the
+    last, always None for the trailing entry (whose section end is the
+    document's own body-level <w:sectPr> instead - the caller already has
+    that one separately). The trailing entry is always appended, even
+    with an empty index list, so callers always have somewhere to attach
+    the final, body-level section terminator.
+    """
+    sections: list[tuple[list[int], etree._Element | None]] = []
+    current: list[int] = []
+    for index, element in enumerate(original_paragraph_elements):
+        current.append(index)
+        inline_sect_pr = _inline_section_break(element)
+        if inline_sect_pr is not None:
+            sections.append((current, inline_sect_pr))
+            current = []
+    sections.append((current, None))
+    return sections
+
+
+def _renumber_doc_pr_ids(body: etree._Element) -> None:
+    """Assign fresh, sequential wp:docPr ids (drawing/shape anchors) to
+    every one left in the rebuilt body, starting from a high offset to
+    stay clear of whatever ids header/footer parts already use (see this
+    module's docstring: docxcompose renumbers those during merge.py's own
+    merge, body-level shapes apparently not). Purely defensive
+    normalization - see the docstring for why any duplicates here are
+    very unlikely to be caused by THIS module.
+    """
+    next_id = _DOC_PR_ID_START
+    for doc_pr in body.iter(f"{{{_WP_NS}}}docPr"):
+        doc_pr.set("id", str(next_id))
+        next_id += 1
+
+
+def _build_section_table(usable_width: int, column_width: int, target_lang: str) -> etree._Element:
+    """A fresh, empty two-column comparison table (borders, style, the
+    "Original"/"Übersetzung (...)" header row) for one section - factored
+    out of build_side_by_side_body() so a multi-section document (see
+    this module's docstring) gets one such table per original section
+    instead of one giant table spanning section boundaries it can't
+    actually represent.
+    """
+    table = etree.Element(_w("tbl"))
+    tbl_pr = etree.SubElement(table, _w("tblPr"))
+    tbl_style = etree.SubElement(tbl_pr, _w("tblStyle"))
+    tbl_style.set(_w("val"), "TableGrid")
+    tbl_w = etree.SubElement(tbl_pr, _w("tblW"))
+    tbl_w.set(_w("w"), str(usable_width))
+    tbl_w.set(_w("type"), "dxa")
+    tbl_borders = etree.SubElement(tbl_pr, _w("tblBorders"))
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        border = etree.SubElement(tbl_borders, _w(edge))
+        border.set(_w("val"), "single")
+        border.set(_w("sz"), "4")
+        border.set(_w("space"), "0")
+        border.set(_w("color"), "BFBFBF")
+    tbl_look = etree.SubElement(tbl_pr, _w("tblLook"))
+    tbl_look.set(_w("val"), "04A0")
+    tbl_look.set(_w("firstRow"), "1")
+    tbl_look.set(_w("noHBand"), "0")
+    tbl_look.set(_w("noVBand"), "1")
+
+    grid = etree.SubElement(table, _w("tblGrid"))
+    for _ in range(2):
+        col = etree.SubElement(grid, _w("gridCol"))
+        col.set(_w("w"), str(column_width))
+
+    table.append(_row([
+        _cell(column_width, [_label_paragraph("Original")], shade=_HEADER_SHADE),
+        _cell(column_width, [_label_paragraph(f"Übersetzung ({target_lang})")], shade=_HEADER_SHADE),
+    ]))
+    return table
 
 
 def _cell(width_twips: int, paragraph_elements: list[etree._Element], span: int = 1, shade: str | None = None) -> etree._Element:
@@ -265,23 +403,28 @@ def build_side_by_side_body(
     instead of duplicating identical text into both columns.
 
     Header/footer are left completely untouched (see this module's
-    docstring) - only the body's own <w:sectPr> is adjusted to
+    docstring) - only each section's own <w:sectPr> is adjusted to
     landscape, since header/footer live in their own separate parts
-    (word/header2.xml/word/footer1.xml) unaffected by the body's page
-    orientation.
+    (word/header2.xml/word/footer1.xml, one set per section on a
+    previously merged multi-source document) unaffected by a section's
+    page orientation.
+
+    A document with MULTIPLE sections (e.g. produced by pipeline.word.
+    merge - see this module's 03.09.2026 docstring entry) gets one
+    separate comparison table per original section, each followed by its
+    own (now-landscaped) section break, exactly where that break
+    originally sat - never one single table spanning several sections,
+    which would trap a section-break paragraph inside a table cell
+    (structurally invalid, and the actual root cause of the 03.09.2026
+    bug report this fix addresses).
     """
     assert engine._root is not None, "Document not opened."
     body = engine._root.find(_w("body"))
     assert body is not None, "word/document.xml has no <w:body>"
 
-    original_paragraphs = engine.get_paragraphs()
-
-    sect_pr = body.find(_w("sectPr"))
-    if sect_pr is not None:
-        _set_landscape(sect_pr)
-        body.remove(sect_pr)  # re-appended last, after every row (schema order)
-    usable_width = _usable_width_twips(sect_pr)
-    column_width = usable_width // 2
+    final_sect_pr = body.find(_w("sectPr"))
+    if final_sect_pr is not None:
+        body.remove(final_sect_pr)  # re-appended per-section below (schema order)
 
     # Removes the CURRENT (already-translated) body paragraphs, not
     # `original_paragraph_elements` - those are separate, detached deep
@@ -290,59 +433,75 @@ def build_side_by_side_body(
     for element in list(engine._paragraph_elements):
         body.remove(element)
 
-    table = etree.Element(_w("tbl"))
-    tbl_pr = etree.SubElement(table, _w("tblPr"))
-    tbl_style = etree.SubElement(tbl_pr, _w("tblStyle"))
-    tbl_style.set(_w("val"), "TableGrid")
-    tbl_w = etree.SubElement(tbl_pr, _w("tblW"))
-    tbl_w.set(_w("w"), str(usable_width))
-    tbl_w.set(_w("type"), "dxa")
-    tbl_borders = etree.SubElement(tbl_pr, _w("tblBorders"))
-    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
-        border = etree.SubElement(tbl_borders, _w(edge))
-        border.set(_w("val"), "single")
-        border.set(_w("sz"), "4")
-        border.set(_w("space"), "0")
-        border.set(_w("color"), "BFBFBF")
-    tbl_look = etree.SubElement(tbl_pr, _w("tblLook"))
-    tbl_look.set(_w("val"), "04A0")
-    tbl_look.set(_w("firstRow"), "1")
-    tbl_look.set(_w("noHBand"), "0")
-    tbl_look.set(_w("noVBand"), "1")
+    for indices, inline_sect_pr in _section_ranges(original_paragraph_elements):
+        governing_sect_pr = inline_sect_pr if inline_sect_pr is not None else final_sect_pr
+        # A private, landscaped COPY of whichever sectPr governs this
+        # section - only used for width/orientation and as this
+        # section's own terminator below. The ORIGINAL inline_sect_pr
+        # element (still living inside its paragraph's <w:pPr> in
+        # original_paragraph_elements) is left untouched here; it gets
+        # stripped from a dedicated cell-only copy in the loop below
+        # instead, since a section break cannot live inside a table cell.
+        landscape_sect_pr = copy.deepcopy(governing_sect_pr) if governing_sect_pr is not None else None
+        if landscape_sect_pr is not None:
+            _set_landscape(landscape_sect_pr)
+        usable_width = _usable_width_twips(landscape_sect_pr)
+        column_width = usable_width // 2
 
-    grid = etree.SubElement(table, _w("tblGrid"))
-    for _ in range(2):
-        col = etree.SubElement(grid, _w("gridCol"))
-        col.set(_w("w"), str(column_width))
+        if indices:
+            table = _build_section_table(usable_width, column_width, target_lang)
+            for index in indices:
+                original_element = original_paragraph_elements[index]
+                cell_source = original_element
+                if _inline_section_break(original_element) is not None:
+                    # This IS the section-break paragraph itself - use a
+                    # separate copy with the sectPr stripped out for the
+                    # cell; the break itself is re-attached as this
+                    # section's own terminator further below instead.
+                    cell_source = copy.deepcopy(original_element)
+                    cell_p_pr = cell_source.find(_w("pPr"))
+                    cell_p_pr.remove(cell_p_pr.find(_w("sectPr")))
+                    if _paragraph_is_empty(cell_source):
+                        # The common case: a dedicated, otherwise-empty
+                        # paragraph holding just the section break - the
+                        # break itself is still emitted below either way,
+                        # skip only the pointless empty row it would
+                        # otherwise leave behind in this section's table.
+                        continue
+                new_runs = translated_runs_by_index.get(index)
+                if new_runs is None:
+                    # Not actually translated (ICO-Metadatenbereich,
+                    # Leerzeile, nicht-übersetzbarer Absatz, ...) - eine
+                    # spaltenübergreifende Zeile statt identischem
+                    # Original-Text doppelt in beiden Spalten.
+                    table.append(_row([_cell(usable_width, [copy.deepcopy(cell_source)], span=2)]))
+                    continue
+                translated_element = _translated_paragraph_element(cell_source, engine._rels, new_runs)
+                table.append(_row([
+                    _cell(column_width, [copy.deepcopy(cell_source)]),
+                    _cell(column_width, [translated_element]),
+                ]))
+            body.append(table)
 
-    table.append(_row([
-        _cell(column_width, [_label_paragraph("Original")], shade=_HEADER_SHADE),
-        _cell(column_width, [_label_paragraph(f"Übersetzung ({target_lang})")], shade=_HEADER_SHADE),
-    ]))
+        if inline_sect_pr is not None:
+            # This section's own break, as its own body-level paragraph -
+            # exactly where the original section break sat, one per
+            # merged source document.
+            closing = etree.SubElement(body, _w("p"))
+            closing_p_pr = etree.SubElement(closing, _w("pPr"))
+            if landscape_sect_pr is not None:
+                closing_p_pr.append(landscape_sect_pr)
+        else:
+            # The FINAL section's sectPr is never wrapped in a paragraph -
+            # it's body's own trailing, direct child, per the OOXML
+            # schema (w:body's content model: any number of w:p/w:tbl,
+            # then exactly one trailing w:sectPr). A table that ends the
+            # body must be followed by at least one <w:p> first (some
+            # Word/LibreOffice versions render/behave oddly otherwise).
+            etree.SubElement(body, _w("p"))
+            if landscape_sect_pr is not None:
+                body.append(landscape_sect_pr)
+            else:
+                etree.SubElement(body, _w("sectPr"))
 
-    for index, (original_element, paragraph) in enumerate(zip(original_paragraph_elements, original_paragraphs)):
-        new_runs = translated_runs_by_index.get(index)
-        if new_runs is None:
-            # Not actually translated (ICO-Metadatenbereich, Leerzeile,
-            # nicht-übersetzbarer Absatz, ...) - eine spaltenübergreifende
-            # Zeile statt identischem Original-Text doppelt in beiden
-            # Spalten.
-            table.append(_row([_cell(usable_width, [copy.deepcopy(original_element)], span=2)]))
-            continue
-        translated_element = _translated_paragraph_element(original_element, engine._rels, new_runs)
-        table.append(_row([
-            _cell(column_width, [copy.deepcopy(original_element)]),
-            _cell(column_width, [translated_element]),
-        ]))
-
-    body.append(table)
-    # A table that ends the body must be followed by at least one <w:p>
-    # (some Word/LibreOffice versions render/behave oddly on a body whose
-    # very last child is a <w:tbl>), then the <w:sectPr> - required last
-    # per the OOXML schema's w:body content model (any number of
-    # w:p/w:tbl, then exactly one trailing w:sectPr).
-    etree.SubElement(body, _w("p"))
-    if sect_pr is not None:
-        body.append(sect_pr)
-    else:
-        etree.SubElement(body, _w("sectPr"))
+    _renumber_doc_pr_ids(body)
