@@ -139,6 +139,7 @@ def translate_document(
     progress_callback: Callable[[str], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
     stats_callback: Callable[[TranslationStats], None] | None = None,
+    translated_runs: dict[int, list[WordRun]] | None = None,
 ) -> TranslationStats:
     """Translate every translatable paragraph of `engine`'s already-open
     document IN PLACE (via engine.replace_paragraph_runs()/
@@ -172,6 +173,21 @@ def translate_document(
     current cumulative `stats`, letting a caller (ui/word_job.py) drive a
     live progress display without polling - again mirroring
     translate_presentation().
+
+    `translated_runs`, if given, is populated with {body_paragraph_index:
+    new_runs} for every BODY paragraph that was actually translated (i.e.
+    replace_paragraph_runs() was called for it) - header/footer are never
+    added, since they're never translated (see the loop below). Added
+    03.09.2026 for the "nebeneinander" side-by-side view (Michael: see
+    pipeline/word/side_by_side.py's module docstring): that module needs
+    both the ORIGINAL paragraph (still available afterwards via
+    engine.get_paragraphs() - replace_paragraph_runs() mutates the live
+    XML tree, not the WordParagraph dataclasses this function reads from)
+    and the TRANSLATED runs for the same paragraph, which otherwise only
+    ever end up written into the XML tree with no separate record kept.
+    Left None (the default) for every other caller (ico_translate/
+    batch.py, tests/manual_translate_full_document.py), which have no use
+    for it and shouldn't pay for building a dict they never read.
     """
     stats = TranslationStats()
 
@@ -221,6 +237,8 @@ def translate_document(
             _report()
             continue
         engine.replace_paragraph_runs(index, new_runs)
+        if translated_runs is not None:
+            translated_runs[index] = new_runs
         stats.body_translated += 1
         _report()
 

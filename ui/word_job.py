@@ -29,6 +29,7 @@ from typing import Callable
 from pipeline.translation.base import TranslationProvider
 from pipeline.translation.cost_control import PricingModel, TranslationBudgetGuard
 from pipeline.word.docx_engine import DocxEngine
+from pipeline.word.side_by_side import build_side_by_side_body, capture_original_paragraph_elements
 from pipeline.word.translate_document import TranslationStats, total_paragraph_count, translate_document
 from ui.document_job_common import DestinationConflictError, build_provider
 
@@ -55,6 +56,7 @@ def run_word_job(
     provider: TranslationProvider | None = None,
     total_callback: Callable[[int], None] | None = None,
     ico_mode: bool = False,
+    side_by_side: bool = False,
 ) -> WordJobResult:
     """Run one full DOCX translation job and return its result.
 
@@ -75,6 +77,19 @@ def run_word_job(
     inferred automatically. Left False by default so existing callers
     (tests, ico_translate/batch.py) keep their prior full-document
     behaviour unless they ask for the special case.
+
+    ``side_by_side`` (03.09.2026, Michael - see
+    pipeline/word/side_by_side.py's module docstring) is the "Original
+    und Übersetzung nebeneinander" checkbox in ui/app.py (Word mode
+    only): when True, translate_document() is asked to also record each
+    translated body paragraph's new runs (translated_runs below), and
+    build_side_by_side_body() then rebuilds the saved document's body as
+    a two-column comparison table before engine.save() - a strict
+    ADDITION to the normal, layout-preserving translation this function
+    always performs first; the normal translation pass and its QA
+    counters are identical either way. Left False by default so every
+    existing caller keeps producing the familiar layout-preserving
+    output unless it opts in.
     """
     source = Path(source)
     destination = Path(destination)
@@ -94,6 +109,12 @@ def run_word_job(
     active_provider = provider if provider is not None else build_provider(provider_name)
     guard = TranslationBudgetGuard(active_provider, pricing, max_chars_per_run=max_chars_per_run)
 
+    # Must be captured BEFORE translate_document() runs - see
+    # capture_original_paragraph_elements()'s docstring for why the
+    # engine's own paragraph elements can no longer be used for this
+    # afterwards.
+    original_paragraph_elements = capture_original_paragraph_elements(engine) if side_by_side else None
+    translated_runs: dict[int, list] | None = {} if side_by_side else None
     stats = translate_document(
         engine,
         guard,
@@ -103,7 +124,11 @@ def run_word_job(
         progress_callback=progress_callback,
         stats_callback=stats_callback,
         should_cancel=should_cancel,
+        translated_runs=translated_runs,
     )
+
+    if side_by_side:
+        build_side_by_side_body(engine, original_paragraph_elements, translated_runs, target_lang)
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     engine.save(str(destination))
@@ -112,7 +137,7 @@ def run_word_job(
     qa_report_path.write_text(
         _build_qa_report(
             source, destination, provider_name, target_lang, source_lang, stats,
-            ico_mode, engine.separator_found,
+            ico_mode, engine.separator_found, side_by_side,
         ),
         encoding="utf-8",
     )
@@ -128,6 +153,7 @@ def _build_qa_report(
     stats: TranslationStats,
     ico_mode: bool = False,
     separator_found: bool = False,
+    side_by_side: bool = False,
 ) -> str:
     lines: list[str] = [
         "DOCX-Übersetzung - QA-Bericht",
@@ -138,6 +164,15 @@ def _build_qa_report(
         f"Sprache: {source_lang or 'automatisch erkannt'} -> {target_lang}",
         "",
     ]
+    if side_by_side:
+        lines.append(
+            "Ansicht: Nebeneinander (Original | Übersetzung) - der Haupttext "
+            "wurde zu einer zweispaltigen Tabelle im Querformat umgebaut, "
+            "Kopf-/Fußzeile sind unverändert. Eingebettete Tabellen im "
+            "Haupttext (falls vorhanden) erscheinen darin nicht - siehe "
+            "pipeline/word/side_by_side.py."
+        )
+        lines.append("")
     if ico_mode and separator_found:
         lines.append(
             "ICO-Modus: aktiv. Der Seite-1-Metadatenbereich vor der Trennlinie wurde "

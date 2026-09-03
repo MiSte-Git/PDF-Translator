@@ -214,6 +214,91 @@ def _optional_date(edit: QDateEdit) -> date | None:
     return date(value.year(), value.month(), value.day())
 
 
+def _persist_date_filter_state(dialog, settings: QSettings, key_prefix: str) -> None:
+    """Write every widget of the date-filter group (see
+    _build_date_filter_group()) to QSettings under `key_prefix` - called
+    from both MergeSearchDialog.done() and WordMergeSearchDialog.done(),
+    same as the local-folder/Drive state right above each of them.
+
+    03.09.2026 (Michael: "Wenn beim Filter Datums Optionen ausgewählt
+    sind, werden sie nicht gespeichert und sind beim nächsten Mal nicht
+    mehr da."): unlike every other field in this dialog (folder, Drive
+    link, recursive, scope checkboxes, query history - all persisted in
+    done()), the date filter built on the same day (02.09.2026) was never
+    wired into done()/_restore_*_state() at all - unnoticed until now
+    because the group starts collapsed/unchecked, so an untouched dialog
+    never showed anything to lose in the first place. Fixed here rather
+    than only in the caller so a MergeSearchDialog/WordMergeSearchDialog
+    fix can never drift apart from the other (see this dialog's docstring
+    on why the two are separate classes to begin with).
+
+    Kept independent of whether the values still form a currently VALID
+    filter (_build_date_filter() may reject an incomplete state, e.g. Von
+    after Bis) - this only remembers what's in the widgets, exactly like
+    the query text field does, so reopening the dialog shows the same
+    not-yet-fixed state rather than silently discarding it.
+    """
+    settings.setValue(f"{key_prefix}_date_filter_enabled", dialog.date_filter_group.isChecked())
+    settings.setValue(f"{key_prefix}_date_source_document", dialog.date_source_document_radio.isChecked())
+    settings.setValue(f"{key_prefix}_date_region_ico_format", dialog.date_region_ico_format_checkbox.isChecked())
+    settings.setValue(f"{key_prefix}_date_region_header", dialog.date_region_header_checkbox.isChecked())
+    settings.setValue(f"{key_prefix}_date_region_footer", dialog.date_region_footer_checkbox.isChecked())
+    settings.setValue(f"{key_prefix}_date_format_iso", dialog.date_format_iso_checkbox.isChecked())
+    settings.setValue(f"{key_prefix}_date_format_de", dialog.date_format_de_checkbox.isChecked())
+    settings.setValue(f"{key_prefix}_date_format_en_month", dialog.date_format_en_month_checkbox.isChecked())
+    settings.setValue(f"{key_prefix}_date_format_slash", dialog.date_format_slash_checkbox.isChecked())
+    settings.setValue(f"{key_prefix}_date_custom_format", dialog.date_custom_format_edit.text())
+    settings.setValue(f"{key_prefix}_date_exact", dialog.date_exact_checkbox.isChecked())
+    for suffix, edit in (("from", dialog.date_from_edit), ("to", dialog.date_to_edit), ("exact_date", dialog.date_exact_edit)):
+        value = edit.date()
+        settings.setValue(f"{key_prefix}_date_{suffix}", value.toString(Qt.ISODate) if value != _DATE_UNSET else "")
+
+
+def _restore_date_filter_state(dialog, settings: QSettings, key_prefix: str) -> None:
+    """Read back what _persist_date_filter_state() wrote - called once from
+    each dialog's constructor, alongside its _restore_local_folder_state()/
+    _restore_drive_state() calls. Uses each widget's own toggled-signal
+    handlers (_on_date_source_changed()/_on_date_exact_toggled()) rather
+    than touching date_document_options/date_range_stack directly, so the
+    restored state drives exactly the same visibility logic a live click
+    would - nothing here needs to know that logic itself.
+    """
+    dialog.date_filter_group.setChecked(bool(settings.value(f"{key_prefix}_date_filter_enabled", False, type=bool)))
+    if bool(settings.value(f"{key_prefix}_date_source_document", False, type=bool)):
+        dialog.date_source_document_radio.setChecked(True)
+    else:
+        dialog.date_source_file_radio.setChecked(True)
+    dialog.date_region_ico_format_checkbox.setChecked(
+        bool(settings.value(f"{key_prefix}_date_region_ico_format", True, type=bool))
+    )
+    dialog.date_region_header_checkbox.setChecked(
+        bool(settings.value(f"{key_prefix}_date_region_header", False, type=bool))
+    )
+    dialog.date_region_footer_checkbox.setChecked(
+        bool(settings.value(f"{key_prefix}_date_region_footer", False, type=bool))
+    )
+    dialog.date_format_iso_checkbox.setChecked(
+        bool(settings.value(f"{key_prefix}_date_format_iso", FORMAT_ISO in DEFAULT_DATE_FORMATS, type=bool))
+    )
+    dialog.date_format_de_checkbox.setChecked(
+        bool(settings.value(f"{key_prefix}_date_format_de", FORMAT_DE in DEFAULT_DATE_FORMATS, type=bool))
+    )
+    dialog.date_format_en_month_checkbox.setChecked(
+        bool(settings.value(f"{key_prefix}_date_format_en_month", FORMAT_EN_MONTH in DEFAULT_DATE_FORMATS, type=bool))
+    )
+    dialog.date_format_slash_checkbox.setChecked(
+        bool(settings.value(f"{key_prefix}_date_format_slash", FORMAT_SLASH in DEFAULT_DATE_FORMATS, type=bool))
+    )
+    dialog.date_custom_format_edit.setText(str(settings.value(f"{key_prefix}_date_custom_format", "", type=str)))
+    dialog.date_exact_checkbox.setChecked(bool(settings.value(f"{key_prefix}_date_exact", False, type=bool)))
+    for suffix, edit in (("from", dialog.date_from_edit), ("to", dialog.date_to_edit), ("exact_date", dialog.date_exact_edit)):
+        stored = str(settings.value(f"{key_prefix}_date_{suffix}", "", type=str))
+        if stored:
+            restored = QDate.fromString(stored, Qt.ISODate)
+            if restored.isValid():
+                edit.setDate(restored)
+
+
 # 02.09.2026 (Michael: "Eine Historie im Suchbereich hätte ich noch gern.")
 # - the search field used to persist only the single LAST query (see
 # query_edit's constructor comment below) even though Michael's original
@@ -522,6 +607,7 @@ class MergeSearchDialog(QDialog):
         self._refresh_drive_status()
         self._restore_drive_state()
         self._restore_local_folder_state()
+        _restore_date_filter_state(self, self.settings, "merge_search")
 
     def _restore_local_folder_state(self) -> None:
         """02.09.2026 (Michael: "Der letzte Suchordner wird auch nicht im
@@ -592,6 +678,7 @@ class MergeSearchDialog(QDialog):
         # _record_query_history() whenever a search actually runs, this
         # just persists whatever it currently holds.
         self.settings.setValue("merge_search_query_history", json.dumps(self._query_history))
+        _persist_date_filter_state(self, self.settings, "merge_search")
         # 02.09.2026 - a still-open detached results window (see
         # _DetachedResultsWindow) must not outlive this dialog: closing it
         # here reparents self.results back before this dialog itself is

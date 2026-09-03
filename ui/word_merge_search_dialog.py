@@ -73,7 +73,9 @@ from ui.merge_search_dialog import (
     _match_path,
     _mtime_or_zero,
     _optional_date,
+    _persist_date_filter_state,
     _record_query_history,
+    _restore_date_filter_state,
 )
 from ui.natural_sort import natural_sort_key
 from ui.search_scopes import (
@@ -234,6 +236,7 @@ class WordMergeSearchDialog(QDialog):
         self._refresh_drive_status()
         self._restore_drive_state()
         self._restore_local_folder_state()
+        _restore_date_filter_state(self, self.settings, "word_merge_search")
 
     def _restore_local_folder_state(self) -> None:
         """02.09.2026 - see MergeSearchDialog's identical method (this
@@ -270,6 +273,7 @@ class WordMergeSearchDialog(QDialog):
         # (this dialog duplicates that one's query field history restore/
         # persist).
         self.settings.setValue("word_merge_search_query_history", json.dumps(self._query_history))
+        _persist_date_filter_state(self, self.settings, "word_merge_search")
         # 02.09.2026 - see MergeSearchDialog.done()'s identical comment
         # (this dialog duplicates that one's detach-results feature).
         if self._detached_results_window is not None:

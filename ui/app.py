@@ -510,6 +510,13 @@ class MainWindow(QMainWindow):
         # _mode_changed() and DocxEngine.open()'s/PyMuPdfEngine.open()'s
         # docstrings for why.
         self.ico_mode = QCheckBox()
+        # Word-only (03.09.2026, Michael - siehe
+        # pipeline/word/side_by_side.py's Moduldocstring): "Original und
+        # Übersetzung nebeneinander" statt des normalen, layoutgetreuen
+        # Ergebnisses. Wie ico_mode ein expliziter, nie automatisch
+        # abgeleiteter Wert - siehe _mode_changed() (Sichtbarkeit/Reset) und
+        # TranslationRequest.side_by_side.
+        self.side_by_side = QCheckBox()
         # PDF-only pair (see _mode_changed()): a real user's live run
         # against a real document had its repeating header translated
         # along with the body, because the direct PDF path never applied
@@ -543,7 +550,7 @@ class MainWindow(QMainWindow):
         self.inpainting_backend_hint.setStyleSheet("font-weight: bold; padding-left: 2px;")
 
         self.form = QFormLayout()
-        self.form_labels = [QLabel() for _ in range(12)]
+        self.form_labels = [QLabel() for _ in range(13)]
         self.form.addRow(self.form_labels[0], self.mode)
         source_row = QHBoxLayout(); source_row.addWidget(self.source_label, 1); source_row.addWidget(self.choose)
         self.form.addRow(self.form_labels[1], source_row)
@@ -558,6 +565,7 @@ class MainWindow(QMainWindow):
         self.form.addRow(self.form_labels[6], protected_row)
         self.form.addRow("", self.protected_hint)
         self.form.addRow(self.form_labels[7], self.ico_mode)
+        self.form.addRow(self.form_labels[12], self.side_by_side)
         self.form.addRow(self.form_labels[8], self.exclude_header)
         self.form.addRow(self.form_labels[9], self.exclude_footer)
         self.form.addRow(self.form_labels[10], self.ocr_engine)
@@ -752,6 +760,7 @@ class MainWindow(QMainWindow):
         self.target_lang.setText(settings.value("form.target_lang", "DE", type=str))
         self.protected.setPlainText(settings.value("form.protected_terms", "", type=str))
         self.ico_mode.setChecked(settings.value("form.ico_mode", False, type=bool))
+        self.side_by_side.setChecked(settings.value("form.side_by_side", False, type=bool))
         self.exclude_header.setChecked(settings.value("form.exclude_header", False, type=bool))
         self.exclude_footer.setChecked(settings.value("form.exclude_footer", False, type=bool))
         ocr_engine_value = settings.value("form.ocr_engine", "", type=str)
@@ -779,6 +788,7 @@ class MainWindow(QMainWindow):
         settings.setValue("form.target_lang", self.target_lang.text())
         settings.setValue("form.protected_terms", self.protected.toPlainText())
         settings.setValue("form.ico_mode", self.ico_mode.isChecked())
+        settings.setValue("form.side_by_side", self.side_by_side.isChecked())
         settings.setValue("form.exclude_header", self.exclude_header.isChecked())
         settings.setValue("form.exclude_footer", self.exclude_footer.isChecked())
         if self.ocr_engine.currentData():
@@ -818,7 +828,7 @@ class MainWindow(QMainWindow):
         self.config_box.setTitle(t("config.group"))
         for index, mode in enumerate(MODE_KEYS): self.mode.setItemText(index, t(MODE_KEYS[mode]))
         for index, key in enumerate(("image.none", "image.selected", "image.all")): self.image_mode.setItemText(index, t(key))
-        for label, key in zip(self.form_labels, ("field.mode", "field.source", "field.images", "field.provider", "field.source_language", "field.target_language", "field.protected_terms", "field.ico_mode", "field.exclude_header", "field.exclude_footer", "field.ocr_engine", "field.inpainting_backend")):
+        for label, key in zip(self.form_labels, ("field.mode", "field.source", "field.images", "field.provider", "field.source_language", "field.target_language", "field.protected_terms", "field.ico_mode", "field.exclude_header", "field.exclude_footer", "field.ocr_engine", "field.inpainting_backend", "field.side_by_side")):
             label.setText(t(key))
         for index, key in enumerate(OCR_ENGINE_FACTORIES):
             self.ocr_engine.setItemText(index, t(f"ocr_engine.{key}"))
@@ -837,6 +847,8 @@ class MainWindow(QMainWindow):
         self.confirm.setText(t("analysis.checked"))
         self.ico_mode.setText(t("ico_mode.checkbox"))
         self.ico_mode.setToolTip(t("ico_mode.tooltip"))
+        self.side_by_side.setText(t("side_by_side.checkbox"))
+        self.side_by_side.setToolTip(t("side_by_side.tooltip"))
         self.exclude_header.setText(t("exclude_header.checkbox"))
         self.exclude_header.setToolTip(t("exclude_header.tooltip"))
         self.exclude_footer.setText(t("exclude_footer.checkbox"))
@@ -1032,6 +1044,13 @@ class MainWindow(QMainWindow):
         self.form.setRowVisible(self.ico_mode, is_word or is_pdf)
         if not (is_word or is_pdf):
             self.ico_mode.setChecked(False)
+        # side_by_side ist vorerst NUR für Word (Michael, auf Rückfrage:
+        # "Nur Word") - PDF/PPTX folgen bei Bedarf, siehe
+        # pipeline/word/side_by_side.py's Moduldocstring. Gleiches
+        # hide-the-row-and-reset-on-mode-change Muster wie ico_mode.
+        self.form.setRowVisible(self.side_by_side, is_word)
+        if not is_word:
+            self.side_by_side.setChecked(False)
         # exclude_header/exclude_footer are PDF's own additional special
         # case (see their construction above) - same hide-the-row-and-
         # reset-on-mode-change treatment as ico_mode, just PDF-only.
@@ -1187,6 +1206,7 @@ class MainWindow(QMainWindow):
             source_language=self.source_lang.text().strip() or None,
             target_language=self.target_lang.text().strip(), embedded_images=EmbeddedImageMode(self.image_mode.currentData()),
             protected_terms=terms, ico_mode=self.ico_mode.isChecked(),
+            side_by_side=self.side_by_side.isChecked(),
             exclude_header=self.exclude_header.isChecked(), exclude_footer=self.exclude_footer.isChecked(),
             ocr_engine=self.ocr_engine.currentData() or "tesseract",
             inpainting_backend=self.inpainting_backend.currentData() or "box_overlay",
@@ -1438,7 +1458,7 @@ class MainWindow(QMainWindow):
             # than added to every constructor just to keep the call below
             # uniform.
             if request.mode == TranslationMode.WORD:
-                extra_kwargs = {"ico_mode": request.ico_mode}
+                extra_kwargs = {"ico_mode": request.ico_mode, "side_by_side": request.side_by_side}
             elif request.mode == TranslationMode.PDF:
                 extra_kwargs = {
                     "exclude_header": request.exclude_header, "exclude_footer": request.exclude_footer,
@@ -1744,7 +1764,7 @@ class MainWindow(QMainWindow):
             self._worker = None
         for widget in (
             self.mode, self.choose, self.analyze, self.confirm, self.settings_button, self.provider,
-            self.ico_mode, self.ocr_engine, self.inpainting_backend, self.merge_button, self.word_merge_button,
+            self.ico_mode, self.side_by_side, self.ocr_engine, self.inpainting_backend, self.merge_button, self.word_merge_button,
         ):
             widget.setEnabled(not running)
         self._update_start_state()

@@ -66,6 +66,15 @@ DE = {
         "Bereich tatsächlich gefunden wird. Für alle anderen Dokumente "
         "deaktiviert lassen."
     ),
+    "field.side_by_side": "Nebeneinander anzeigen",
+    "side_by_side.checkbox": "Original und Übersetzung nebeneinander",
+    "side_by_side.tooltip": (
+        "Nur Word: baut den Haupttext statt des normalen, layoutgetreuen "
+        "Ergebnisses als zweispaltige Vergleichstabelle (Original | "
+        "Übersetzung) im Querformat auf. Kopf- und Fußzeile bleiben "
+        "unverändert. Eingebettete Tabellen im Haupttext (falls vorhanden) "
+        "erscheinen in dieser Ansicht nicht."
+    ),
     "field.exclude_header": "Kopfzeile",
     "exclude_header.checkbox": "Wiederkehrende Kopfzeile nicht übersetzen",
     "exclude_header.tooltip": (
@@ -782,6 +791,15 @@ EN = {
         "separator line; PDF: detected via anchor terms like "
         "\"Issuer Address\"/\"Asset Matrix\") - regardless of whether that "
         "block is actually found. Leave disabled for every other document."
+    ),
+    "field.side_by_side": "Side-by-side view",
+    "side_by_side.checkbox": "Original and translation side by side",
+    "side_by_side.tooltip": (
+        "Word only: builds the main text as a two-column landscape "
+        "comparison table (Original | Translation) instead of the normal, "
+        "layout-preserving output. Header and footer stay unchanged. Any "
+        "embedded tables in the main text (if present) don't appear in "
+        "this view."
     ),
     "field.exclude_header": "Header",
     "exclude_header.checkbox": "Don't translate recurring header",

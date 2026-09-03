@@ -43,6 +43,13 @@ class TranslationRequest:
     excluded from translation. Never inferred automatically - see
     DocxEngine.open()'s docstring for why the underlying detection used to
     run unconditionally and no longer does."""
+    side_by_side: bool = False
+    """Word-only (03.09.2026, Michael - siehe
+    pipeline/word/side_by_side.py's Moduldocstring): zeigt Original und
+    Übersetzung nebeneinander in einer zweispaltigen Tabelle statt des
+    normalen, layoutgetreuen Ergebnisses - ein ZUSÄTZLICHER Modus, kein
+    Ersatz. Wie ico_mode ein expliziter, nie automatisch abgeleiteter
+    Checkbox-Wert (siehe ui/app.py)."""
     exclude_header: bool = False
     exclude_footer: bool = False
     """PDF-only checkboxes (ui/app.py, mirroring ico_mode's Word-only

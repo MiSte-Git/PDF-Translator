@@ -529,3 +529,83 @@ def test_picking_a_date_from_the_calendar_still_works_normally(qapp, module_name
         assert (calendar.yearShown(), calendar.monthShown()) == (2019, 6)
     finally:
         dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_date_filter_state_is_persisted_and_restored_across_dialog_reopen(qapp, module_name, dialog_attr) -> None:
+    """Regression guard for 03.09.2026 (Michael: "Wenn beim Filter Datums
+    Optionen ausgewählt sind, werden sie nicht gespeichert und sind beim
+    nächstem Mal nicht mehr da."): every other field in this dialog
+    (folder, Drive link, recursive, scope checkboxes, query history) is
+    written in done() and read back in a _restore_*_state() call from the
+    constructor - the date filter, added the same day as this test file's
+    other coverage, was never wired into either. See
+    _persist_date_filter_state()/_restore_date_filter_state() in
+    ui/merge_search_dialog.py (shared by both dialogs)."""
+    dialog = _make_dialog(module_name, dialog_attr, "DateFilterPersistence")
+    try:
+        dialog.date_filter_group.setChecked(True)
+        dialog.date_source_document_radio.setChecked(True)
+        dialog.date_region_header_checkbox.setChecked(True)
+        dialog.date_region_ico_format_checkbox.setChecked(False)
+        dialog.date_format_de_checkbox.setChecked(True)
+        dialog.date_format_iso_checkbox.setChecked(False)
+        dialog.date_custom_format_edit.setText("MMMM D, YYYY")
+        dialog.date_exact_checkbox.setChecked(False)
+        dialog.date_from_edit.setDate(QDate(2025, 3, 1))
+        dialog.date_to_edit.setDate(QDate(2025, 9, 30))
+    finally:
+        dialog.close()  # routes through done(), same as every other persisted field
+
+    reopened = _make_dialog(module_name, dialog_attr, "DateFilterPersistence")
+    try:
+        assert reopened.date_filter_group.isChecked() is True
+        assert reopened.date_source_document_radio.isChecked() is True
+        assert reopened.date_region_header_checkbox.isChecked() is True
+        assert reopened.date_region_ico_format_checkbox.isChecked() is False
+        assert reopened.date_format_de_checkbox.isChecked() is True
+        assert reopened.date_format_iso_checkbox.isChecked() is False
+        assert reopened.date_custom_format_edit.text() == "MMMM D, YYYY"
+        assert reopened.date_exact_checkbox.isChecked() is False
+        assert reopened.date_from_edit.date() == QDate(2025, 3, 1)
+        assert reopened.date_to_edit.date() == QDate(2025, 9, 30)
+    finally:
+        reopened.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_date_filter_off_by_default_is_not_forced_on_by_a_stale_persisted_state(qapp, module_name, dialog_attr) -> None:
+    """A dialog that has never had its date filter touched must still open
+    with the filter off, exactly like test_date_filter_group_is_unchecked_by_default()
+    - i.e. persistence must not affect a settings scope nothing was ever
+    written to."""
+    dialog = _make_dialog(module_name, dialog_attr, "DateFilterNeverTouched")
+    try:
+        assert dialog.date_filter_group.isChecked() is False
+        assert dialog.date_exact_edit.date() == QDate(1900, 1, 1)
+    finally:
+        dialog.close()
+
+
+@pytest.mark.parametrize("module_name, dialog_attr", _DIALOGS)
+def test_date_filter_exact_mode_and_unset_dates_persist_too(qapp, module_name, dialog_attr) -> None:
+    """The Von/Bis-vs-Exakt toggle and an UNSET field (still the 1900
+    sentinel - see _configure_optional_date_edit()) must round-trip too,
+    not just a filled-in range."""
+    dialog = _make_dialog(module_name, dialog_attr, "DateFilterExactPersistence")
+    try:
+        dialog.date_filter_group.setChecked(True)
+        dialog.date_exact_checkbox.setChecked(True)
+        dialog.date_exact_edit.setDate(QDate(2025, 12, 24))
+        # date_from_edit/date_to_edit are left at their unset sentinel.
+    finally:
+        dialog.close()
+
+    reopened = _make_dialog(module_name, dialog_attr, "DateFilterExactPersistence")
+    try:
+        assert reopened.date_exact_checkbox.isChecked() is True
+        assert reopened.date_exact_edit.date() == QDate(2025, 12, 24)
+        assert reopened.date_from_edit.date() == QDate(1900, 1, 1)
+        assert reopened.date_to_edit.date() == QDate(1900, 1, 1)
+    finally:
+        reopened.close()

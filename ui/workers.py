@@ -152,6 +152,7 @@ class WordTranslationWorker(QRunnable):
         protected_terms: list[str],
         max_chars_per_run: int,
         ico_mode: bool = False,
+        side_by_side: bool = False,
     ) -> None:
         super().__init__()
         self.source = source
@@ -163,6 +164,7 @@ class WordTranslationWorker(QRunnable):
         self.protected_terms = protected_terms
         self.max_chars_per_run = max_chars_per_run
         self.ico_mode = ico_mode
+        self.side_by_side = side_by_side
         self.signals = TranslationSignals()
         self._cancel_event = threading.Event()
 
@@ -186,6 +188,7 @@ class WordTranslationWorker(QRunnable):
                 should_cancel=self._cancel_event.is_set,
                 total_callback=self.signals.total.emit,
                 ico_mode=self.ico_mode,
+                side_by_side=self.side_by_side,
             )
         except Exception as exc:
             self.signals.failed.emit(f"{type(exc).__name__}: {exc}")
