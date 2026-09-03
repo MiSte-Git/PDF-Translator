@@ -5,6 +5,7 @@ full .docx.
 """
 from __future__ import annotations
 
+import copy
 import zipfile
 from pathlib import Path
 
@@ -76,7 +77,24 @@ def _walk_run(run: etree._Element) -> tuple[list[str], bool]:
     would double text or misdetect images). Returns:
     - text segments split at each <w:br/> (N breaks -> N+1 segments,
       possibly empty strings) - see BREAK_MARKER and _build_runs().
-    - whether the run carries a <w:drawing> anywhere in it.
+    - whether the run carries a <w:drawing> OR a <w:sym/> anywhere in it -
+      both are treated identically from here on (WordRun.is_image=True):
+      like an image, a <w:sym/> (a symbol-font character reference, e.g. a
+      Wingdings bullet glyph - no <w:t/> text at all) has no translatable
+      text representation and must be reused verbatim, never rebuilt.
+
+      03.09.2026 (Michael, real translated documents, flagged as "ein
+      Muster... kommt immer wieder vor"): a <w:sym/> bullet character
+      sitting in its own run was previously invisible to this function
+      entirely (only <w:t>/<w:br>/<w:drawing> were recognized), so it was
+      never represented as a WordRun from extraction onward and could
+      never survive into translated output - it silently vanished on
+      every run, in both normal and side-by-side mode. Folding it into
+      the existing has_image/is_image handling (rather than adding a
+      parallel is_symbol flag) reuses the already-correct "match original
+      elements 1:1, in document order, and reuse them verbatim" logic in
+      _replace_runs_in_paragraph() and pipeline/word/side_by_side.py's
+      _translated_paragraph_element() for free.
     """
     segments: list[str] = [""]
     has_image = False
@@ -89,7 +107,7 @@ def _walk_run(run: etree._Element) -> tuple[list[str], bool]:
             segments[-1] += element.text
         elif element.tag == _w("br"):
             segments.append("")
-        elif element.tag == _w("drawing"):
+        elif element.tag in (_w("drawing"), _w("sym")):
             has_image = True
         for child in element:
             walk(child)
@@ -128,6 +146,59 @@ def _run_properties(run: etree._Element) -> tuple[bool, bool, bool]:
     return bold, italic, underline
 
 
+def _copy_rpr(rpr: etree._Element | None) -> etree._Element | None:
+    """Deep-copy `rpr` (or return None) - every WordRun that stashes a
+    source_rpr gets its own independent copy, so mutating one (e.g. inside
+    _build_run_properties()) can never affect another WordRun's."""
+    return None if rpr is None else copy.deepcopy(rpr)
+
+
+# CT_RPr's element order per the OOXML (ECMA-376) schema, truncated to the
+# properties this codebase ever reads or writes into a copied <w:rPr> (see
+# _build_run_properties()). Needed because _build_run_properties() deep-
+# copies an ORIGINAL run's <w:rPr> (which may already carry rFonts/sz/
+# rStyle/... in correct schema order) and then adds/replaces its own b/i/u
+# toggle elements - simply appending those at the end would put them after
+# elements the schema requires them to precede (e.g. <w:sz> must come
+# after <w:b>/<w:i>, not before), which Word/LibreOffice can reject or
+# silently reinterpret. See _insert_rpr_child().
+_RPR_CHILD_ORDER = (
+    "rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps",
+    "strike", "dstrike", "outline", "shadow", "emboss", "imprint",
+    "noProof", "snapToGrid", "vanish", "webHidden", "color", "spacing",
+    "w", "kern", "position", "sz", "szCs", "highlight", "u", "effect",
+    "bdr", "shd", "fitText", "vertAlign", "rtl", "cs", "em", "lang",
+    "eastAsianLayout", "specVanish", "oMath",
+)
+
+
+def _insert_rpr_child(rpr: etree._Element, new_child: etree._Element) -> None:
+    """Insert `new_child` into `rpr` at the position CT_RPr's schema order
+    (_RPR_CHILD_ORDER) requires, rather than just appending it - see that
+    constant's docstring for why. An element whose tag isn't in
+    _RPR_CHILD_ORDER (shouldn't happen for b/bCs/i/iCs/u, the only tags
+    this is ever called with) is appended at the end as a safe fallback.
+    """
+    new_tag = etree.QName(new_child).localname
+    try:
+        new_pos = _RPR_CHILD_ORDER.index(new_tag)
+    except ValueError:
+        rpr.append(new_child)
+        return
+
+    insert_at = len(rpr)
+    for i, existing in enumerate(rpr):
+        existing_tag = etree.QName(existing).localname
+        try:
+            existing_pos = _RPR_CHILD_ORDER.index(existing_tag)
+        except ValueError:
+            continue
+        if existing_pos > new_pos:
+            insert_at = i
+            break
+    rpr.insert(insert_at, new_child)
+
+
 def _build_runs(
     run: etree._Element,
     paragraph_translatable: bool,
@@ -136,6 +207,7 @@ def _build_runs(
     underline: bool,
     is_hyperlink: bool = False,
     hyperlink_target: str | None = None,
+    source_rpr: etree._Element | None = None,
 ) -> list[WordRun]:
     """Build the WordRun(s) for one <w:r> element - usually one, but a run
     with N embedded <w:br/> line breaks becomes N break-marker WordRuns
@@ -145,6 +217,16 @@ def _build_runs(
     <w:r> - a <w:drawing> sharing a run with real text hasn't been
     observed in practice, but this keeps the image from being lost either
     way.
+
+    `source_rpr` is this run's own <w:r>/<w:rPr> element (see
+    _build_paragraph()) - stashed (deep-copied, once per WordRun so later
+    in-place mutation of one doesn't leak into another) on every text/
+    break WordRun as WordRun.source_rpr, for _build_run_properties() to
+    preserve font/size/color/hyperlink-style when this run is later
+    rebuilt (translated in place, or reused for the side-by-side
+    translated column). Not set on the image/symbol WordRun: that one is
+    always reused verbatim (never rebuilt from a WordRun at all - see
+    _replace_runs_in_paragraph()), so it has no use for its own rPr here.
     """
     segments, has_image = _walk_run(run)
 
@@ -174,6 +256,7 @@ def _build_runs(
                     bold=bold,
                     italic=italic,
                     underline=underline,
+                    source_rpr=_copy_rpr(source_rpr),
                 )
             )
         if segment:
@@ -186,6 +269,7 @@ def _build_runs(
                     bold=bold,
                     italic=italic,
                     underline=underline,
+                    source_rpr=_copy_rpr(source_rpr),
                 )
             )
 
@@ -204,7 +288,11 @@ def _build_paragraph(
     for child in paragraph:
         if child.tag == _w("r"):
             bold, italic, underline = _run_properties(child)
-            runs.extend(_build_runs(child, translatable, bold, italic, underline))
+            runs.extend(
+                _build_runs(
+                    child, translatable, bold, italic, underline, source_rpr=child.find(_w("rPr"))
+                )
+            )
         elif child.tag == _w("hyperlink"):
             target = rels.get(child.get(_r_id_attr()))
             for run_element in child.findall(_w("r")):
@@ -218,6 +306,7 @@ def _build_paragraph(
                         underline,
                         is_hyperlink=True,
                         hyperlink_target=target,
+                        source_rpr=run_element.find(_w("rPr")),
                     )
                 )
     return WordParagraph(runs=runs, translatable=translatable)
@@ -231,20 +320,55 @@ def _build_break_run() -> etree._Element:
 
 
 def _build_run_properties(run: WordRun) -> etree._Element | None:
-    """<w:rPr> with only the toggle elements the run's bold/italic/
-    underline flags call for (schema order: b, i, u) - None if none of
-    them are set, since a <w:r> doesn't need an (empty, meaningless) rPr.
+    """<w:rPr> for a rebuilt run - None if there's nothing to write (no
+    source_rpr AND no bold/italic/underline), since a <w:r> doesn't need
+    an (empty, meaningless) rPr.
+
+    03.09.2026 (Michael: "Ich sehe noch Unterschiede bei den Fonts, Links
+    werden bei der Übersetzung scheinbar kaputt gemacht"): previously this
+    built a <w:rPr> from scratch containing only b/i/u, discarding every
+    other original run property (rFonts, sz, color, the hyperlink <w:
+    rStyle>, ...) - translated runs fell back to the document's default
+    font, and hyperlinks lost their visual styling entirely (the link
+    itself still worked - only its <w:rPr> was gone). Now: when the run
+    carries a source_rpr (see WordRun.source_rpr's docstring for where
+    that comes from - either the original run this WordRun maps 1:1 to,
+    or, for a run built from translated HTML, the paragraph's/hyperlink's
+    representative original rPr threaded through by
+    pipeline/word/html_bridge.py), that's deep-copied as the base, its own
+    b/bCs/i/iCs/u stripped out (they'd reflect whatever formatting the
+    ORIGINAL run/paragraph happened to have, not necessarily this run's -
+    e.g. a translation can restructure which words end up bold), and this
+    run's OWN bold/italic/underline flags are written back in at the
+    schema-correct position (_insert_rpr_child()) - so rFonts/sz/color/
+    rStyle survive untouched while b/i/u stay accurate to this run.
     """
-    if not (run.bold or run.italic or run.underline):
+    if run.source_rpr is not None:
+        rpr = copy.deepcopy(run.source_rpr)
+        for tag in ("b", "bCs", "i", "iCs", "u"):
+            existing = rpr.find(_w(tag))
+            if existing is not None:
+                rpr.remove(existing)
+    elif run.bold or run.italic or run.underline:
+        rpr = etree.Element(_w("rPr"))
+    else:
         return None
-    rpr = etree.Element(_w("rPr"))
+
     if run.bold:
-        etree.SubElement(rpr, _w("b"))
+        bold = etree.Element(_w("b"))
+        _insert_rpr_child(rpr, bold)
+        bold_cs = etree.Element(_w("bCs"))
+        _insert_rpr_child(rpr, bold_cs)
     if run.italic:
-        etree.SubElement(rpr, _w("i"))
+        italic = etree.Element(_w("i"))
+        _insert_rpr_child(rpr, italic)
+        italic_cs = etree.Element(_w("iCs"))
+        _insert_rpr_child(rpr, italic_cs)
     if run.underline:
-        underline = etree.SubElement(rpr, _w("u"))
+        underline = etree.Element(_w("u"))
         underline.set(_w("val"), "single")
+        _insert_rpr_child(rpr, underline)
+
     return rpr
 
 
@@ -266,14 +390,31 @@ def _build_text_run(run: WordRun) -> etree._Element:
 
 
 def _build_hyperlink_element(rid: str, run: WordRun) -> etree._Element:
-    """<w:hyperlink r:id="..."><w:r><w:t xml:space="preserve">...</w:t>
-    </w:r></w:hyperlink> for a hyperlink WordRun, reusing an existing
-    relationship id (see DocxEngine.replace_paragraph_runs()) rather than
-    creating a new word/_rels/document.xml.rels entry.
+    """<w:hyperlink r:id="..."><w:r><w:rPr>...</w:rPr><w:t
+    xml:space="preserve">...</w:t></w:r></w:hyperlink> for a hyperlink
+    WordRun, reusing an existing relationship id (see
+    DocxEngine.replace_paragraph_runs()) rather than creating a new
+    word/_rels/document.xml.rels entry.
+
+    03.09.2026 (Michael: "Links werden bei der Übersetzung scheinbar
+    kaputt gemacht"): this used to build a bare <w:r><w:t>...</w:t></w:r>
+    with NO <w:rPr> at all - the link itself still worked (the r:id was
+    always preserved), but the original's <w:rStyle w:val="Hyperlink"/>
+    plus its font/size were silently dropped, so a translated hyperlink
+    rendered as plain, unstyled black text instead of Word's usual blue/
+    underlined link style. Now goes through the same _build_run_properties()
+    used for a plain text run, so a hyperlink WordRun's source_rpr (its own
+    original <w:hyperlink>/<w:r>/<w:rPr> - see
+    ParagraphHtml.hyperlink_source_rpr in pipeline/word/html_bridge.py for
+    how a run rebuilt from translated HTML gets one) is preserved the same
+    way.
     """
     hyperlink = etree.Element(_w("hyperlink"))
     hyperlink.set(_r_id_attr(), rid)
     inner_run = etree.SubElement(hyperlink, _w("r"))
+    run_properties = _build_run_properties(run)
+    if run_properties is not None:
+        inner_run.append(run_properties)
     text_element = etree.SubElement(inner_run, _w("t"))
     text_element.set(_xml_space_attr(), "preserve")
     text_element.text = run.text
@@ -560,8 +701,10 @@ class DocxEngine:
         since that's the only thing left once the old runs are removed).
 
         Image runs (run.is_image) are matched 1:1, in document order,
-        against the paragraph's ORIGINAL <w:drawing>-bearing <w:r>
-        elements and reused verbatim, never rebuilt - images must not be
+        against the paragraph's ORIGINAL <w:drawing>- or <w:sym/>-bearing
+        <w:r> elements and reused verbatim, never rebuilt - images (and
+        symbol-font characters like Wingdings bullets, which _walk_run()
+        treats identically - see that function's docstring) must not be
         touched structurally. Raises ValueError if new_runs has more
         image runs than the paragraph originally had (nothing to reuse -
         fabricating a new image run isn't supported).

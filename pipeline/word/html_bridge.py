@@ -20,6 +20,7 @@ paragraph <-> html conversion in both directions.
 """
 from __future__ import annotations
 
+import copy
 import html
 import json
 from dataclasses import dataclass, field
@@ -68,6 +69,31 @@ class ParagraphHtml:
     """run_index (matching a <a data-run="..."> tag's data-run attribute
     in `html`) -> the hyperlink's resolved target. Same run_index scheme
     as image_runs, so both are looked up the same way after translation."""
+    base_rpr: object = None
+    """A representative original <w:rPr> element (see WordRun.source_rpr)
+    for this paragraph's ordinary (non-hyperlink) text - the first
+    non-image, non-hyperlink run's source_rpr, or (if the paragraph is
+    ALL images/hyperlinks) the first run's regardless. None if the
+    paragraph had no runs with a source_rpr at all (e.g. every run was
+    built by hand, as in most of this project's own tests).
+
+    03.09.2026 (Michael: "Ich sehe noch Unterschiede bei den Fonts"): a run
+    built from translated HTML in html_to_paragraph() doesn't map 1:1 to
+    one specific original <w:r> (a provider can merge/split/reorder text
+    across the original runs) - there is no single "the" original rPr to
+    reuse for it. Using the paragraph's dominant/first-run rPr as a
+    stand-in base is an approximation (a paragraph with genuinely mixed
+    fonts mid-sentence would still average toward one), but covers the
+    overwhelmingly common case (a whole paragraph in one font) that was
+    previously lost entirely."""
+    hyperlink_source_rpr: dict[int, object] = field(default_factory=dict)
+    """Same run_index scheme as hyperlink_targets, but each entry is that
+    SPECIFIC original hyperlink run's own source_rpr (carrying, e.g., its
+    <w:rStyle w:val="Hyperlink"/> plus whatever font/size the hyperlink
+    itself used) - a hyperlink is precise here (unlike base_rpr) because,
+    just like hyperlink_targets, html_to_paragraph() always knows exactly
+    which original hyperlink run_index a translated <a data-run="n"> tag
+    came from."""
 
 
 def paragraph_to_html(paragraph: WordParagraph) -> ParagraphHtml:
@@ -99,6 +125,9 @@ def paragraph_to_html(paragraph: WordParagraph) -> ParagraphHtml:
     parts: list[str] = []
     image_runs: dict[int, WordRun] = {}
     hyperlink_targets: dict[int, str] = {}
+    hyperlink_source_rpr: dict[int, object] = {}
+    base_rpr: object = None
+    fallback_base_rpr: object = None
 
     for index, run in enumerate(paragraph.runs):
         if run.is_image:
@@ -112,6 +141,16 @@ def paragraph_to_html(paragraph: WordParagraph) -> ParagraphHtml:
 
         if not run.text:
             continue
+
+        # First non-image, non-hyperlink run's rPr is the paragraph's
+        # "ordinary text" representative (see ParagraphHtml.base_rpr) -
+        # falling back to the first run of ANY kind only if the paragraph
+        # turns out to have no such run at all (e.g. it's one giant
+        # hyperlink).
+        if base_rpr is None and not run.is_hyperlink and run.source_rpr is not None:
+            base_rpr = run.source_rpr
+        if fallback_base_rpr is None and run.source_rpr is not None:
+            fallback_base_rpr = run.source_rpr
 
         prev_is_break = index > 0 and paragraph.runs[index - 1].text == BREAK_MARKER
         next_is_break = (
@@ -128,12 +167,18 @@ def paragraph_to_html(paragraph: WordParagraph) -> ParagraphHtml:
             escaped = f"<b>{escaped}</b>"
         if run.is_hyperlink:
             hyperlink_targets[index] = run.hyperlink_target or ""
+            if run.source_rpr is not None:
+                hyperlink_source_rpr[index] = run.source_rpr
             escaped = f'<a data-run="{index}">{escaped}</a>'
 
         parts.append(escaped)
 
     return ParagraphHtml(
-        html="".join(parts), image_runs=image_runs, hyperlink_targets=hyperlink_targets
+        html="".join(parts),
+        image_runs=image_runs,
+        hyperlink_targets=hyperlink_targets,
+        base_rpr=base_rpr if base_rpr is not None else fallback_base_rpr,
+        hyperlink_source_rpr=hyperlink_source_rpr,
     )
 
 
@@ -266,7 +311,24 @@ def _make_text_run(
         hyperlink_target=(
             original.hyperlink_targets.get(hyperlink_index) if hyperlink_index is not None else None
         ),
+        source_rpr=_copy_source_rpr(hyperlink_index, original),
     )
+
+
+def _copy_source_rpr(hyperlink_index: int | None, original: ParagraphHtml) -> object:
+    """The rPr a rebuilt WordRun should carry (see WordRun.source_rpr and
+    ParagraphHtml.base_rpr/hyperlink_source_rpr): the specific original
+    hyperlink run's own rPr if this text sits inside a <a data-run="n">
+    tag, else the paragraph's general base_rpr. Deep-copied per call (like
+    DocxEngine's own _copy_rpr()) so multiple WordRuns built from the same
+    ParagraphHtml never share - and risk one mutating - the same element.
+    """
+    source = (
+        original.hyperlink_source_rpr.get(hyperlink_index)
+        if hyperlink_index is not None
+        else original.base_rpr
+    )
+    return None if source is None else copy.deepcopy(source)
 
 
 def _walk(
@@ -310,6 +372,7 @@ def _walk(
                     if hyperlink_index is not None
                     else None
                 ),
+                source_rpr=_copy_source_rpr(hyperlink_index, original),
             )
         )
         return

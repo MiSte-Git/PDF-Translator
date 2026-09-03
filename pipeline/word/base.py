@@ -45,6 +45,32 @@ class WordRun:
     """Formatting read from the run's <w:rPr> (OOXML toggle-property
     semantics - see DocxEngine._run_properties()). Meaningless/False on a
     BREAK_MARKER or image run."""
+    source_rpr: object = field(default=None, compare=False, repr=False)
+    """The original <w:r>'s full <w:rPr> lxml element (rFonts/sz/color/
+    rStyle/... - everything beyond bold/italic/underline), or a paragraph-
+    level stand-in for a run built from translated HTML (see
+    ParagraphHtml.base_rpr/hyperlink_source_rpr in
+    pipeline/word/html_bridge.py) - None if there's nothing to preserve
+    (a break-marker run, an image run, or a run built with no formatting
+    context at all).
+
+    03.09.2026 (Michael, real translated documents: "Ich sehe noch
+    Unterschiede bei den Fonts, Links werden bei der Übersetzung scheinbar
+    kaputt gemacht"): before this field existed, every rebuilt run
+    (_build_text_run()/_build_hyperlink_element() in docx_engine.py) only
+    ever wrote bold/italic/underline into a fresh <w:rPr> - the original's
+    font family, size, color and hyperlink <w:rStyle> were silently
+    dropped, so translated text fell back to the document's default font
+    and hyperlinks lost their blue/underlined styling (the link itself
+    still worked - only its <w:rPr> was gone). _build_run_properties() now
+    deep-copies this element as its base instead of building from scratch.
+
+    compare=False/repr=False: an lxml element has no meaningful equality
+    (it compares by identity) and would make WordRun instances that are
+    otherwise identical (and every existing WordRun(...) == WordRun(...)
+    test assertion, which never sets this field) compare unequal, or dump
+    unreadably in a failure message - this field intentionally sits
+    outside both."""
 
 
 @dataclass
