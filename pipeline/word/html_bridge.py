@@ -52,6 +52,54 @@ _BREAK_ANOMALY_LOG_PATH = (
 # structural marker - see html_bridge.py's module docstring).
 _SPACE_MARKER = "§§SP§§"
 
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def _rpr_signature(rpr: object) -> tuple[str | None, str | None]:
+    """A coarse (font, size) fingerprint of an rPr element - used only to
+    pick the most representative one among several candidate source_rpr's
+    (see _dominant_rpr()/paragraph_to_html()'s base_rpr resolution), not a
+    full formatting comparison.
+    """
+    if rpr is None:
+        return (None, None)
+    rfonts = rpr.find(f"{{{_W_NS}}}rFonts")
+    sz = rpr.find(f"{{{_W_NS}}}sz")
+    font = rfonts.get(f"{{{_W_NS}}}ascii") if rfonts is not None else None
+    size = sz.get(f"{{{_W_NS}}}val") if sz is not None else None
+    return (font, size)
+
+
+def _dominant_rpr(candidates: list) -> object:
+    """The most common rPr among `candidates`, by (font, size) signature -
+    ties broken by first occurrence, for determinism. None if `candidates`
+    is empty.
+
+    03.09.2026 (Michael, a merged multi-ICO document: "Dann hat der
+    Originale Body Text 11 pt und der Übersetzte 12 pt"): base_rpr used to
+    just take the paragraph's FIRST non-hyperlink run's source_rpr as the
+    representative "this paragraph's normal text formatting" - fragile
+    whenever a paragraph happens to START with something atypical (a
+    leading icon/emoji run in a different embedded font, a stray empty-
+    ish formatting run, ...), which then poisoned EVERY translated run in
+    that paragraph with the wrong font/size, even though the paragraph's
+    actual bulk of text was consistently something else. Picking the
+    formatting shared by the MOST runs is far more robust - the one edge
+    case it can't help is a paragraph genuinely, evenly split between two
+    formattings with no majority, which no positional heuristic could
+    resolve correctly anyway.
+    """
+    if not candidates:
+        return None
+    counts: dict[tuple[str | None, str | None], int] = {}
+    first_seen: dict[tuple[str | None, str | None], object] = {}
+    for rpr in candidates:
+        signature = _rpr_signature(rpr)
+        counts[signature] = counts.get(signature, 0) + 1
+        first_seen.setdefault(signature, rpr)
+    best_signature = max(counts, key=lambda signature: counts[signature])
+    return first_seen[best_signature]
+
 
 @dataclass
 class ParagraphHtml:
@@ -126,8 +174,8 @@ def paragraph_to_html(paragraph: WordParagraph) -> ParagraphHtml:
     image_runs: dict[int, WordRun] = {}
     hyperlink_targets: dict[int, str] = {}
     hyperlink_source_rpr: dict[int, object] = {}
-    base_rpr: object = None
-    fallback_base_rpr: object = None
+    base_rpr_candidates: list = []
+    fallback_base_rpr_candidates: list = []
 
     for index, run in enumerate(paragraph.runs):
         if run.is_image:
@@ -142,15 +190,16 @@ def paragraph_to_html(paragraph: WordParagraph) -> ParagraphHtml:
         if not run.text:
             continue
 
-        # First non-image, non-hyperlink run's rPr is the paragraph's
-        # "ordinary text" representative (see ParagraphHtml.base_rpr) -
-        # falling back to the first run of ANY kind only if the paragraph
-        # turns out to have no such run at all (e.g. it's one giant
-        # hyperlink).
-        if base_rpr is None and not run.is_hyperlink and run.source_rpr is not None:
-            base_rpr = run.source_rpr
-        if fallback_base_rpr is None and run.source_rpr is not None:
-            fallback_base_rpr = run.source_rpr
+        # Every non-image, non-hyperlink run's rPr is a candidate for the
+        # paragraph's "ordinary text" representative (see
+        # ParagraphHtml.base_rpr/_dominant_rpr() - the most COMMON one
+        # wins, not just the first) - falling back to a run of ANY kind
+        # only if the paragraph turns out to have no such run at all (e.g.
+        # it's one giant hyperlink).
+        if not run.is_hyperlink and run.source_rpr is not None:
+            base_rpr_candidates.append(run.source_rpr)
+        if run.source_rpr is not None:
+            fallback_base_rpr_candidates.append(run.source_rpr)
 
         prev_is_break = index > 0 and paragraph.runs[index - 1].text == BREAK_MARKER
         next_is_break = (
@@ -174,7 +223,9 @@ def paragraph_to_html(paragraph: WordParagraph) -> ParagraphHtml:
         parts.append(escaped)
 
     # Priority for the paragraph's "ordinary text" base rPr:
-    # 1. a non-hyperlink run's own rPr (base_rpr) - the most specific.
+    # 1. the non-hyperlink run rPr shared by the MOST runs (base_rpr, via
+    #    _dominant_rpr()) - the most specific and, since 03.09.2026, the
+    #    most robust (not just whichever run happens to come first).
     # 2. the paragraph mark's own rPr (paragraph.mark_rpr) - many real
     #    documents set font/size once here rather than repeating it on
     #    every run (03.09.2026, Michael: "Dann hat der Originale Body Text
@@ -182,12 +233,13 @@ def paragraph_to_html(paragraph: WordParagraph) -> ParagraphHtml:
     #    whose runs carried no rPr of their own at all).
     # 3. any run's rPr regardless of kind (fallback_base_rpr), so a
     #    paragraph that's ENTIRELY one hyperlink still has something.
+    base_rpr = _dominant_rpr(base_rpr_candidates)
     if base_rpr is not None:
         resolved_base_rpr = base_rpr
     elif paragraph.mark_rpr is not None:
         resolved_base_rpr = paragraph.mark_rpr
     else:
-        resolved_base_rpr = fallback_base_rpr
+        resolved_base_rpr = _dominant_rpr(fallback_base_rpr_candidates)
 
     return ParagraphHtml(
         html="".join(parts),
