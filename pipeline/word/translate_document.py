@@ -147,12 +147,17 @@ def translate_document(
     document - see the module docstring for why that stays the caller's
     job.
 
-    A single paragraph's TranslationError is caught and counted as
-    failed rather than re-raised, so one bad paragraph never aborts the
-    rest of the document - the same "skip, don't abort" policy the
-    original single-document script used at paragraph level (independent
-    of, and one level below, ico_translate/batch.py's equivalent
-    "skip, don't abort" policy at the whole-DOCUMENT level).
+    A single paragraph's TranslationError - or a ValueError raised by
+    html_bridge.py's _validate_tags() for a lost/duplicated/reindexed
+    image or hyperlink after translation (03.09.2026: this used to only
+    catch TranslationError, so one such paragraph aborted the ENTIRE run,
+    with nothing saved even though every other paragraph translated fine) -
+    is caught and counted as failed rather than re-raised, so one bad
+    paragraph never aborts the rest of the document - the same "skip,
+    don't abort" policy the original single-document script used at
+    paragraph level (independent of, and one level below,
+    ico_translate/batch.py's equivalent "skip, don't abort" policy at the
+    whole-DOCUMENT level).
 
     `progress_callback`, if given, is called with a short human-readable
     string before each paragraph attempt and on each per-paragraph
@@ -225,7 +230,23 @@ def translate_document(
             new_runs, sent = _translate_paragraph(
                 paragraph, provider, protected_terms, target_lang, source_lang, f"body:{index}"
             )
-        except TranslationError as exc:
+        except (TranslationError, ValueError) as exc:
+            # ValueError here is _validate_tags()'s deliberate, loud
+            # image/hyperlink mismatch check (pipeline/word/html_bridge.py)
+            # firing - e.g. the provider dropped one of several <a> tags in
+            # a paragraph, so the retranslated HTML no longer has one of
+            # the original hyperlinks. 03.09.2026 (Michael, real-world
+            # crash report: "ValueError: mismatch after translation: found
+            # ['3','4','6'], expected ['3','4','5','6']"): this used to
+            # only catch TranslationError, so ONE such paragraph aborted
+            # the entire run (engine.save() was never reached - nothing
+            # got saved, even paragraphs already translated successfully).
+            # A markup mismatch is exactly as recoverable, per-paragraph, as
+            # a provider error - same "skip this one, keep going" policy
+            # this loop already applies to TranslationError, not a silent
+            # swallow: the original paragraph (with its hyperlink intact)
+            # is simply never replaced, and this failure is still reported
+            # in stats.errors/the QA report below.
             _notify(f"  FEHLER (uebersprungen): {exc}")
             stats.body_failed += 1
             stats.errors.append(f"body:{index}: {type(exc).__name__}: {exc}")
@@ -271,7 +292,11 @@ def translate_document(
             new_runs, sent = _translate_paragraph(
                 paragraph, provider, protected_terms, target_lang, source_lang, f"{source}:{sub_index}"
             )
-        except TranslationError as exc:
+        except (TranslationError, ValueError) as exc:
+            # See the body loop's identical except clause above for why
+            # ValueError is caught here too (kept symmetrical, even though
+            # header/footer paragraphs are never actually translated today -
+            # see the comment above this loop).
             _notify(f"  FEHLER (uebersprungen): {exc}")
             if source == "header":
                 stats.header_failed += 1
