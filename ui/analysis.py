@@ -183,9 +183,29 @@ def analyze_request(
         else:
             warnings.append("warning.image_cost_unknown")
 
-    selected = images if request.embedded_images == EmbeddedImageMode.ALL else 0
-    if request.embedded_images == EmbeddedImageMode.SELECTED:
-        warnings.append("warning.image_selection_later")
+    # 03.09.2026 (Michael: "Werden bei der Kostenkontrolle die übersetzten
+    # Bilder mit berechnet und weggelassen wenn diese nicht übersetzt
+    # werden sollen?"): `images` above is the pure INVENTORY (what the
+    # document contains), `selected` is what the chosen image mode would
+    # actually send to translation - 0 for "keine Bilder", so an excluded
+    # image can never show up as a cost driver. ui/app.py::_show_analysis()
+    # renders the two numbers differently per mode. Honest caveat: the
+    # document runs (ui/pdf_job.py, ui/word_job.py, ui/pptx_job.py) do
+    # not translate embedded images yet (RoadMap.md Phase 3, "Optionalen
+    # Pfad für eingebettete Bilder klar vom Dokumenttext trennen"), so
+    # their OCR text is NOT part of `text_chars`/the estimate either -
+    # warning.embedded_images_not_estimated says so instead of silently
+    # pricing a selection that the run then ignores.
+    if request.mode == TranslationMode.IMAGES:
+        selected = images
+    elif request.embedded_images == EmbeddedImageMode.NONE:
+        selected = 0
+    else:
+        selected = images
+        if request.embedded_images == EmbeddedImageMode.SELECTED:
+            warnings.append("warning.image_selection_later")
+        if images:
+            warnings.append("warning.embedded_images_not_estimated")
     cost = _cost(request.provider, text_chars, max_chars_per_run, warnings)
     return AnalysisResult(
         request.mode, len(request.source_paths), units, label, text_chars, images, selected,

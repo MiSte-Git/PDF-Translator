@@ -76,3 +76,36 @@ def test_standalone_images_analysis_warns_when_ocr_engine_unavailable(tmp_path: 
 
     assert result.text_characters == 0
     assert "warning.image_cost_unknown" in result.warnings
+
+
+# 03.09.2026 (Michael: "Werden bei der Kostenkontrolle die übersetzten Bilder
+# mit berechnet und weggelassen wenn diese nicht übersetzt werden sollen?"):
+# the embedded-image inventory is always reported, but only the chosen image
+# mode decides how many of them count as translation candidates - "keine
+# Bilder" must never leave a selected/charged image behind, and text_characters
+# (the priced number) is unaffected by the image mode either way, because the
+# document runs do not translate embedded images yet.
+
+def test_pptx_analysis_excludes_embedded_images_when_mode_is_none() -> None:
+    result = analyze_request(TranslationRequest(TranslationMode.PRESENTATION, (FIXTURE,), embedded_images=EmbeddedImageMode.NONE))
+    assert result.selected_image_candidates == 0
+    assert "warning.embedded_images_not_estimated" not in result.warnings
+    assert result.cost.characters == result.text_characters
+
+
+def test_pptx_analysis_reports_candidates_but_prices_no_image_text_when_mode_is_all() -> None:
+    none = analyze_request(TranslationRequest(TranslationMode.PRESENTATION, (FIXTURE,), embedded_images=EmbeddedImageMode.NONE))
+    result = analyze_request(TranslationRequest(TranslationMode.PRESENTATION, (FIXTURE,), embedded_images=EmbeddedImageMode.ALL))
+    assert result.embedded_images == none.embedded_images
+    assert result.selected_image_candidates == result.embedded_images
+    assert result.text_characters == none.text_characters
+    if result.embedded_images:
+        assert "warning.embedded_images_not_estimated" in result.warnings
+    else:
+        assert "warning.embedded_images_not_estimated" not in result.warnings
+
+
+def test_pptx_analysis_selected_mode_keeps_its_later_ui_warning() -> None:
+    result = analyze_request(TranslationRequest(TranslationMode.PRESENTATION, (FIXTURE,), embedded_images=EmbeddedImageMode.SELECTED))
+    assert "warning.image_selection_later" in result.warnings
+    assert result.selected_image_candidates == result.embedded_images

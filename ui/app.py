@@ -1211,9 +1211,21 @@ class MainWindow(QMainWindow):
     def _show_analysis(self, result: AnalysisResult) -> None:
         t = self.language.text
         warnings = "<br>".join(t(key) for key in result.warnings) or t("analysis.no_warnings")
+        # Image line depends on the chosen image mode (see
+        # ui/analysis.py::analyze_request()'s selected/images comment):
+        # standalone image files ARE the job; embedded images are either
+        # excluded ("keine Bilder") or candidates for translation.
+        if result.mode == TranslationMode.IMAGES:
+            images_text = t("analysis.images.files", images=result.embedded_images)
+        elif result.selected_image_candidates == 0:
+            images_text = t("analysis.images.excluded", images=result.embedded_images)
+        else:
+            images_text = t(
+                "analysis.images.included", selected=result.selected_image_candidates, images=result.embedded_images,
+            )
         text = t(
             "analysis.summary", units=result.units, unit_label=t(result.unit_label),
-            characters=result.text_characters, images=result.embedded_images,
+            characters=result.text_characters, images=images_text,
             provider=result.cost.provider, usage=result.cost.month_usage, free=result.cost.free_tier,
             cost=result.cost.estimated_cost_usd, limit=result.cost.max_chars_per_run,
             limit_state=t("analysis.within" if result.cost.within_run_limit else "analysis.exceeded"),
