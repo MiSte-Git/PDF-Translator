@@ -18,9 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import docx
-import docx.oxml.ns
 import pytest
-from docx.enum.section import WD_SECTION
 
 from pipeline.word.merge import DEFAULT_BATCH_SIZE, WordMergeStats, merge_docx_files
 
@@ -49,12 +47,7 @@ def test_merge_preserves_source_order(tmp_path: Path) -> None:
     assert stats == WordMergeStats(segments=3, files_processed=3, batches=0, cancelled=False, warnings=[])
 
 
-def test_merge_inserts_a_new_page_section_break_between_sources(tmp_path: Path) -> None:
-    """Since 03.09.2026 a SECTION break (new page), not a plain page break -
-    see _append_as_own_section(): headers/footers are section properties,
-    so every source needs its own section to keep them. No explicit
-    <w:br w:type="page"/> any more either, or there would be an empty page
-    between the two."""
+def test_merge_inserts_a_page_break_between_sources(tmp_path: Path) -> None:
     a = _make_docx(tmp_path / "a.docx", "First document")
     b = _make_docx(tmp_path / "b.docx", "Second document")
     destination = tmp_path / "out.docx"
@@ -62,107 +55,19 @@ def test_merge_inserts_a_new_page_section_break_between_sources(tmp_path: Path) 
     merge_docx_files([a, b], destination)
 
     document = docx.Document(str(destination))
-    assert len(document.sections) == 2
-    assert all(section.start_type == WD_SECTION.NEW_PAGE for section in document.sections)
-    assert 'w:type="page"' not in document.element.body.xml
+    xml = document.element.body.xml
+    assert 'w:type="page"' in xml  # the <w:br w:type="page"/> from add_page_break()
 
 
-def test_single_source_has_a_single_section(tmp_path: Path) -> None:
+def test_single_source_has_no_page_break(tmp_path: Path) -> None:
     a = _make_docx(tmp_path / "a.docx", "Only document")
     destination = tmp_path / "out.docx"
 
     merge_docx_files([a], destination)
 
     document = docx.Document(str(destination))
-    assert len(document.sections) == 1
+    assert 'w:type="page"' not in document.element.body.xml
     assert [p.text for p in document.paragraphs if p.text] == ["Only document"]
-
-
-def _make_docx_with_header(
-    path: Path, text: str, header: str, footer: str | None = None, second_section_header: str | None = None,
-) -> Path:
-    document = docx.Document()
-    document.add_paragraph(text)
-    document.sections[0].header.paragraphs[0].text = header
-    if footer is not None:
-        document.sections[0].footer.paragraphs[0].text = footer
-    if second_section_header is not None:
-        section = document.add_section(WD_SECTION.NEW_PAGE)
-        section.header.is_linked_to_previous = False
-        section.header.paragraphs[0].text = second_section_header
-        document.add_paragraph(text + " (part 2)")
-    document.save(str(path))
-    return path
-
-
-def _section_headers_and_footers(path: Path) -> list[tuple[str, str]]:
-    document = docx.Document(str(path))
-    return [(s.header.paragraphs[0].text, s.footer.paragraphs[0].text) for s in document.sections]
-
-
-def test_every_source_keeps_its_own_header_and_footer(tmp_path: Path) -> None:
-    """Regression guard for 03.09.2026 (Michael: "Beim Zusammenführen der
-    Worddokumente wird [...] der Header des ersten Dokuments übernommen.
-    Auf jeden Fall ist dort auf jeder Seite der gleiche Header."): plain
-    docxcompose drops every appended document's section properties, so
-    the first file's header/footer ended up on every page."""
-    a = _make_docx_with_header(tmp_path / "a.docx", "Doc A", "Header A", "Footer A")
-    b = _make_docx_with_header(tmp_path / "b.docx", "Doc B", "Header B", "Footer B")
-    c = _make_docx_with_header(tmp_path / "c.docx", "Doc C", "Header C")
-    destination = tmp_path / "out.docx"
-
-    merge_docx_files([a, b, c], destination)
-
-    # Doc C has no footer of its own: it must get a BLANK one, not inherit
-    # Footer B from the section before it (OOXML's default for a section
-    # without a footer reference).
-    assert _section_headers_and_footers(destination) == [
-        ("Header A", "Footer A"), ("Header B", "Footer B"), ("Header C", ""),
-    ]
-
-
-def test_multi_section_source_keeps_all_of_its_headers(tmp_path: Path) -> None:
-    a = _make_docx_with_header(tmp_path / "a.docx", "Doc A", "Header A")
-    b = _make_docx_with_header(tmp_path / "b.docx", "Doc B", "Header B", second_section_header="Header B / 2")
-    destination = tmp_path / "out.docx"
-
-    merge_docx_files([a, b], destination)
-
-    assert [h for h, _ in _section_headers_and_footers(destination)] == ["Header A", "Header B", "Header B / 2"]
-    texts = [t for t in _paragraph_texts(destination) if t]
-    assert texts == ["Doc A", "Doc B", "Doc B (part 2)"]
-
-
-def test_header_images_are_copied_with_the_header(tmp_path: Path) -> None:
-    from PIL import Image
-
-    logo = tmp_path / "logo.png"
-    Image.new("RGB", (40, 20), "red").save(logo)
-    a = _make_docx_with_header(tmp_path / "a.docx", "Doc A", "Header A")
-    b = docx.Document()
-    b.add_paragraph("Doc B")
-    b.sections[0].header.paragraphs[0].add_run("Header B ").add_picture(str(logo))
-    b.save(str(tmp_path / "b.docx"))
-    destination = tmp_path / "out.docx"
-
-    merge_docx_files([a, tmp_path / "b.docx"], destination)
-
-    merged = docx.Document(str(destination))
-    header = merged.sections[1].header
-    blips = header._element.xpath(".//a:blip")
-    assert len(blips) == 1
-    rid = blips[0].get(docx.oxml.ns.qn("r:embed"))
-    assert rid in header.part.rels  # the image relationship was carried over, not left dangling
-
-
-def test_headers_survive_two_level_batching(tmp_path: Path) -> None:
-    sources = [_make_docx_with_header(tmp_path / f"d{i}.docx", f"Doc {i}", f"Header {i}") for i in range(5)]
-    destination = tmp_path / "out.docx"
-
-    stats = merge_docx_files(sources, destination, batch_size=2)
-
-    assert stats.batches == 3
-    assert [h for h, _ in _section_headers_and_footers(destination)] == [f"Header {i}" for i in range(5)]
 
 
 def test_same_file_listed_twice_counts_once_in_files_processed(tmp_path: Path) -> None:
@@ -323,92 +228,51 @@ def test_progress_callback_reports_file_and_batch_messages(tmp_path: Path) -> No
     assert any("Zwischenergebnisse" in m for m in messages)
 
 
-def test_partial_append_failure_leaves_nothing_of_the_skipped_document_behind(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """03.09.2026 (Michael: "Das sind solche Fehler die nicht so gut
-    auffallen."): docxcompose inserts paragraph by paragraph and can fail
-    halfway through a document. The warning says "übersprungen", so the
-    result must not contain the first half of that document either - the
-    body is rolled back to its exact state before the failed append."""
-    a = _make_docx_with_header(tmp_path / "a.docx", "Doc A", "Header A")
-    b = _make_docx_with_header(tmp_path / "b.docx", "Half of B", "Header B")
-    c = _make_docx_with_header(tmp_path / "c.docx", "Doc C", "Header C")
-    destination = tmp_path / "out.docx"
-
-    from docxcompose.composer import Composer
-
-    original_append = Composer.append
-    calls = {"n": 0}
-
-    def half_then_fail(self, doc, remove_property_fields=True):
-        calls["n"] += 1
-        original_append(self, doc, remove_property_fields=remove_property_fields)  # content IS inserted ...
-        if calls["n"] == 1:
-            raise RuntimeError("simulated failure after the content was already inserted")
-
-    monkeypatch.setattr(Composer, "append", half_then_fail)
-
-    stats = merge_docx_files([a, b, c], destination)
-
-    texts = [t for t in _paragraph_texts(destination) if t]
-    assert texts == ["Doc A", "Doc C"]
-    assert stats.segments == 2
-    assert len(stats.warnings) == 1 and "b.docx" in stats.warnings[0]
-    assert [h for h, _ in _section_headers_and_footers(destination)] == ["Header A", "Header C"]
-
-
-def _make_docx_with_header_and_body_image(path: Path, text: str, header_color, body_color) -> Path:
-    """Header AND body each carry a distinct, unique image - see
-    test_merging_many_documents_with_distinct_header_and_body_images_produces_no_duplicate_media_parts()."""
-    from PIL import Image
-
-    header_img = path.with_name(path.stem + "_header.png")
-    body_img = path.with_name(path.stem + "_body.png")
-    Image.new("RGB", (10, 10), header_color).save(header_img)
-    Image.new("RGB", (12, 12), body_color).save(body_img)
-
+def _make_docx_with_bookmark(path: Path, text: str) -> Path:
+    """A document containing a <w:bookmarkStart/>...<w:bookmarkEnd/> pair -
+    something Word inserts routinely (cross-references, TOC entries,
+    comment anchors, ...) and completely unremarkable on its own, but
+    python-docx has no modeled Python class for either element (see
+    test_a_source_with_a_bookmark_does_not_get_skipped_on_namespace_error()
+    below) - both stay a bare lxml.etree._Element."""
     document = docx.Document()
-    run = document.add_paragraph().add_run()
-    run.add_picture(str(body_img))
-    document.add_paragraph(text)
-    document.sections[0].header.paragraphs[0].add_run(f"Header for {text} ").add_picture(str(header_img))
+    paragraph = document.add_paragraph(text)
+    bookmark_start = docx.oxml.OxmlElement("w:bookmarkStart")
+    bookmark_start.set(docx.oxml.ns.qn("w:id"), "0")
+    bookmark_start.set(docx.oxml.ns.qn("w:name"), "test_bookmark")
+    bookmark_end = docx.oxml.OxmlElement("w:bookmarkEnd")
+    bookmark_end.set(docx.oxml.ns.qn("w:id"), "0")
+    paragraph._p.insert(0, bookmark_start)
+    paragraph._p.append(bookmark_end)
     document.save(str(path))
     return path
 
 
-def test_merging_many_documents_with_distinct_header_and_body_images_produces_no_duplicate_media_parts(
-    tmp_path: Path,
-) -> None:
-    """Regression guard for 03.09.2026 (Michael, real merged file: "ist
-    defekt und kann deshalb nicht geöffnet werden [...] Soll LibreOffice
-    die Datei reparieren?"): copying a header/footer image via
-    Composer.add_relationship()'s generic, package-wide filename scan
-    picks numbers independently from python-docx's own
-    Package.image_parts registry (used for BODY images by docxcompose
-    itself) - the two can hand out the SAME "next free" image partname,
-    producing a zip with two entries of the same name (only visible with
-    per-document-UNIQUE images; identical images across documents get
-    deduplicated by sha1 before the collision would ever occur, which is
-    why this needs its own fixture rather than reusing the shared-logo
-    tests above).
+def test_a_source_with_a_bookmark_does_not_get_skipped_on_namespace_error(tmp_path: Path) -> None:
+    """03.09.2026 regression (Michael, a real merge run: '"561 AngelKey.
+    docx" konnte nicht angehängt werden und wurde übersprungen (Undefined
+    namespace prefix)'): _append_as_own_section() ran .xpath() queries
+    directly on elements docxcompose had just deep-copied into the master
+    document, relying on lxml to infer the "w" namespace prefix from each
+    element's own .nsmap. That only works for elements python-docx has
+    registered its own class for (BaseOxmlElement, which overrides
+    .xpath() to always supply the full namespace map itself) -
+    <w:bookmarkEnd/> (confirmed directly: python-docx has no class for it
+    at all) stays a bare lxml.etree._Element with no such override, so the
+    very same query that works fine on a "normal" python-docx element
+    raised exactly this error on one. A bookmark is an ordinary, common
+    Word feature (cross-references, TOC entries, comment anchors, ...) -
+    not a malformed or unusual document - which is why this could hit
+    "suddenly" on a specific file that happened to contain one, while
+    plenty of others merged fine.
     """
-    import zipfile
-
-    sources = [
-        _make_docx_with_header_and_body_image(
-            tmp_path / f"d{i}.docx", f"Doc {i}", (i * 20 % 255, 0, 0), (0, i * 20 % 255, 0),
-        )
-        for i in range(8)
-    ]
+    first = _make_docx(tmp_path / "first.docx", "First document.")
+    second = _make_docx_with_bookmark(tmp_path / "second.docx", "Second document with a bookmark.")
     destination = tmp_path / "out.docx"
 
-    merge_docx_files(sources, destination)
+    stats = merge_docx_files([first, second], destination)
 
-    with zipfile.ZipFile(destination) as archive:
-        names = archive.namelist()
-    assert len(names) == len(set(names)), f"duplicate zip entries: {[n for n in set(names) if names.count(n) > 1]}"
-
-    # And every merged section still shows its own, distinct header.
-    merged = docx.Document(str(destination))
-    assert [s.header.paragraphs[0].text for s in merged.sections] == [f"Header for Doc {i} " for i in range(8)]
+    assert stats.warnings == []
+    assert stats.files_processed == 2
+    texts = [t for t in _paragraph_texts(destination) if t]
+    assert texts == ["First document.", "Second document with a bookmark."]

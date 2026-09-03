@@ -49,7 +49,38 @@ import shutil
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Any, Callable, Sequence
+
+from lxml import etree
+
+
+def _xpath(element: etree._Element, expression: str, nsmap: dict[str, str]) -> Any:
+    """Run an XPath query against `element` with `nsmap` supplied
+    explicitly, bypassing whatever `.xpath()` override `element`'s own
+    class happens to provide.
+
+    03.09.2026 (Michael, a real merge that skipped one specific source
+    file: '"561 AngelKey.docx" konnte nicht angehängt werden und wurde
+    übersprungen (Undefined namespace prefix)'): python-docx's element
+    classes (BaseOxmlElement) override .xpath() to always supply its own
+    complete namespace map automatically - but that override only exists
+    on elements python-docx has registered a custom class for. A "plain"
+    element type it has no model for (confirmed directly on the reported
+    file: a <w:bookmarkEnd/> deep-copied into the master document by
+    docxcompose during append) is just a bare lxml.etree._Element, with
+    NO automatic namespace map - calling .xpath("w:sectPr") on one of
+    those needs an explicit `namespaces=` argument or lxml raises exactly
+    this "Undefined namespace prefix" error, even though the element's
+    OWN .nsmap correctly resolves "w" (that document also carries
+    Mac-Office/Mac-VML namespace declarations python-docx doesn't
+    register a class for either, which is presumably why this specific
+    file - apparently edited in Word for Mac at some point - hit this and
+    other, "normal" Windows-authored files hadn't). Going straight to the
+    base lxml method (etree._Element.xpath, called unbound so it can't be
+    shadowed by any subclass's own override) sidesteps that inconsistency
+    for every element uniformly, python-docx-modeled or not.
+    """
+    return etree._Element.xpath(element, expression, namespaces=nsmap)
 
 DEFAULT_BATCH_SIZE = 100
 """Chunk size for merge_docx_files()'s two-level batching - picked as a
@@ -201,7 +232,7 @@ def _ensure_blank_header_footer(composer, sectpr) -> None:
     alone: they only apply when the section itself asks for them."""
     from docx.opc.constants import RELATIONSHIP_TYPE as RT
     from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
+    from docx.oxml.ns import nsmap, qn
     from docx.parts.hdrftr import FooterPart, HeaderPart
 
     package = composer.doc.part.package
@@ -209,18 +240,20 @@ def _ensure_blank_header_footer(composer, sectpr) -> None:
         ("w:headerReference", HeaderPart, RT.HEADER),
         ("w:footerReference", FooterPart, RT.FOOTER),
     ):
-        if sectpr.xpath(f"{tag}[@w:type='default']"):
+        if _xpath(sectpr, f"{tag}[@w:type='default']", nsmap):
             continue
         rid = composer.doc.part.relate_to(part_class.new(package), reltype)
         reference = OxmlElement(tag)
         reference.set(qn("w:type"), "default")
         reference.set(qn("r:id"), rid)
         # schema order: headerReference* first, then footerReference*
-        anchors = sectpr.xpath("w:footerReference" if tag == "w:footerReference" else "w:headerReference")
+        anchors = _xpath(
+            sectpr, "w:footerReference" if tag == "w:footerReference" else "w:headerReference", nsmap
+        )
         if anchors:
             anchors[-1].addnext(reference)
-        elif tag == "w:footerReference" and sectpr.xpath("w:headerReference"):
-            sectpr.xpath("w:headerReference")[-1].addnext(reference)
+        elif tag == "w:footerReference" and _xpath(sectpr, "w:headerReference", nsmap):
+            _xpath(sectpr, "w:headerReference", nsmap)[-1].addnext(reference)
         else:
             sectpr.insert(0, reference)
 
@@ -264,11 +297,19 @@ def _append_as_own_section(composer, doc) -> None:
     Nothing about the master document is touched until append() has
     succeeded, so a docxcompose append failure (see _merge_sequential())
     still leaves the composed document exactly as it was.
+
+    03.09.2026 (Michael, a real merge that skipped one specific source
+    file: '"561 AngelKey.docx" konnte nicht angehängt werden und wurde
+    übersprungen (Undefined namespace prefix)'): every `.xpath()` call in
+    this function (and in _ensure_blank_header_footer()) now goes through
+    _xpath() instead - see that helper's docstring for the precise root
+    cause (a python-docx-unmodeled element type, deep-copied in by
+    docxcompose, has no automatic namespace map of its own).
     """
     from copy import deepcopy
 
     from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
+    from docx.oxml.ns import nsmap, qn
 
     body = composer.doc.element.body
     r_id = qn("r:id")
@@ -276,7 +317,7 @@ def _append_as_own_section(composer, doc) -> None:
 
     # 1. header/footer parts -> master package
     rid_map: dict[str, str] = {}
-    for ref in doc.element.body.xpath(ref_xpath):
+    for ref in _xpath(doc.element.body, ref_xpath, nsmap):
         old_rid = ref.get(r_id)
         if old_rid in rid_map or old_rid not in doc.part.rels:
             continue
@@ -309,10 +350,10 @@ def _append_as_own_section(composer, doc) -> None:
     new_elements = list(body)[insert_at:]
     first_boundary_sectpr = None
     for element in new_elements:
-        for sectpr in element.xpath(".//w:sectPr|self::w:sectPr"):
+        for sectpr in _xpath(element, ".//w:sectPr|self::w:sectPr", nsmap):
             if first_boundary_sectpr is None:
                 first_boundary_sectpr = sectpr
-            for ref in sectpr.xpath(ref_xpath):
+            for ref in _xpath(sectpr, ref_xpath, nsmap):
                 mapped = rid_map.get(ref.get(r_id))
                 if mapped is not None:
                     ref.set(r_id, mapped)
@@ -328,8 +369,8 @@ def _append_as_own_section(composer, doc) -> None:
             section_type = OxmlElement("w:type")
             # schema order: headerReference*, footerReference*, footnotePr?,
             # endnotePr?, type?, pgSz?, ...
-            predecessors = first_boundary_sectpr.xpath(
-                "w:headerReference|w:footerReference|w:footnotePr|w:endnotePr"
+            predecessors = _xpath(
+                first_boundary_sectpr, "w:headerReference|w:footerReference|w:footnotePr|w:endnotePr", nsmap
             )
             if predecessors:
                 predecessors[-1].addnext(section_type)
