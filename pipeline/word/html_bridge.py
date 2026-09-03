@@ -425,6 +425,37 @@ def _walk(
     tag = element.tag
     if tag == "img":
         index = int(element.get("data-run"))
+        # 03.09.2026 (Michael, a real ICO document's ending bullet:
+        # "Könnten wir wenigstens vor dem Bild einen Zeilenumbruch und
+        # Line Feed in der Übersetzung einbauen? Dann bleibt zwar
+        # möglicherweise ein Wort einfach im Raum stehen."): a provider is
+        # free to reflow plain text across a <br/> boundary (see this
+        # function's own docstring and _check_break_count()) - on a real
+        # document this once left the tail end of the PREVIOUS sentence
+        # sitting directly in front of a <w:sym/> bullet's <img> tag
+        # instead of on its own line, because DeepL's grammatically
+        # correct German verb-final word order happened to land right
+        # there. Force a break immediately before an image/symbol run
+        # whenever one doesn't already precede it, so the bullet always
+        # starts its own line - accepting Michael's explicitly stated
+        # trade-off that a stray word can end up alone on the line above
+        # it, in exchange for the bullet never being buried mid-line.
+        if runs and runs[-1].text != BREAK_MARKER:
+            runs.append(
+                WordRun(
+                    text=BREAK_MARKER,
+                    bold=bold,
+                    italic=italic,
+                    underline=underline,
+                    is_hyperlink=hyperlink_index is not None,
+                    hyperlink_target=(
+                        original.hyperlink_targets.get(hyperlink_index)
+                        if hyperlink_index is not None
+                        else None
+                    ),
+                    source_rpr=_copy_source_rpr(hyperlink_index, original),
+                )
+            )
         runs.append(original.image_runs[index])
         return
     if tag == "br":
