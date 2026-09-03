@@ -101,6 +101,42 @@ def _open_docx(path: Path):
         raise ValueError(f'"{path.name}" konnte nicht geöffnet werden: {exc}') from exc
 
 
+def _copy_image_relationship(composer, dest_part, relationship):
+    """Add an image relationship on `dest_part` pointing at the same image
+    `relationship` already points at, going through python-docx's own
+    Package.image_parts registry - NOT Composer.add_relationship()'s
+    generic, package-wide filename scan.
+
+    03.09.2026 (Michael's real merged file, "ist defekt und kann deshalb
+    nicht geöffnet werden"): the two pick image numbers independently and
+    can choose the SAME "next free" partname, e.g. word/media/image12.jpeg
+    twice - a duplicate zip entry, which is exactly the kind of damage
+    that triggers this dialog. docxcompose's own add_images()/add_shapes()
+    (used for images inside the appended BODY, called from
+    Composer.append() itself) name new image parts via
+    `composer.pkg.image_parts._get_by_sha1()`/`_add_image_part()`, a
+    Package-level, SHA1-deduplicating cache that is separate from and
+    unaware of Composer.add_relationship()'s own FILENAME_IDX_RE-based
+    scan of the package (used for every OTHER relationship type - fonts,
+    external hyperlinks, diagrams - see _copy_header_footer_part()'s
+    docstring for why the generic path is fine there). Since a header can
+    itself embed images (a repeated logo, most commonly), it must use the
+    SAME `image_parts` registry as body images so the two never hand out
+    the same name - and as a bonus this also deduplicates the identical
+    logo image referenced by many merged headers, exactly like
+    Composer.add_images() would for a body image reused across documents.
+    """
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    from docxcompose.composer import ImageWrapper
+
+    image_parts = composer.pkg.image_parts
+    target_part = relationship.target_part
+    new_image_part = image_parts._get_by_sha1(target_part.sha1)
+    if new_image_part is None:
+        new_image_part = image_parts._add_image_part(ImageWrapper(target_part))
+    return dest_part.relate_to(new_image_part, RT.IMAGE)  # already the rId string, see Part.relate_to()
+
+
 def _copy_header_footer_part(composer, relationship) -> str:
     """Copy the header/footer part behind `relationship` (from an appended
     document) into the composer's master package and return the new rId
@@ -112,11 +148,13 @@ def _copy_header_footer_part(composer, relationship) -> str:
     master expecting a real python-docx HeaderPart/FooterPart with an
     `.element` - a generic Part there raises AttributeError inside
     append(). So the part is recreated as the proper class with a deep
-    copy of its XML; the parts IT references (a logo image in the header,
-    for instance) are copied with add_relationship() and their rIds
+    copy of its XML; the parts IT references (fonts, external hyperlinks,
+    diagrams, ...) are copied with add_relationship() and their rIds
     rewritten inside the copied XML explicitly, rather than relying on
     the "same insertion order gives the same rIds" assumption docxcompose
-    makes for itself.
+    makes for itself. The one exception is an IMAGE relationship (a logo
+    in the header, most commonly) - see _copy_image_relationship() for why
+    that specific type cannot go through add_relationship() as well.
     """
     from copy import deepcopy
 
@@ -142,7 +180,10 @@ def _copy_header_footer_part(composer, relationship) -> str:
 
     inner_rid_map: dict[str, str] = {}
     for rid, inner_rel in source_part.rels.items():
-        inner_rid_map[rid] = composer.add_relationship(source_part, new_part, inner_rel).rId
+        if inner_rel.reltype == RT.IMAGE and not inner_rel.is_external:
+            inner_rid_map[rid] = _copy_image_relationship(composer, new_part, inner_rel)
+        else:
+            inner_rid_map[rid] = composer.add_relationship(source_part, new_part, inner_rel).rId
     if inner_rid_map:
         r_ns = nsmap["r"]
         for element in new_part.element.iter():

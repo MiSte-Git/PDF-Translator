@@ -356,3 +356,59 @@ def test_partial_append_failure_leaves_nothing_of_the_skipped_document_behind(
     assert stats.segments == 2
     assert len(stats.warnings) == 1 and "b.docx" in stats.warnings[0]
     assert [h for h, _ in _section_headers_and_footers(destination)] == ["Header A", "Header C"]
+
+
+def _make_docx_with_header_and_body_image(path: Path, text: str, header_color, body_color) -> Path:
+    """Header AND body each carry a distinct, unique image - see
+    test_merging_many_documents_with_distinct_header_and_body_images_produces_no_duplicate_media_parts()."""
+    from PIL import Image
+
+    header_img = path.with_name(path.stem + "_header.png")
+    body_img = path.with_name(path.stem + "_body.png")
+    Image.new("RGB", (10, 10), header_color).save(header_img)
+    Image.new("RGB", (12, 12), body_color).save(body_img)
+
+    document = docx.Document()
+    run = document.add_paragraph().add_run()
+    run.add_picture(str(body_img))
+    document.add_paragraph(text)
+    document.sections[0].header.paragraphs[0].add_run(f"Header for {text} ").add_picture(str(header_img))
+    document.save(str(path))
+    return path
+
+
+def test_merging_many_documents_with_distinct_header_and_body_images_produces_no_duplicate_media_parts(
+    tmp_path: Path,
+) -> None:
+    """Regression guard for 03.09.2026 (Michael, real merged file: "ist
+    defekt und kann deshalb nicht geöffnet werden [...] Soll LibreOffice
+    die Datei reparieren?"): copying a header/footer image via
+    Composer.add_relationship()'s generic, package-wide filename scan
+    picks numbers independently from python-docx's own
+    Package.image_parts registry (used for BODY images by docxcompose
+    itself) - the two can hand out the SAME "next free" image partname,
+    producing a zip with two entries of the same name (only visible with
+    per-document-UNIQUE images; identical images across documents get
+    deduplicated by sha1 before the collision would ever occur, which is
+    why this needs its own fixture rather than reusing the shared-logo
+    tests above).
+    """
+    import zipfile
+
+    sources = [
+        _make_docx_with_header_and_body_image(
+            tmp_path / f"d{i}.docx", f"Doc {i}", (i * 20 % 255, 0, 0), (0, i * 20 % 255, 0),
+        )
+        for i in range(8)
+    ]
+    destination = tmp_path / "out.docx"
+
+    merge_docx_files(sources, destination)
+
+    with zipfile.ZipFile(destination) as archive:
+        names = archive.namelist()
+    assert len(names) == len(set(names)), f"duplicate zip entries: {[n for n in set(names) if names.count(n) > 1]}"
+
+    # And every merged section still shows its own, distinct header.
+    merged = docx.Document(str(destination))
+    assert [s.header.paragraphs[0].text for s in merged.sections] == [f"Header for Doc {i} " for i in range(8)]
