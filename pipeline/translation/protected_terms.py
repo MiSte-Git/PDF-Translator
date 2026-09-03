@@ -8,12 +8,89 @@ the translation model/engine intact.
 """
 from __future__ import annotations
 
+import csv
 import re
 from pathlib import Path
 
 _LEADING_NUMBER_RE = re.compile(r"^\d+\s+(.+)$")
 
 _PLACEHOLDER_FORMAT = "§§{index}§§"
+
+# First-row values that mark a header line rather than a real term when a
+# term list is loaded from a file (see load_protected_terms_file()).
+_HEADER_WORDS = frozenset({"term", "terms", "begriff", "begriffe", "protected", "geschützt", "wort", "word"})
+
+_CSV_DELIMITERS = ";,\t|"
+
+
+def load_protected_terms_file(path: str | Path) -> list[str]:
+    """Read protected terms from a .csv/.txt/.tsv file - one term per row
+    (03.09.2026: Michael wanted to load term lists from a file instead of
+    typing every term by hand into the "Geschützte Begriffe" box).
+
+    Rules, kept deliberately simple so any spreadsheet export works:
+    - Only the FIRST column of every row is used, so a sheet with a
+      "comment"/"translation" column next to the terms still loads fine.
+      A plain .txt with one term per line is just a one-column CSV.
+    - The delimiter (";", ",", tab or "|") is sniffed per file; a file
+      without any delimiter is read as one term per line.
+    - A first row that is just a column header ("Term", "Begriff", ...)
+      is skipped; every other row is a term.
+    - Empty cells, surrounding whitespace and duplicates (case-insensitive,
+      first spelling wins) are dropped; the order of the file is kept.
+    - Encoding: UTF-8 (a BOM from Excel is tolerated), falling back to
+      cp1252 for older Windows exports.
+
+    Raises FileNotFoundError / UnicodeDecodeError untouched so the caller
+    (the UI) can show them.
+    """
+    file_path = Path(path)
+    raw = file_path.read_bytes()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252")
+
+    sample = text[:4096]
+    try:
+        dialect: type[csv.Dialect] | csv.Dialect = csv.Sniffer().sniff(sample, delimiters=_CSV_DELIMITERS)
+    except csv.Error:
+        # No consistent delimiter (typically a plain "one term per line"
+        # .txt): the default excel dialect then yields one cell per line.
+        dialect = csv.excel
+
+    terms: list[str] = []
+    seen: set[str] = set()
+    for row_index, row in enumerate(csv.reader(text.splitlines(), dialect)):
+        if not row:
+            continue
+        term = row[0].strip()
+        if not term:
+            continue
+        if row_index == 0 and term.casefold() in _HEADER_WORDS:
+            continue
+        key = term.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        terms.append(term)
+    return terms
+
+
+def merge_protected_terms(existing_text: str, new_terms: list[str]) -> str:
+    """Append `new_terms` to the newline-separated `existing_text` of the UI's
+    protected-terms box, skipping terms already present (case-insensitive)
+    so loading the same file twice does not duplicate anything.
+    """
+    lines = [line.strip() for line in existing_text.splitlines() if line.strip()]
+    seen = {line.casefold() for line in lines}
+    for term in new_terms:
+        key = term.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(term)
+    return "\n".join(lines)
 
 
 def derive_protected_term(filename: str) -> str:

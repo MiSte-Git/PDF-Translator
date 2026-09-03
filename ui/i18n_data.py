@@ -120,6 +120,18 @@ DE = {
     ),
     "source_language.placeholder": "optional / automatisch",
     "protected.placeholder": "Ein geschützter Begriff pro Zeile",
+    # 03.09.2026 (Michael: "Können wir bei den 'geschützten Begriffen' auch
+    # noch ein aus Dateien auslesen hinzufügen? [...] eine csv laden"):
+    "protected.load_file": "Aus Datei laden …",
+    "protected.load_file.tooltip": (
+        "Begriffe aus einer CSV- oder Textdatei übernehmen (ein Begriff pro Zeile, "
+        "bei CSV zählt die erste Spalte). Vorhandene Einträge bleiben erhalten, "
+        "Duplikate werden übersprungen."
+    ),
+    "protected.loaded": "{added} neue Begriffe aus {name} übernommen ({total} in der Datei).",
+    "protected.load_error": "{name} konnte nicht gelesen werden: {error}",
+    "dialog.choose_protected_terms": "Begriffsliste auswählen",
+    "dialog.all_files": "Alle Dateien",
     # 02.09.2026 (Michael: "Sollten die beiden Optionen [...] mit in die
     # 'Vorgang' Auswahlbox? Oder sollten wir Rahmen für Übersetzung und
     # für 'PDF/DOCX' Zusammenführen machen. So ist es ein unangenehmer
@@ -812,6 +824,15 @@ EN = {
     ),
     "source_language.placeholder": "optional / automatic",
     "protected.placeholder": "One protected term per line",
+    "protected.load_file": "Load from file …",
+    "protected.load_file.tooltip": (
+        "Load terms from a CSV or text file (one term per line; for CSV the first "
+        "column is used). Existing entries are kept, duplicates are skipped."
+    ),
+    "protected.loaded": "{added} new terms loaded from {name} ({total} in the file).",
+    "protected.load_error": "{name} could not be read: {error}",
+    "dialog.choose_protected_terms": "Select term list",
+    "dialog.all_files": "All files",
     "merge_box.group": "Merge files",
     "config.group": "Configure job",
     "analysis.group": "Analysis and cost control",

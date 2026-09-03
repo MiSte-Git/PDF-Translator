@@ -139,6 +139,43 @@ UI-frei" stehen in [`CONTRIBUTING.md`](CONTRIBUTING.md). Offene Arbeiten und
 Hintergrund zu bereits gelösten Einzelfällen stehen in
 [`RoadMap.md`](RoadMap.md) und [`Backlog.md`](Backlog.md).
 
+## Release-Prozess
+
+Ein Release entsteht aus einem Git-Tag; die Versionsnummer lebt an genau
+einer Stelle, in `_version.py` (Semver `MAJOR.MINOR.PATCH`). Ablauf:
+
+1. Alle Feature-Commits sind auf `main`, Testsuite grün (`python -m pytest`).
+2. `__version__` in `_version.py` erhöhen und **als eigenen Commit**
+   einchecken:
+
+   ```bash
+   git add _version.py
+   git commit -m "Version X.Y.Z"
+   ```
+
+3. Tag setzen und pushen – das führende `v` gehört zum Tag, nicht zur
+   Versionsnummer:
+
+   ```bash
+   git tag vX.Y.Z
+   git push origin main vX.Y.Z
+   ```
+
+4. Der Tag-Push startet
+   [`build-bootstrap.yml`](.github/workflows/build-bootstrap.yml). Die
+   Pipeline bricht ab, **bevor** irgendetwas veröffentlicht wird, falls Tag
+   und `__version__` nicht übereinstimmen. Sonst baut sie die drei
+   Assistenten-Executables (Linux/Windows/macOS) plus das Quellcode-ZIP und
+   legt daraus das GitHub-Release an.
+5. Kurz in den GitHub Actions prüfen, dass alle drei Matrix-Jobs
+   durchgelaufen sind. Bestehende Installationen finden das neue Release
+   beim nächsten App-Start über die eingebaute Update-Prüfung.
+
+Was sich **nicht** ändern darf, ohne beide Stellen anzupassen: `_version.py`
+und der Tag müssen zusammenpassen (siehe Punkt 4), und pro Release darf
+genau ein `.zip`-Asset existieren – `bootstrap/release_source.py` nimmt das
+erste `.zip`, das es findet.
+
 ## Architektur der geführten Installation
 
 Der Installations-Assistent (`bootstrap/`) ist bewusst ein eigenständiges,

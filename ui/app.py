@@ -1,6 +1,7 @@
 """First desktop UI slice for explicit document modes and cost analysis."""
 from __future__ import annotations
 
+import csv
 import json
 import logging
 import os
@@ -23,6 +24,7 @@ from pipeline.images.inpainting import GPU_MIN_VRAM_GB, gpu_vram_gb
 from pipeline.pdf.translate_pdf import PdfTranslationStats
 from pipeline.presentation.translate_presentation import PresentationTranslationStats
 from pipeline.translation.cost_control import DEFAULT_MAX_CHARS_PER_RUN
+from pipeline.translation.protected_terms import load_protected_terms_file, merge_protected_terms
 from pipeline.word.translate_document import TranslationStats as WordTranslationStats
 from ui.analysis import PRICING
 from ui.document_job_common import (
@@ -485,6 +487,21 @@ class MainWindow(QMainWindow):
         self.target_lang = QLineEdit("DE")
         self.protected = QTextEdit()
         self.protected.setMaximumHeight(90)
+        # 03.09.2026 (Michael: "Können wir bei den 'geschützten Begriffen'
+        # auch noch ein aus Dateien auslesen hinzufügen? Das man zum
+        # Beispiel eine csv laden kann."): loads a .csv/.txt term list and
+        # APPENDS it to whatever is already typed - see
+        # _load_protected_terms_file() and
+        # pipeline.translation.protected_terms.load_protected_terms_file().
+        self.protected_load = QPushButton()
+        self.protected_load.clicked.connect(self._load_protected_terms_file)
+        # Feedback line under the box ("12 Begriffe aus x.csv übernommen"),
+        # following provider_hint's pattern instead of a modal dialog the
+        # user would have to click away after every load.
+        self.protected_hint = QLabel()
+        self.protected_hint.setWordWrap(True)
+        self.protected_hint.setStyleSheet("padding-left: 2px;")
+        self.protected_hint.setVisible(False)
         # Explicit, user-controlled special case for the internal "ICO"
         # document type (see RoadMap.md): visible for Word AND PDF mode
         # (see _mode_changed()), wired through TranslationRequest.ico_mode
@@ -533,8 +550,13 @@ class MainWindow(QMainWindow):
         self.form.addRow(self.form_labels[2], self.image_mode)
         self.form.addRow(self.form_labels[3], self.provider)
         self.form.addRow("", self.provider_hint)
-        for label, field in zip(self.form_labels[4:], (self.source_lang, self.target_lang, self.protected)):
-            self.form.addRow(label, field)
+        self.form.addRow(self.form_labels[4], self.source_lang)
+        self.form.addRow(self.form_labels[5], self.target_lang)
+        protected_row = QHBoxLayout()
+        protected_row.addWidget(self.protected, 1)
+        protected_row.addWidget(self.protected_load, 0, Qt.AlignTop)
+        self.form.addRow(self.form_labels[6], protected_row)
+        self.form.addRow("", self.protected_hint)
         self.form.addRow(self.form_labels[7], self.ico_mode)
         self.form.addRow(self.form_labels[8], self.exclude_header)
         self.form.addRow(self.form_labels[9], self.exclude_footer)
@@ -808,6 +830,8 @@ class MainWindow(QMainWindow):
         self.word_merge_button.setText(t("word_merge.button"))
         self.source_lang.setPlaceholderText(t("source_language.placeholder"))
         self.protected.setPlaceholderText(t("protected.placeholder"))
+        self.protected_load.setText(t("protected.load_file"))
+        self.protected_load.setToolTip(t("protected.load_file.tooltip"))
         self.cost_box.setTitle(t("analysis.group"))
         self.analyze.setText(t("analysis.button"))
         self.confirm.setText(t("analysis.checked"))
@@ -1117,6 +1141,37 @@ class MainWindow(QMainWindow):
             self.source_label.setText("\n".join(path.name for path in self.paths))
             self.settings.setValue("last_source_dir", str(self.paths[0].parent))
             self._invalidate_analysis()
+
+    def _load_protected_terms_file(self) -> None:
+        """Append the terms of a chosen .csv/.txt file to the protected-terms
+        box (duplicates skipped, existing entries kept - see
+        merge_protected_terms()). Remembers the file's folder separately
+        from last_source_dir, because term lists usually live somewhere
+        else than the documents being translated."""
+        start_dir = str(self.settings.value("last_protected_terms_dir", "", type=str))
+        name, _ = QFileDialog.getOpenFileName(
+            self, self.language.text("dialog.choose_protected_terms"), start_dir,
+            "CSV / Text (*.csv *.txt *.tsv);;" + self.language.text("dialog.all_files") + " (*)",
+        )
+        if not name:
+            return
+        try:
+            loaded = load_protected_terms_file(name)
+        except (OSError, UnicodeDecodeError, csv.Error) as exc:
+            QMessageBox.warning(
+                self, self.language.text("protected.load_file"),
+                self.language.text("protected.load_error", name=Path(name).name, error=str(exc)),
+            )
+            return
+        self.settings.setValue("last_protected_terms_dir", str(Path(name).parent))
+        before = self.protected.toPlainText()
+        merged = merge_protected_terms(before, loaded)
+        added = len([line for line in merged.splitlines() if line.strip()]) - len(
+            [line for line in before.splitlines() if line.strip()]
+        )
+        self.protected.setPlainText(merged)
+        self.protected_hint.setText(self.language.text("protected.loaded", added=added, total=len(loaded), name=Path(name).name))
+        self.protected_hint.setVisible(True)
 
     def _request(self) -> TranslationRequest:
         terms = tuple(line.strip() for line in self.protected.toPlainText().splitlines() if line.strip())
