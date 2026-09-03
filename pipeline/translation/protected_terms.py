@@ -109,14 +109,35 @@ def derive_protected_term(filename: str) -> str:
 
 
 def protect_terms(html: str, terms: list[str]) -> tuple[str, dict[str, str]]:
-    """Replace every occurrence of any of `terms` in `html` with a unique
-    §§N§§ placeholder, matched case-insensitively at word boundaries so
-    matches inside HTML tags (e.g. "<b>VIRELICON</b>") are found without
-    disturbing the tags themselves.
+    """Replace every occurrence of any of `terms` in `html` that is written
+    in ALL CAPS with a unique §§N§§ placeholder, matched at word
+    boundaries so matches inside HTML tags (e.g. "<b>VIRELICON</b>") are
+    found without disturbing the tags themselves. An occurrence of the
+    same term that is NOT all-uppercase (lower/mixed case) is left alone -
+    untouched, translated normally like any other word.
+
+    03.09.2026 (Michael, real translated documents: several ordinary
+    English words - "creation", "wisdom", "unfinished", ... - were coming
+    back untranslated): his protected-terms list holds the names of
+    individual ICOs, which are meant to always be written in capitals but
+    in practice sometimes aren't - and several of those names happen to
+    also be ordinary English words. Matching case-INsensitively (the
+    previous behavior) meant a lowercase, perfectly ordinary occurrence of
+    such a word got "protected" (left untranslated) right along with the
+    genuine, all-caps ICO-name occurrences, breaking the surrounding
+    sentence's translation. Michael: "Von daher macht es Sinn nur an den
+    Stellen wo das Wort in Grossbuchstaben steht, es nicht zu übersetzen,
+    ansonsten muss das später per Hand korrigiert werden." Matching is
+    still done case-insensitively (a term can be typed in the settings box
+    in any casing - only the casing of the occurrence FOUND in the text
+    decides whether it's protected), so this is not "exact-case matching
+    against the term's own spelling" - it's specifically "protect only
+    where the found text is fully uppercase".
 
     Returns the modified html and a mapping of placeholder -> the exact
-    text found in `html` (preserving its original casing, not the search
-    term's casing), for use with restore_terms().
+    text found in `html` (always its all-caps original spelling, since
+    only all-caps occurrences are ever replaced), for use with
+    restore_terms().
 
     Terms are matched longest-first so a shorter term can't shadow a longer
     one that contains it.
@@ -137,8 +158,15 @@ def protect_terms(html: str, terms: list[str]) -> tuple[str, dict[str, str]]:
 
     def _replace(match: re.Match[str]) -> str:
         nonlocal counter
+        found = match.group(0)
+        if not found.isupper():
+            # Not written in all caps here - not a genuine ICO-name
+            # occurrence (or Michael's term list simply hasn't caught up
+            # to how this particular mention is capitalized) - leave it
+            # for normal translation rather than protecting it.
+            return found
         placeholder = _PLACEHOLDER_FORMAT.format(index=counter)
-        mapping[placeholder] = match.group(0)
+        mapping[placeholder] = found
         counter += 1
         return placeholder
 

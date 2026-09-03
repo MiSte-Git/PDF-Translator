@@ -39,10 +39,15 @@ def main() -> None:
     print(f"\nProtected html:\n  {protected_html}")
     print(f"Mapping: {mapping}")
 
+    # 03.09.2026 (Michael, "Case Sensitive" request): only the all-caps
+    # occurrence is protected now - "Virelicon"/"virelicon" are left alone
+    # so they still get translated normally, since only an ALL-CAPS
+    # mention is treated as a genuine ICO name (see protect_terms()'s
+    # docstring).
     assert "VIRELICON" not in protected_html
-    assert "Virelicon" not in protected_html
-    assert "virelicon" not in protected_html
-    assert len(mapping) == 3
+    assert "Virelicon is not a tool" in protected_html
+    assert "virelicon bends truth" in protected_html
+    assert len(mapping) == 1
 
     # Simulate translation leaving placeholders untouched.
     fake_translated_html = protected_html.replace("was born", "wurde geboren")
