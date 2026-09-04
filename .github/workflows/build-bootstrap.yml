@@ -199,6 +199,63 @@ jobs:
           print("Bundled Python runtime ready at python_runtime/")
           PY
 
+      # 04.09.2026 (second real Windows test run: frozen .exe crashed
+      # immediately with "_tkinter.TclError: ... version conflict for
+      # package "Tcl": have 8.6.12, need exactly 8.6.15" the moment
+      # bootstrap/app.py's BootstrapApp(tk.Tk) opened its first window -
+      # see project doc "windows-testlauf-04-09-2026.md" for the first
+      # (unrelated) Windows bug found the same day). Root cause: when
+      # TCL_LIBRARY/TK_LIBRARY are not already set, PyInstaller's tkinter
+      # hook auto-discovers which Tcl/Tk script-library directories to
+      # bundle - and on windows-latest that discovery picked up
+      # Strawberry Perl's OWN bundled Tcl 8.6.12 (Strawberry Perl ships
+      # preinstalled on GitHub's windows-latest image for its Perl/Tk
+      # support and puts its Tcl on PATH) instead of the Tcl 8.6.15 that
+      # actually belongs to the actions/setup-python 3.13 interpreter
+      # whose _tkinter.pyd/tcl86t.dll gets bundled a few lines below - the
+      # frozen exe ends up with a Tcl DLL built for 8.6.15 sitting next to
+      # init.tcl script files that identify themselves as 8.6.12
+      # ("package require -exact Tcl 8.6.15" then fails against a library
+      # that can only "package provide Tcl 8.6.12"). Explicitly pointing
+      # TCL_LIBRARY/TK_LIBRARY at the just-installed Python's OWN tcl/
+      # tcl8.6 and tcl/tk8.6 directories before PyInstaller runs removes
+      # the ambiguity its hook was resolving incorrectly - PyInstaller's
+      # hook-_tkinter.py reads these two env vars first and only falls
+      # back to auto-discovery when they are unset. Windows-only: Linux
+      # gets its Tcl/Tk from the single apt-installed python3-tk package
+      # above (nothing else on that runner to conflict with), and macOS
+      # runners have not shown this problem with actions/setup-python's
+      # own bundled Tcl/Tk.
+      - name: Pin Tcl/Tk to the just-installed Python (Windows only)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import sys
+
+          tcl_dir = pathlib.Path(sys.base_prefix) / "tcl"
+          tcl_candidates = sorted(tcl_dir.glob("tcl8.*"))
+          tk_candidates = sorted(tcl_dir.glob("tk8.*"))
+          if not tcl_candidates or not tk_candidates:
+              sys.exit(
+                  f"Could not find tcl8.*/tk8.* under {tcl_dir} - has "
+                  "actions/setup-python's install layout changed?"
+              )
+          # Highest version wins if more than one is somehow present -
+          # matches what this same interpreter's own _tkinter actually
+          # links against.
+          tcl_library = tcl_candidates[-1]
+          tk_library = tk_candidates[-1]
+          print(f"TCL_LIBRARY={tcl_library}")
+          print(f"TK_LIBRARY={tk_library}")
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+              f.write(f"TCL_LIBRARY={tcl_library}\n")
+              f.write(f"TK_LIBRARY={tk_library}\n")
+          PY
+
       - name: Build bootstrapper executable
         run: >
           pyinstaller --onefile --windowed --name pdf-translator-setup
@@ -209,11 +266,18 @@ jobs:
       # Frozen-binary launch smoke test: starts the actual built
       # executable, gives it a couple of seconds to open its first window
       # without crashing, then kills it - proves the PyInstaller bundle
-      # itself (not just the source) is intact. Linux-only because a
-      # virtual framebuffer (Xvfb) is trivial to set up there; the Windows
-      # and macOS runners have no equivalent reliably available, so those
-      # two platforms rely on the import smoke check above plus manual
-      # verification of the downloaded artifact.
+      # itself (not just the source) is intact, which the "Import smoke
+      # check" step above does NOT: it only imports bootstrap.app's
+      # source, it never instantiates BootstrapApp(tk.Tk) the way the
+      # frozen exe does at startup - exactly the gap that let the
+      # Tcl/Tk version-mismatch bug above reach a real release
+      # completely undetected by CI (only the Linux leg had this check
+      # until now). Linux uses Xvfb (trivial to set up there); Windows
+      # runners have a real (if headless) desktop session so the .exe can
+      # just be started directly - see the step below. macOS still has no
+      # equivalent reliably available, so that platform continues to rely
+      # on the import smoke check above plus manual verification of the
+      # downloaded artifact.
       - name: Frozen-binary launch smoke test (Linux only)
         if: runner.os == 'Linux'
         run: |
@@ -225,6 +289,23 @@ jobs:
             exit 1
           fi
           kill "$pid"
+
+      # 04.09.2026 - added together with the TCL_LIBRARY/TK_LIBRARY pin
+      # above, specifically so a future re-occurrence of that Tcl/Tk
+      # mismatch (or any other frozen-exe-only startup crash) fails the
+      # CI build instead of only surfacing on a real user's machine after
+      # a release is already published.
+      - name: Frozen-binary launch smoke test (Windows only)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath "dist\pdf-translator-setup.exe" -PassThru
+          Start-Sleep -Seconds 3
+          if ($proc.HasExited) {
+            Write-Error "Bootstrapper exited within 3s of starting - treating as a build failure."
+            exit 1
+          }
+          Stop-Process -Id $proc.Id -Force
 
       - name: Stage renamed artifact
         shell: bash
