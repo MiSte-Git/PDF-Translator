@@ -8,12 +8,12 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QThreadPool, QTimer, QUrl, Qt
+from PySide6.QtCore import QSettings, QSize, QThreadPool, QTimer, QUrl, Qt
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+    QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QFrame, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
-    QMessageBox, QProgressBar, QPushButton, QScrollArea, QSpinBox, QTextEdit, QVBoxLayout, QWidget,
+    QMessageBox, QProgressBar, QPushButton, QScrollArea, QSpinBox, QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
 
 from _version import __version__
@@ -60,6 +60,13 @@ log = logging.getLogger(__name__)
 # from assets/icon.svg by tools/build_icon.py). QIcon of a missing file is
 # simply empty, so an older checkout without assets/ still starts.
 APP_ICON_PATH = Path(__file__).resolve().parent.parent / "assets" / "icon.png"
+
+# Flaggen-Icons fuer die Sprachumschalter-Leiste (04.09.2026) - siehe
+# tools/build_flags.py / assets/flags/<code>.svg fuer die Quellen. Fehlt ein
+# PNG (z. B. aelterer Checkout), faellt der jeweilige Button einfach auf den
+# Sprachcode als Text zurueck statt zu crashen (gleiche Vorsicht wie beim
+# App-Icon oben).
+FLAGS_DIR = Path(__file__).resolve().parent.parent / "assets" / "flags"
 
 MODE_KEYS = {
     TranslationMode.PDF: "mode.pdf",
@@ -423,6 +430,44 @@ class MainWindow(QMainWindow):
         self.help_menu = self.menuBar().addMenu("")
         self._rebuild_help_menu()
 
+        # Sprachumschalter-Leiste (04.09.2026, Michael: "eine Flaggen-
+        # Leiste einbauen") - Schnellzugriff direkt im Hauptfenster, ohne
+        # den Umweg ueber Einstellungen -> Sprache (SettingsDialog.locale
+        # bleibt trotzdem bestehen, siehe self.settings_button weiter
+        # unten - beide teilen sich dieselbe LanguageManager-Instanz und
+        # bleiben so automatisch synchron). Ein checkbarer QToolButton pro
+        # verfuegbarer Sprache (LocaleInfo.available, siehe ui/i18n_data.py
+        # - aktuell alle 9), exklusiv in einer QButtonGroup, Icon aus
+        # assets/flags/<code>.png. Tooltip ist bewusst NICHT ueber i18n
+        # uebersetzt: LocaleInfo.native_name IST bereits der Name der
+        # jeweiligen Sprache in sich selbst (z. B. "Francais"), unabhaengig
+        # von der gerade eingestellten UI-Sprache.
+        self.flag_buttons: dict[str, QToolButton] = {}
+        self._flag_button_group = QButtonGroup(self)
+        self._flag_button_group.setExclusive(True)
+        self.flag_row = QHBoxLayout()
+        self.flag_row.setSpacing(4)
+        for info in LOCALES:
+            if not info.available:
+                continue
+            button = QToolButton()
+            icon_path = FLAGS_DIR / f"{info.code}.png"
+            if icon_path.exists():
+                button.setIcon(QIcon(str(icon_path)))
+                button.setIconSize(QSize(28, 19))
+            else:
+                button.setText(info.code.upper())
+            button.setCheckable(True)
+            button.setToolTip(info.native_name)
+            button.setAccessibleName(info.native_name)
+            button.setCursor(Qt.PointingHandCursor)
+            button.setProperty("cssClass", "flag")
+            button.clicked.connect(lambda _checked, code=info.code: self._flag_clicked(code))
+            self._flag_button_group.addButton(button)
+            self.flag_buttons[info.code] = button
+            self.flag_row.addWidget(button)
+        self.flag_row.addStretch(1)
+
         self.mode = QComboBox()
         for mode in MODE_KEYS:
             self.mode.addItem("", mode)
@@ -687,6 +732,7 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout()
         root.setContentsMargins(20, 20, 20, 20)
         root.setSpacing(16)
+        root.addLayout(self.flag_row)
         root.addWidget(self.merge_box)
         root.addWidget(self.config_box)
         root.addWidget(self.cost_box)
@@ -832,6 +878,8 @@ class MainWindow(QMainWindow):
 
     def retranslate(self) -> None:
         t = self.language.text
+        for code, button in self.flag_buttons.items():
+            button.setChecked(code == self.language.language)
         self.setWindowTitle(t("app.title"))
         self.merge_box.setTitle(t("merge_box.group"))
         self.config_box.setTitle(t("config.group"))
@@ -1809,6 +1857,14 @@ class MainWindow(QMainWindow):
         box.exec()
         if box.clickedButton() is open_button:
             self._open_settings(provider)
+
+    def _flag_clicked(self, code: str) -> None:
+        # Sofort wirksam UND sofort persistiert (anders als
+        # SettingsDialog.locale, das erst mit "Speichern" in QSettings
+        # landet) - fuer eine Schnellzugriffs-Leiste ist "klicken = fertig"
+        # die erwartete Interaktion, kein Zwischenschritt noetig.
+        self.language.set_language(code)
+        self.settings.setValue("language", code)
 
     def _open_settings(self, preselect_provider: str | None = None) -> None:
         dialog = SettingsDialog(self.settings, self.language, self, initial_provider=preselect_provider)

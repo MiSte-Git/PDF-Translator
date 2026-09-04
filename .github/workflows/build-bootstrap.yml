@@ -36,18 +36,35 @@ jobs:
           # icon_arg: PyInstaller embeds an executable icon on Windows
           # (.ico) and macOS (.icns) only; Linux binaries have no such
           # slot, the .desktop entry carries the icon there instead.
+          #
+          # python_triple: platform triple used to pick the right
+          # python-build-standalone "install_only" asset for the bundled
+          # Python runtime (see "Download bundled Python runtime" step and
+          # bootstrap/bundled_python.py's module docstring - 04.09.2026
+          # Windows test-run fix). macos-latest is an Apple Silicon
+          # (arm64) runner, hence aarch64 rather than x86_64 there.
+          #
+          # add_data_sep: PyInstaller's --add-data separates SRC from DEST
+          # with ":" on Linux/macOS but requires ";" on Windows (":" there
+          # collides with drive letters, e.g. "C:").
           - os: ubuntu-latest
             asset_name: pdf-translator-setup-linux
             dist_name: pdf-translator-setup
             icon_arg: ""
+            python_triple: x86_64-unknown-linux-gnu
+            add_data_sep: ":"
           - os: windows-latest
             asset_name: pdf-translator-setup-windows.exe
             dist_name: pdf-translator-setup.exe
             icon_arg: "--icon assets/icon.ico"
+            python_triple: x86_64-pc-windows-msvc
+            add_data_sep: ";"
           - os: macos-latest
             asset_name: pdf-translator-setup-macos
             dist_name: pdf-translator-setup
             icon_arg: "--icon assets/icon.icns"
+            python_triple: aarch64-apple-darwin
+            add_data_sep: ":"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -77,10 +94,75 @@ jobs:
       - name: Import smoke check
         run: python -c "import bootstrap.app"
 
+      # 04.09.2026 (first real Windows test run, project doc
+      # "windows-testlauf-04-09-2026.md"): a frozen bootstrapper has no
+      # real Python interpreter of its own (sys.executable is the .exe
+      # itself) - venv creation failed with WinError 2 on a clean test
+      # machine with no system Python installed, which is the expected
+      # case for this project's target audience, not an edge case. Fixed
+      # by bundling a redistributable CPython (python-build-standalone,
+      # same project uv/rye use) into the executable and always creating
+      # the Stage-2 venv from THAT interpreter - see
+      # bootstrap/bundled_python.py and bootstrap/installer.py::
+      # create_venv()/_base_python(). Downloaded from the latest
+      # python-build-standalone release rather than a pinned URL so this
+      # step keeps working as that project cuts new releases.
+      - name: Download bundled Python runtime
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import pathlib
+          import re
+          import sys
+          import tarfile
+          import urllib.request
+
+          triple = "${{ matrix.python_triple }}"
+          request = urllib.request.Request(
+              "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest",
+              headers={"User-Agent": "pdf-translator-build", "Accept": "application/vnd.github+json"},
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              release = json.load(response)
+
+          assets = release.get("assets", [])
+          # Prefer "install_only_stripped" (debug symbols stripped, notably
+          # smaller) when this release has one for our triple; fall back to
+          # plain "install_only" for older releases/triples without it.
+          variants = ["install_only_stripped", "install_only"]
+          patterns = [
+              re.compile(r"^cpython-3\.13\.\d+\+\d+-" + re.escape(triple) + r"-" + variant + r"\.tar\.gz$")
+              for variant in variants
+          ]
+          asset = next(
+              (a for pattern in patterns for a in assets if pattern.match(a["name"])), None
+          )
+          if asset is None:
+              candidates = "\n".join(a["name"] for a in assets if triple in a["name"])
+              sys.exit(
+                  f"No install_only(_stripped) CPython 3.13 asset found for {triple} in "
+                  f"astral-sh/python-build-standalone's latest release. "
+                  f"Candidates containing that triple:\n{candidates}"
+              )
+
+          print(f"Downloading {asset['name']} ({asset.get('size', 0) / 1_000_000:.1f} MB)")
+          archive = pathlib.Path("python-runtime.tar.gz")
+          urllib.request.urlretrieve(asset["browser_download_url"], archive)
+
+          with tarfile.open(archive) as tf:
+              tf.extractall(".")
+          archive.unlink()
+          pathlib.Path("python").rename("python_runtime")
+          print("Bundled Python runtime ready at python_runtime/")
+          PY
+
       - name: Build bootstrapper executable
         run: >
           pyinstaller --onefile --windowed --name pdf-translator-setup
-          ${{ matrix.icon_arg }} bootstrap/__main__.py
+          ${{ matrix.icon_arg }}
+          --add-data "python_runtime${{ matrix.add_data_sep }}python_runtime"
+          bootstrap/__main__.py
 
       # Frozen-binary launch smoke test: starts the actual built
       # executable, gives it a couple of seconds to open its first window

@@ -243,6 +243,24 @@ def build_stylesheet(is_dark: bool) -> str:
             color: {c['muted']};
         }}
 
+        /* Sprachumschalter-Leiste (04.09.2026) - eigene Klasse statt der
+        normalen QPushButton-Regel oben: flach/randlos im Ruhezustand (die
+        Flagge selbst traegt schon genug Farbe), ein farbiger Rahmen zeigt
+        nur die aktuell aktive Sprache an (QToolButton::checked). */
+        QToolButton[cssClass="flag"] {{
+            background: transparent;
+            border: 2px solid transparent;
+            border-radius: 6px;
+            padding: 2px;
+        }}
+        QToolButton[cssClass="flag"]:hover {{
+            background: {c['button_hover']};
+        }}
+        QToolButton[cssClass="flag"]:checked {{
+            border: 2px solid {c['accent']};
+            background: {c['button_bg']};
+        }}
+
         QLineEdit, QTextEdit, QComboBox, QSpinBox {{
             background: {c['input_bg']};
             color: {c['ink']};
