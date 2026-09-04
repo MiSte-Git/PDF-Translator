@@ -387,8 +387,79 @@ class BootstrapApp(tk.Tk):
 
 
 def main() -> None:
-    app = BootstrapApp()
-    app.mainloop()
+    try:
+        app = BootstrapApp()
+        app.mainloop()
+    except Exception:
+        _report_startup_crash()
+        raise
+
+
+def _report_startup_crash() -> None:
+    """Writes the current exception to a log file and shows it in a way
+    the user can actually copy - as opposed to PyInstaller's own
+    --windowed crash dialog ("Unhandled exception in script"), which a
+    user hit repeatedly during Windows testing (04.09.2026, Tcl/Tk
+    version-mismatch bug - see .github/workflows/build-bootstrap.yml's
+    Windows smoke-test step for the CI-side half of that story) and
+    could only get to us as screenshots, since that particular dialog's
+    text cannot be selected or saved.
+
+    Deliberately does not touch tkinter: the exception that lands here
+    can be tkinter/Tcl itself failing during BootstrapApp.__init__'s
+    very first line (super().__init__(), i.e. tk.Tk() - exactly what
+    happened in practice), so any error path that itself needs a
+    working Tk would just crash a second time, less informatively than
+    the first. ctypes.windll.user32.MessageBoxW is a plain Win32 API
+    call with no such dependency, and - unlike PyInstaller's dialog -
+    its text can be selected/copied with Ctrl+C, which is standard
+    behaviour for a native Windows message box.
+    """
+    import datetime
+    import os as _os
+    import platform
+    import sys
+    import tempfile
+    import traceback
+
+    tb = traceback.format_exc()
+    log_dir = _os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
+    log_path = _os.path.join(log_dir, "PDF-Translator", "bootstrap-crash.log")
+    log_written = False
+    try:
+        _os.makedirs(_os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"--- {datetime.datetime.now().isoformat()} ---\n")
+            f.write(f"Python: {sys.version}\n")
+            f.write(f"Platform: {platform.platform()}\n")
+            for var in ("TCL_LIBRARY", "TK_LIBRARY"):
+                f.write(f"{var}={_os.environ.get(var, '<not set>')}\n")
+            f.write(tb)
+            f.write("\n")
+        log_written = True
+    except OSError:
+        pass
+
+    if log_written:
+        message = (
+            "Der Installer konnte nicht gestartet werden.\n\n"
+            f"Details wurden gespeichert unter:\n{log_path}\n\n"
+            "Bitte diese Datei mitschicken, falls du das meldest.\n\n"
+            "---\n\n"
+            f"{tb}"
+        )
+    else:
+        message = f"Der Installer konnte nicht gestartet werden:\n\n{tb}"
+
+    title = "PDF-Translator Setup - Fehler beim Start / Startup Error"
+    if sys.platform == "win32":
+        import ctypes
+
+        # MB_OK | MB_ICONERROR. Runs even though Tk/Tcl may be broken -
+        # this is a bare Win32 API call, not a tkinter one.
+        ctypes.windll.user32.MessageBoxW(0, message, title, 0x10)
+    else:
+        print(f"{title}\n\n{message}", file=sys.stderr)
 
 
 if __name__ == "__main__":

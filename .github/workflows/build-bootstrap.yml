@@ -318,14 +318,49 @@ jobs:
       # mismatch (or any other frozen-exe-only startup crash) fails the
       # CI build instead of only surfacing on a real user's machine after
       # a release is already published.
+      #
+      # 04.09.2026, revised same day: the check above (HasExited only)
+      # turned out to be blind to exactly the crash it was written to
+      # catch. A PyInstaller --windowed build installs its own top-level
+      # exception handler that, on an unhandled exception such as the
+      # Tcl/Tk version-conflict error, shows a "Unhandled exception in
+      # script" message-box dialog INSTEAD OF exiting - the process sits
+      # there alive, blocked on that dialog, until something closes it.
+      # $proc.HasExited was therefore $false on every single run so far,
+      # crashed or not: this smoke test has been passing unconditionally
+      # since it was added, on both the pre-fix and post-fix builds,
+      # which is why the exact same startup crash kept reaching a real
+      # Windows VM run after run with CI reporting green the whole time.
+      # Checking $proc.MainWindowTitle closes that gap: a healthy start
+      # shows the app's own window (whatever ui/i18n_data.py's
+      # "app.title" is in the active locale), a crashed start shows only
+      # that fixed, non-localised bootloader dialog - so matching on its
+      # literal English title reliably tells the two apart.
       - name: Frozen-binary launch smoke test (Windows only)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $proc = Start-Process -FilePath "dist\pdf-translator-setup.exe" -PassThru
           Start-Sleep -Seconds 3
+          $proc.Refresh()
           if ($proc.HasExited) {
             Write-Error "Bootstrapper exited within 3s of starting - treating as a build failure."
+            exit 1
+          }
+          $title = $proc.MainWindowTitle
+          Write-Host "Main window title after 3s: '$title'"
+          # Two possible crash-dialog titles to watch for: PyInstaller's
+          # own generic --windowed handler ("Unhandled exception...",
+          # shown for any exception this app does not catch itself), and
+          # - since 04.09.2026 - bootstrap/app.py::_report_startup_crash's
+          # own, more informative dialog for exceptions raised inside
+          # main() specifically (its title is fixed and bilingual, not
+          # run through ui/i18n_data.py, so this match is stable
+          # regardless of OS locale). Either one means the app failed to
+          # reach its own window.
+          if ($title -like "Unhandled exception*" -or $title -like "*Fehler beim Start*") {
+            Stop-Process -Id $proc.Id -Force
+            Write-Error "Bootstrapper crashed at startup - an error dialog was shown ('$title') instead of the app's own window. Treating as a build failure."
             exit 1
           }
           Stop-Process -Id $proc.Id -Force
