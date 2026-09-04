@@ -221,32 +221,34 @@ jobs:
           print("Bundled Python runtime ready at python_runtime/")
           PY
 
-      # 04.09.2026 (second real Windows test run: frozen .exe crashed
+      # 04.09.2026 (multiple real Windows test runs, project doc
+      # "windows-testlauf-04-09-2026.md"): frozen .exe crashed
       # immediately with "_tkinter.TclError: ... version conflict for
       # package "Tcl": have 8.6.12, need exactly 8.6.15" the moment
-      # bootstrap/app.py's BootstrapApp(tk.Tk) opened its first window -
-      # see project doc "windows-testlauf-04-09-2026.md" for the first
-      # (unrelated) Windows bug found the same day). Root cause:
-      # windows-latest ships Strawberry Perl preinstalled (for its own
-      # Perl/Tk support), WITH ITS OWN Tcl 8.6.12 on PATH - and
-      # PyInstaller resolves what to bundle for tkinter through TWO
-      # independent, easily-mismatched paths: (1) the Tcl/Tk SCRIPT
-      # library (init.tcl etc.) via its hook-_tkinter.py, which reads the
-      # TCL_LIBRARY/TK_LIBRARY env vars first and only auto-discovers when
-      # they are unset; (2) the Tcl/Tk DLLs (tcl86t.dll/tk86t.dll) that
-      # _tkinter.pyd depends on, resolved via a Windows DLL search that
-      # walks PATH - so even with TCL_LIBRARY/TK_LIBRARY correctly pinned
-      # to Python's own 8.6.15 SCRIPTS (first attempted fix, insufficient
-      # on its own - same error persisted on retest), Strawberry's
-      # tcl86t.dll could still win the DLL search if its directory sorts
-      # earlier on PATH, bundling an 8.6.12 DLL next to 8.6.15 scripts (or
-      # vice versa - either mismatch direction produces the exact same
-      # "version conflict" error). Fixing this at the source instead of
-      # chasing each individual lookup mechanism: strip every
-      # Strawberry-Perl directory out of PATH for the rest of this job,
-      # in addition to keeping the TCL_LIBRARY/TK_LIBRARY pin (belt and
-      # suspenders - the pin still matters for hook-_tkinter.py's own
-      # lookup, PATH-stripping additionally matters for the DLL search).
+      # bootstrap/app.py's BootstrapApp(tk.Tk) opened its first window.
+      # Two earlier attempts here (pinning TCL_LIBRARY/TK_LIBRARY;
+      # stripping Strawberry Perl from PATH, on the theory that its own
+      # bundled Tcl 8.6.12 was winning a DLL search) did NOT fix it -
+      # confirmed by bootstrap/app.py::_report_startup_crash logging what
+      # actually ended up inside a real crash's own sys._MEIPASS: this
+      # job's own diagnostic step (below) shows only ONE tcl86t.dll
+      # exists anywhere on this runner at all - Python's own, correctly
+      # 8.6.15 - yet the crash log shows the exe's bundled tcl86t.dll
+      # self-reporting version 8.6.2.12 (i.e. 8.6.12). So there is no
+      # rogue DLL being picked up from PATH; PyInstaller's own resolution
+      # of the _tkinter extension's DLL dependency (bindepend.get_imports,
+      # in PyInstaller/utils/hooks/tcl_tk.py -> depend/bindepend.py) is
+      # somehow still not landing on the one, correct file that sits
+      # right next to _tkinter.pyd. Rather than keep chasing why that
+      # auto-detection gets it wrong, this step now sidesteps it: it
+      # locates the DLLs itself (same directory the diagnostic step
+      # already confirmed holds the right ones) and passes them to
+      # PyInstaller explicitly via --add-binary, which - per how
+      # PyInstaller merges its binaries TOC - takes priority over
+      # whatever the hook would have auto-collected for the same
+      # destination path. TCL_LIBRARY/TK_LIBRARY stay pinned too (that
+      # half was already confirmed correct from the crash logs - the
+      # bundled init.tcl has consistently been the right, 8.6.15 one).
       # Windows-only: Linux gets its Tcl/Tk from the single apt-installed
       # python3-tk package above (nothing else on that runner to
       # conflict with), and macOS runners have not shown this problem
@@ -276,6 +278,29 @@ jobs:
           print(f"TCL_LIBRARY={tcl_library}")
           print(f"TK_LIBRARY={tk_library}")
 
+          # Force-bundle the DLLs directly (see the comment above this
+          # step for why: PyInstaller's own auto-detection of these has
+          # been confirmed, via a real crash's own sys._MEIPASS report,
+          # to sometimes land on the wrong version even though only one
+          # candidate DLL exists anywhere on this runner). python.org's
+          # Windows installer - what actions/setup-python uses here -
+          # puts tcl86t.dll/tk86t.dll in the same DLLs folder as
+          # _tkinter.pyd itself.
+          dll_dir = pathlib.Path(sys.base_prefix) / "DLLs"
+          tcl_dll = dll_dir / "tcl86t.dll"
+          tk_dll = dll_dir / "tk86t.dll"
+          if not tcl_dll.is_file() or not tk_dll.is_file():
+              sys.exit(
+                  f"Could not find tcl86t.dll/tk86t.dll under {dll_dir} - "
+                  "has actions/setup-python's install layout changed?"
+              )
+          print(f"TCL_DLL={tcl_dll}")
+          print(f"TK_DLL={tk_dll}")
+          # Destination "." bundles them at the onefile root, matching
+          # where a real crash's sys._MEIPASS report showed the (wrong)
+          # auto-collected ones actually landing.
+          tcltk_dll_args = f'--add-binary "{tcl_dll};." --add-binary "{tk_dll};."'
+
           # PATH as inherited here is already the native Windows
           # (semicolon-separated) form - bash.exe reconstructs a native
           # PATH for any child process it spawns (like this python.exe),
@@ -299,6 +324,7 @@ jobs:
               f.write(f"TCL_LIBRARY={tcl_library}\n")
               f.write(f"TK_LIBRARY={tk_library}\n")
               f.write(f"PATH={filtered_path}\n")
+              f.write(f"TCLTK_DLL_ARGS={tcltk_dll_args}\n")
           PY
 
       # 04.09.2026 - added after the Strawberry Perl PATH filter above
@@ -356,6 +382,7 @@ jobs:
           pyinstaller --onefile --windowed --name pdf-translator-setup
           ${{ matrix.icon_arg }}
           --add-data "python_runtime${{ matrix.add_data_sep }}python_runtime"
+          ${{ env.TCLTK_DLL_ARGS }}
           bootstrap/__main__.py
 
       # Frozen-binary launch smoke test: starts the actual built
