@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -74,16 +76,66 @@ def test_requirements_files_for_mode_skips_missing_optional_files(tmp_path):
 
 
 def test_create_venv_wraps_errors(monkeypatch, tmp_path):
-    class _FailingBuilder:
-        def __init__(self, *a, **k):
-            pass
+    def fake_run(cmd, **kwargs):
+        raise subprocess.CalledProcessError(returncode=1, cmd=cmd, stderr="disk full")
 
-        def create(self, venv_dir):
-            raise OSError("disk full")
+    monkeypatch.setattr(installer.subprocess, "run", fake_run)
+    with pytest.raises(InstallError, match="disk full"):
+        installer.create_venv(tmp_path / "venv", base_python=tmp_path / "python")
 
-    monkeypatch.setattr(installer.venv_module, "EnvBuilder", _FailingBuilder)
-    with pytest.raises(InstallError):
-        installer.create_venv(tmp_path / "venv")
+
+def test_create_venv_invokes_base_python_module_venv(monkeypatch, tmp_path):
+    captured = {}
+
+    class _Result:
+        returncode = 0
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _Result()
+
+    monkeypatch.setattr(installer.subprocess, "run", fake_run)
+    venv_dir = tmp_path / "venv"
+    installer.create_venv(venv_dir, base_python=tmp_path / "python")
+    assert captured["cmd"] == [str(tmp_path / "python"), "-m", "venv", str(venv_dir)]
+
+
+def test_create_venv_defaults_to_base_python(monkeypatch, tmp_path):
+    monkeypatch.setattr(installer, "_base_python", lambda: tmp_path / "resolved-python")
+    captured = {}
+
+    class _Result:
+        returncode = 0
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _Result()
+
+    monkeypatch.setattr(installer.subprocess, "run", fake_run)
+    installer.create_venv(tmp_path / "venv")
+    assert captured["cmd"][0] == str(tmp_path / "resolved-python")
+
+
+# --- 04.09.2026: bundled-Python interpreter selection (Windows test-run fix) --
+
+
+def test_base_python_uses_sys_executable_when_not_frozen(monkeypatch):
+    monkeypatch.setattr(installer.paths, "is_frozen", lambda: False)
+    assert installer._base_python() == Path(sys.executable)
+
+
+def test_base_python_uses_bundled_python_when_frozen(monkeypatch):
+    bundled = Path("/opt/bundled/python")
+    monkeypatch.setattr(installer.paths, "is_frozen", lambda: True)
+    monkeypatch.setattr(installer.bundled_python, "bundled_python_executable", lambda: bundled)
+    assert installer._base_python() == bundled
+
+
+def test_base_python_raises_when_frozen_and_bundle_missing(monkeypatch):
+    monkeypatch.setattr(installer.paths, "is_frozen", lambda: True)
+    monkeypatch.setattr(installer.bundled_python, "bundled_python_executable", lambda: None)
+    with pytest.raises(InstallError, match="python_runtime"):
+        installer._base_python()
 
 
 def test_pip_install_wraps_called_process_error(monkeypatch, tmp_path):

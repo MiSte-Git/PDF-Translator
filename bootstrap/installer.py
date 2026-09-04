@@ -20,15 +20,16 @@ contains it - it does not exist in this sandbox's requirements-ocr.txt yet.
 from __future__ import annotations
 
 import subprocess
-import venv as venv_module
+import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Callable, Optional
 
-from bootstrap import desktop_integration, gpu_check, paths, release_source
+from bootstrap import bundled_python, desktop_integration, gpu_check, paths, release_source
 
 _PIP_INSTALL_TIMEOUT_SECONDS = 60 * 30  # large ML wheels (torch, etc.) are slow to fetch
+_VENV_CREATE_TIMEOUT_SECONDS = 60 * 5  # venv + ensurepip is normally seconds, not minutes
 
 
 class InstallMode(str, Enum):
@@ -87,10 +88,51 @@ def requirements_files_for_mode(mode: InstallMode, app_source_dir: Path) -> list
     return [path for path in candidates if path.is_file()]
 
 
-def create_venv(venv_dir: Path) -> None:
+def _base_python() -> Path:
+    """Interpreter used to create the Stage-2 venv.
+
+    04.09.2026 (first real Windows test run): a frozen build's own
+    sys.executable is the bootstrapper .exe, not a real interpreter - see
+    bootstrap/bundled_python.py's module docstring for the full story. Use
+    the bundled CPython there. Running from source (dev/tests),
+    sys.executable already IS a real interpreter, same as before this fix.
+    """
+    if paths.is_frozen():
+        python = bundled_python.bundled_python_executable()
+        if python is None:
+            raise InstallError(
+                "This build is missing its bundled Python runtime "
+                "(python_runtime) - it was not built correctly."
+            )
+        return python
+    return Path(sys.executable)
+
+
+def create_venv(venv_dir: Path, base_python: Path | None = None) -> None:
+    """Creates the Stage-2 venv by running `<python> -m venv <venv_dir>` in
+    a subprocess, rather than venv.EnvBuilder() in-process (as this used to
+    do): EnvBuilder derives its base interpreter from the running process,
+    which is wrong for a frozen bootstrapper (see _base_python()). Running
+    the target interpreter's own venv module as a subprocess sidesteps that
+    entirely - `-m venv` always builds a venv based on itself, exactly like
+    running it from a normal command line would. `-m venv` installs pip by
+    default (same as EnvBuilder(with_pip=True) before it), so behaviour for
+    callers is unchanged.
+    """
+    python = base_python if base_python is not None else _base_python()
     try:
-        venv_module.EnvBuilder(with_pip=True, clear=True).create(venv_dir)
-    except Exception as exc:  # venv/ensurepip can raise several error types
+        subprocess.run(
+            [str(python), "-m", "venv", str(venv_dir)],
+            capture_output=True,
+            text=True,
+            timeout=_VENV_CREATE_TIMEOUT_SECONDS,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise InstallError(
+            f"Could not create the virtual environment: {exc.stderr.strip() if exc.stderr else exc}"
+        ) from exc
+    except (OSError, subprocess.SubprocessError) as exc:
         raise InstallError(f"Could not create the virtual environment: {exc}") from exc
 
 

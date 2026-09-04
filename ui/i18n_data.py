@@ -682,15 +682,18 @@ DE = {
         "Übersetzung läuft über einen externen Anbieter (DeepL, Google, "
         "OpenAI oder Grok). Dafür fallen laufende Kosten pro Übersetzung "
         "an, und es wird ein eigener API-Schlüssel des jeweiligen "
-        "Anbieters benötigt - dazu gleich mehr. Empfohlen, wenn keine "
-        "starke Grafikkarte vorhanden ist."
+        "Anbieters benötigt - dazu gleich mehr. Kein großer Download "
+        "nötig. Empfohlen, wenn keine starke Grafikkarte vorhanden ist."
     ),
     "bootstrap.mode_local_label": "Lokal (auf dieser Grafikkarte)",
     "bootstrap.mode_local_desc": (
-        "Übersetzung/Bildbearbeitung läuft direkt auf diesem Rechner, "
-        "keine laufenden Kosten. Braucht aber eine ausreichend starke "
-        "NVIDIA-Grafikkarte - wird im nächsten Schritt geprüft - und einen "
-        "größeren einmaligen Download."
+        "Übersetzung/Bildbearbeitung läuft direkt auf diesem Rechner - für "
+        "die Übersetzung selbst fallen keine laufenden Kosten an. "
+        "Online-Anbieter lassen sich zusätzlich jederzeit in den "
+        "Einstellungen einrichten, falls gewünscht - diese Option "
+        "installiert also beides. Braucht eine ausreichend starke "
+        "NVIDIA-Grafikkarte (wird im nächsten Schritt geprüft) und einen "
+        "einmaligen Download von ca. 2-3 GB."
     ),
     "bootstrap.gpu_checking": "Grafikkarte wird geprüft …",
     "bootstrap.gpu_ok": (
@@ -1303,15 +1306,18 @@ EN = {
     "bootstrap.mode_online_desc": (
         "Translation runs through an external provider (DeepL, Google, "
         "OpenAI, or Grok). This costs money per translation, and you'll "
-        "need your own API key from that provider - more on that next. "
-        "Recommended if you don't have a strong graphics card."
+        "need your own API key from that provider - more on that next. No "
+        "large download needed. Recommended if you don't have a strong "
+        "graphics card."
     ),
     "bootstrap.mode_local_label": "Local (on this graphics card)",
     "bootstrap.mode_local_desc": (
-        "Translation/image editing runs directly on this computer, no "
-        "ongoing costs. Needs a sufficiently strong NVIDIA graphics card "
-        "though - checked in the next step - and a larger one-time "
-        "download."
+        "Translation/image editing runs directly on this computer - no "
+        "ongoing costs for the translation itself. Online providers can "
+        "still be set up any time in Settings if you want them too - this "
+        "option installs both. Needs a sufficiently strong NVIDIA graphics "
+        "card (checked in the next step) and a one-time download of about "
+        "2-3 GB."
     ),
     "bootstrap.gpu_checking": "Checking graphics card …",
     "bootstrap.gpu_ok": "Found: {name} with {vram_gb:.0f} GB of video memory - that's enough.",
