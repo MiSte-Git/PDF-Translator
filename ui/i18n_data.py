@@ -692,8 +692,8 @@ DE = {
         "Online-Anbieter lassen sich zusätzlich jederzeit in den "
         "Einstellungen einrichten, falls gewünscht - diese Option "
         "installiert also beides. Braucht eine ausreichend starke "
-        "NVIDIA-Grafikkarte (wird im nächsten Schritt geprüft) und einen "
-        "einmaligen Download von ca. 2-3 GB."
+        "NVIDIA-Grafikkarte (wird im nächsten Schritt geprüft) und lädt "
+        "während der Installation einmalig ca. 2-3 GB herunter."
     ),
     "bootstrap.gpu_checking": "Grafikkarte wird geprüft …",
     "bootstrap.gpu_ok": (
@@ -1316,8 +1316,8 @@ EN = {
         "ongoing costs for the translation itself. Online providers can "
         "still be set up any time in Settings if you want them too - this "
         "option installs both. Needs a sufficiently strong NVIDIA graphics "
-        "card (checked in the next step) and a one-time download of about "
-        "2-3 GB."
+        "card (checked in the next step) and downloads about 2-3 GB during "
+        "setup."
     ),
     "bootstrap.gpu_checking": "Checking graphics card …",
     "bootstrap.gpu_ok": "Found: {name} with {vram_gb:.0f} GB of video memory - that's enough.",
