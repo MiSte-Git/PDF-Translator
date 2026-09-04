@@ -83,8 +83,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3-tk xvfb
 
+      # certifi bundles a known-good CA root file, collected into the
+      # frozen exe automatically by pyinstaller-hooks-contrib's stock
+      # hook for it. See bootstrap/release_source.py::_https_context()
+      # for why this is needed: 04.09.2026, a real installer run on a
+      # genuinely blank, freshly-installed Windows 11 VM (never run
+      # Windows Update) failed to reach GitHub with "[SSL:
+      # CERTIFICATE_VERIFY_FAILED] ... unable to get local issuer
+      # certificate" - urllib's default context on Windows uses the OS
+      # certificate store, which such a machine can legitimately not
+      # have fully populated yet. Bundling our own CA file sidesteps
+      # that rather than depending on a given user's OS being current.
       - name: Install PyInstaller
-        run: python -m pip install --upgrade pip pyinstaller
+        run: python -m pip install --upgrade pip pyinstaller certifi
 
       # Cheap, cross-platform sanity check before spending time on a full
       # PyInstaller build: catches ordinary Python-level import errors in

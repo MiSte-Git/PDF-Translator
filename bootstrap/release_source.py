@@ -36,6 +36,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import ssl
 import tempfile
 import urllib.error
 import urllib.request
@@ -66,6 +67,36 @@ _USER_AGENT = "pdf-translator-bootstrapper"
 ProgressCallback = Callable[[int, Optional[int]], None]
 
 
+def _https_context() -> ssl.SSLContext | None:
+    """SSL context for the urlopen() calls below - explicitly built from
+    certifi's own CA bundle rather than relying on urllib's default
+    (which, on Windows, means the OS certificate store). 04.09.2026:
+    a real installer run on a genuinely blank, freshly-installed Windows
+    11 VM failed here with "[SSL: CERTIFICATE_VERIFY_FAILED] ... unable
+    to get local issuer certificate" - a machine that has never run
+    Windows Update yet (or long enough for its background root-store
+    sync) can be missing the specific intermediate/root CA GitHub's
+    current chain needs, which is an environment gap, not anything this
+    codebase controls. Bundling a known-good CA file with the
+    bootstrapper itself (certifi, installed alongside pyinstaller in
+    .github/workflows/build-bootstrap.yml and collected into the frozen
+    exe automatically via pyinstaller-hooks-contrib's stock certifi hook)
+    sidesteps that gap entirely instead of depending on whatever root
+    store happens to be on a given user's machine.
+
+    Falls back to None (urllib's own default context, i.e. the OS store)
+    if certifi is not importable - e.g. a local `python -m bootstrap` dev
+    run before `pip install certifi`, which the module docstring's
+    "usable before anything from requirements.txt is installed" property
+    should not depend on.
+    """
+    try:
+        import certifi
+    except ImportError:
+        return None
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 class ReleaseSourceError(RuntimeError):
     """Raised when the app source could not be resolved or downloaded."""
 
@@ -76,7 +107,9 @@ def fetch_latest_release_metadata() -> dict:
         GITHUB_API_LATEST_RELEASE, headers={"User-Agent": _USER_AGENT, "Accept": "application/vnd.github+json"}
     )
     try:
-        with urllib.request.urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:
+        with urllib.request.urlopen(
+            request, timeout=_REQUEST_TIMEOUT_SECONDS, context=_https_context()
+        ) as response:
             return json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError) as exc:
         raise ReleaseSourceError(f"Could not reach GitHub: {exc}") from exc
@@ -99,7 +132,9 @@ def resolve_zip_asset_url(release_metadata: dict) -> str:
 def _download_to_file(url: str, dest: Path, progress_cb: ProgressCallback | None = None) -> None:
     request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
     try:
-        with urllib.request.urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:
+        with urllib.request.urlopen(
+            request, timeout=_REQUEST_TIMEOUT_SECONDS, context=_https_context()
+        ) as response:
             total = response.length  # None if the server did not send Content-Length
             downloaded = 0
             with open(dest, "wb") as f:
