@@ -301,6 +301,56 @@ jobs:
               f.write(f"PATH={filtered_path}\n")
           PY
 
+      # 04.09.2026 - added after the Strawberry Perl PATH filter above
+      # still did not stop the Tcl version-conflict crash on a real
+      # Windows VM (three rounds of testing, same "have 8.6.12, need
+      # exactly 8.6.15" every time). The "unfrozen Tcl/Tk is self-
+      # consistent" check further up in this job proved the mismatch is
+      # not present in actions/setup-python's own installation - it is
+      # introduced while PyInstaller freezes the app. Looking at
+      # PyInstaller's own source
+      # (PyInstaller/utils/hooks/tcl_tk.py) explains why: it locates the
+      # Tcl/Tk DLLs to bundle via bindepend.getImports() - a binary
+      # dependency walk of _tkinter's own .pyd, completely independent
+      # of the TCL_LIBRARY/TK_LIBRARY env vars pinned above (those only
+      # steer the SEPARATE script-library lookup, via `Tcl().eval("info
+      # library")`, which is exactly why the bundled init.tcl has
+      # consistently been the correct 8.6.15 one - that half of the pin
+      # works - while the DLL keeps coming from somewhere else). The
+      # PATH filter guessed Strawberry Perl as that "somewhere else" and
+      # was wrong, or at least incomplete. Rather than guess again, this
+      # step lists every tcl86t.dll/tk86t.dll actually reachable on
+      # PATH right now, with each one's real file version - so the next
+      # fix targets the confirmed source instead of another guess.
+      - name: Diagnose - locate every tcl86t.dll/tk86t.dll on PATH (Windows only)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $pyBase = python -c "import sys; print(sys.base_prefix)"
+          Write-Host "Python sys.base_prefix: $pyBase"
+          $dllNames = @('tcl86t.dll', 'tk86t.dll')
+          $found = 0
+          foreach ($dir in ($env:PATH -split ';' | Where-Object { $_ -ne '' } | Select-Object -Unique)) {
+            foreach ($dll in $dllNames) {
+              $full = Join-Path $dir $dll
+              if (Test-Path -LiteralPath $full -PathType Leaf) {
+                $found++
+                $vi = (Get-Item -LiteralPath $full).VersionInfo
+                Write-Host "FOUND: $full  FileVersion=$($vi.FileVersion)  ProductVersion=$($vi.ProductVersion)"
+              }
+            }
+          }
+          if ($found -eq 0) {
+            Write-Host "No tcl86t.dll/tk86t.dll found anywhere on PATH."
+          }
+          # Also check directly inside Python's own install tree, in case
+          # its DLL lives somewhere bindepend's search does not reach via
+          # PATH at all (e.g. a DLLs\ subfolder never added to PATH).
+          Get-ChildItem -LiteralPath $pyBase -Recurse -Filter 'tcl86t.dll' -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "IN PYTHON TREE: $($_.FullName)  FileVersion=$($_.VersionInfo.FileVersion)" }
+          Get-ChildItem -LiteralPath $pyBase -Recurse -Filter 'tk86t.dll' -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "IN PYTHON TREE: $($_.FullName)  FileVersion=$($_.VersionInfo.FileVersion)" }
+
       - name: Build bootstrapper executable
         run: >
           pyinstaller --onefile --windowed --name pdf-translator-setup
