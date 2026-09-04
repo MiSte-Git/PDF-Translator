@@ -107,24 +107,66 @@ jobs:
       # create_venv()/_base_python(). Downloaded from the latest
       # python-build-standalone release rather than a pinned URL so this
       # step keeps working as that project cuts new releases.
+      # 04.09.2026 (v0.5.0 release run: "HTTP Error 403: rate limit
+      # exceeded" fetching the astral-sh/python-build-standalone metadata
+      # below, on all three matrix legs) - api.github.com rate-limits
+      # UNAUTHENTICATED requests to 60/hour per source IP, and
+      # GitHub-hosted runners share IP pools that are frequently already
+      # close to that limit from OTHER workflows worldwide; three matrix
+      # legs firing the same request within seconds of each other made
+      # this trivial to hit. Authenticating with the run's own
+      # GITHUB_TOKEN (automatically provided, no secret to configure)
+      # raises the same limit to 5000/hour per token - this is the
+      # standard fix, not a workaround. Unrelated to
+      # bootstrap/release_source.py's own unauthenticated GitHub API
+      # calls: those run on an end user's machine post-install, where
+      # there is no GITHUB_TOKEN to use and a single person's occasional
+      # requests don't come close to 60/hour.
       - name: Download bundled Python runtime
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python - <<'PY'
           import json
+          import os
           import pathlib
           import re
           import sys
           import tarfile
+          import time
+          import urllib.error
           import urllib.request
 
           triple = "${{ matrix.python_triple }}"
+          headers = {"User-Agent": "pdf-translator-build", "Accept": "application/vnd.github+json"}
+          token = os.environ.get("GITHUB_TOKEN")
+          if token:
+              headers["Authorization"] = f"Bearer {token}"
+
+          # Small retry with backoff: the rate-limit fix above should make
+          # this unnecessary in practice, but a release build failing on a
+          # single transient GitHub hiccup (this step gates all three
+          # platform builds) is expensive enough to retry a few times for.
           request = urllib.request.Request(
               "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest",
-              headers={"User-Agent": "pdf-translator-build", "Accept": "application/vnd.github+json"},
+              headers=headers,
           )
-          with urllib.request.urlopen(request, timeout=30) as response:
-              release = json.load(response)
+          for attempt in range(3):
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      release = json.load(response)
+                  break
+              except (urllib.error.URLError, TimeoutError) as exc:
+                  if attempt == 2:
+                      hint = (
+                          " (still rate-limited even with GITHUB_TOKEN - unusual, check "
+                          "https://api.github.com/rate_limit)"
+                          if isinstance(exc, urllib.error.HTTPError) and exc.code == 403
+                          else ""
+                      )
+                      sys.exit(f"Could not reach GitHub after 3 attempts: {exc}{hint}")
+                  time.sleep(2 ** attempt)
 
           assets = release.get("assets", [])
           # Prefer "install_only_stripped" (debug symbols stripped, notably
