@@ -395,6 +395,99 @@ def main() -> None:
         raise
 
 
+def _write_meipass_tcl_tk_report(f) -> None:
+    """Writes what tcl86t.dll/tk86t.dll actually ended up inside THIS
+    exe's own onefile bundle - not what was available at build time,
+    which .github/workflows/build-bootstrap.yml's own diagnostic step
+    already checked and found to be a single, correctly-versioned
+    (8.6.15) DLL with no alternative candidate anywhere on that runner.
+    Since the crash still happens with a real user's build despite that,
+    the only way left to find the actual discrepancy is to look inside
+    the exe that is actually crashing, on the machine where it actually
+    crashes - this runs in the very same frozen process that just failed
+    to start Tk, using sys._MEIPASS (PyInstaller's own extraction
+    directory for this run, already populated by the time this code
+    runs) rather than anything guessed from outside.
+    """
+    import os as _os
+    import sys
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if not meipass:
+        f.write("_MEIPASS: not set (not running as a frozen onefile build)\n")
+        return
+
+    f.write(f"_MEIPASS={meipass}\n")
+    try:
+        entries = sorted(_os.listdir(meipass))
+        f.write(f"_MEIPASS top-level entries ({len(entries)}): {', '.join(entries)}\n")
+    except OSError as exc:
+        f.write(f"_MEIPASS listdir failed: {exc}\n")
+
+    if sys.platform != "win32":
+        return
+
+    for dll_name in ("tcl86t.dll", "tk86t.dll"):
+        dll_path = _os.path.join(meipass, dll_name)
+        if not _os.path.isfile(dll_path):
+            f.write(f"{dll_name}: NOT FOUND at {dll_path}\n")
+            continue
+        size = _os.path.getsize(dll_path)
+        version = _win_file_version(dll_path)
+        f.write(f"{dll_name}: path={dll_path} size={size} FileVersion={version}\n")
+
+
+def _win_file_version(path: str) -> str:
+    """Reads a Windows PE file's FixedFileInfo FileVersion via the plain
+    Win32 version-info API (GetFileVersionInfoW/VerQueryValueW) - no
+    external dependency, works the same whether or not Tk is usable.
+    Returns a "MAJOR.MINOR.BUILD.REVISION" string, or a short
+    "<error: ...>" placeholder if anything about the lookup fails (never
+    raises - this is diagnostic best-effort, not allowed to itself crash
+    the crash handler).
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    try:
+        version_dll = ctypes.windll.version
+        size = version_dll.GetFileVersionInfoSizeW(path, None)
+        if not size:
+            return "<error: GetFileVersionInfoSizeW returned 0>"
+        buf = ctypes.create_string_buffer(size)
+        if not version_dll.GetFileVersionInfoW(path, 0, size, buf):
+            return "<error: GetFileVersionInfoW failed>"
+
+        class _VS_FIXEDFILEINFO(ctypes.Structure):
+            _fields_ = [
+                ("dwSignature", wintypes.DWORD),
+                ("dwStrucVersion", wintypes.DWORD),
+                ("dwFileVersionMS", wintypes.DWORD),
+                ("dwFileVersionLS", wintypes.DWORD),
+                ("dwProductVersionMS", wintypes.DWORD),
+                ("dwProductVersionLS", wintypes.DWORD),
+                ("dwFileFlagsMask", wintypes.DWORD),
+                ("dwFileFlags", wintypes.DWORD),
+                ("dwFileOS", wintypes.DWORD),
+                ("dwFileType", wintypes.DWORD),
+                ("dwFileSubtype", wintypes.DWORD),
+                ("dwFileDateMS", wintypes.DWORD),
+                ("dwFileDateLS", wintypes.DWORD),
+            ]
+
+        value_ptr = ctypes.c_void_p()
+        value_len = ctypes.c_uint()
+        if not version_dll.VerQueryValueW(
+            buf, "\\", ctypes.byref(value_ptr), ctypes.byref(value_len)
+        ):
+            return "<error: VerQueryValueW failed>"
+        info = ctypes.cast(value_ptr, ctypes.POINTER(_VS_FIXEDFILEINFO)).contents
+        ms, ls = info.dwFileVersionMS, info.dwFileVersionLS
+        return f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}.{ls & 0xFFFF}"
+    except Exception as exc:  # noqa: BLE001 - diagnostic best-effort only
+        return f"<error: {exc!r}>"
+
+
 def _report_startup_crash() -> None:
     """Writes the current exception to a log file and shows it in a way
     the user can actually copy - as opposed to PyInstaller's own
@@ -434,6 +527,7 @@ def _report_startup_crash() -> None:
             f.write(f"Platform: {platform.platform()}\n")
             for var in ("TCL_LIBRARY", "TK_LIBRARY"):
                 f.write(f"{var}={_os.environ.get(var, '<not set>')}\n")
+            _write_meipass_tcl_tk_report(f)
             f.write(tb)
             f.write("\n")
         log_written = True
