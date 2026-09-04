@@ -94,6 +94,28 @@ jobs:
       - name: Import smoke check
         run: python -c "import bootstrap.app"
 
+      # 04.09.2026 - diagnostic added after the Tcl/Tk version-conflict
+      # fixes below (TCL_LIBRARY/TK_LIBRARY pin, Strawberry Perl PATH
+      # filter) did NOT stop the crash from recurring on a real Windows
+      # VM, even though this same job's own smoke test (further down)
+      # kept passing. Both of those earlier fixes assumed the mismatch
+      # was introduced by PyInstaller picking up files from two different
+      # sources while bundling - but that was never actually verified,
+      # just inferred from the error message shape. This step checks the
+      # much more basic possibility first: is actions/setup-python's OWN,
+      # completely unfrozen Python on this runner already internally
+      # inconsistent (its tcl86t.dll reporting a different patch level
+      # than its own tcl8.6/init.tcl expects) before PyInstaller ever
+      # touches it? If this step fails, the bug is upstream of anything
+      # in this workflow (wrong fix: chase PyInstaller bundling further;
+      # right fix: pin a different Python 3.13.x patch version above). If
+      # it passes, the inconsistency is proven to be introduced during
+      # the freeze, which points back at PyInstaller's hook-_tkinter.py.
+      - name: Verify the just-installed Python's own Tcl/Tk is self-consistent (Windows only)
+        if: runner.os == 'Windows'
+        run: |
+          python -c "import tkinter; r = tkinter.Tk(); v = r.tk.call('info', 'patchlevel'); print(f'tkinter.Tk() OK - unfrozen Tcl patchlevel: {v}'); r.destroy()"
+
       # 04.09.2026 (first real Windows test run, project doc
       # "windows-testlauf-04-09-2026.md"): a frozen bootstrapper has no
       # real Python interpreter of its own (sys.executable is the .exe
