@@ -204,28 +204,31 @@ jobs:
       # package "Tcl": have 8.6.12, need exactly 8.6.15" the moment
       # bootstrap/app.py's BootstrapApp(tk.Tk) opened its first window -
       # see project doc "windows-testlauf-04-09-2026.md" for the first
-      # (unrelated) Windows bug found the same day). Root cause: when
-      # TCL_LIBRARY/TK_LIBRARY are not already set, PyInstaller's tkinter
-      # hook auto-discovers which Tcl/Tk script-library directories to
-      # bundle - and on windows-latest that discovery picked up
-      # Strawberry Perl's OWN bundled Tcl 8.6.12 (Strawberry Perl ships
-      # preinstalled on GitHub's windows-latest image for its Perl/Tk
-      # support and puts its Tcl on PATH) instead of the Tcl 8.6.15 that
-      # actually belongs to the actions/setup-python 3.13 interpreter
-      # whose _tkinter.pyd/tcl86t.dll gets bundled a few lines below - the
-      # frozen exe ends up with a Tcl DLL built for 8.6.15 sitting next to
-      # init.tcl script files that identify themselves as 8.6.12
-      # ("package require -exact Tcl 8.6.15" then fails against a library
-      # that can only "package provide Tcl 8.6.12"). Explicitly pointing
-      # TCL_LIBRARY/TK_LIBRARY at the just-installed Python's OWN tcl/
-      # tcl8.6 and tcl/tk8.6 directories before PyInstaller runs removes
-      # the ambiguity its hook was resolving incorrectly - PyInstaller's
-      # hook-_tkinter.py reads these two env vars first and only falls
-      # back to auto-discovery when they are unset. Windows-only: Linux
-      # gets its Tcl/Tk from the single apt-installed python3-tk package
-      # above (nothing else on that runner to conflict with), and macOS
-      # runners have not shown this problem with actions/setup-python's
-      # own bundled Tcl/Tk.
+      # (unrelated) Windows bug found the same day). Root cause:
+      # windows-latest ships Strawberry Perl preinstalled (for its own
+      # Perl/Tk support), WITH ITS OWN Tcl 8.6.12 on PATH - and
+      # PyInstaller resolves what to bundle for tkinter through TWO
+      # independent, easily-mismatched paths: (1) the Tcl/Tk SCRIPT
+      # library (init.tcl etc.) via its hook-_tkinter.py, which reads the
+      # TCL_LIBRARY/TK_LIBRARY env vars first and only auto-discovers when
+      # they are unset; (2) the Tcl/Tk DLLs (tcl86t.dll/tk86t.dll) that
+      # _tkinter.pyd depends on, resolved via a Windows DLL search that
+      # walks PATH - so even with TCL_LIBRARY/TK_LIBRARY correctly pinned
+      # to Python's own 8.6.15 SCRIPTS (first attempted fix, insufficient
+      # on its own - same error persisted on retest), Strawberry's
+      # tcl86t.dll could still win the DLL search if its directory sorts
+      # earlier on PATH, bundling an 8.6.12 DLL next to 8.6.15 scripts (or
+      # vice versa - either mismatch direction produces the exact same
+      # "version conflict" error). Fixing this at the source instead of
+      # chasing each individual lookup mechanism: strip every
+      # Strawberry-Perl directory out of PATH for the rest of this job,
+      # in addition to keeping the TCL_LIBRARY/TK_LIBRARY pin (belt and
+      # suspenders - the pin still matters for hook-_tkinter.py's own
+      # lookup, PATH-stripping additionally matters for the DLL search).
+      # Windows-only: Linux gets its Tcl/Tk from the single apt-installed
+      # python3-tk package above (nothing else on that runner to
+      # conflict with), and macOS runners have not shown this problem
+      # with actions/setup-python's own bundled Tcl/Tk.
       - name: Pin Tcl/Tk to the just-installed Python (Windows only)
         if: runner.os == 'Windows'
         shell: bash
@@ -251,9 +254,29 @@ jobs:
           print(f"TCL_LIBRARY={tcl_library}")
           print(f"TK_LIBRARY={tk_library}")
 
+          # PATH as inherited here is already the native Windows
+          # (semicolon-separated) form - bash.exe reconstructs a native
+          # PATH for any child process it spawns (like this python.exe),
+          # its own POSIX-style $PATH is internal to bash only. Filtering
+          # here and writing the result back to GITHUB_ENV as PATH
+          # overrides the value every later step in this job inherits,
+          # regardless of which shell that step uses.
+          original_path = os.environ.get("PATH", "")
+          segments = original_path.split(";")
+          kept = [s for s in segments if "strawberry" not in s.lower()]
+          removed = [s for s in segments if "strawberry" in s.lower()]
+          if removed:
+              print("Removing Strawberry Perl from PATH for this job:")
+              for s in removed:
+                  print(f"  - {s}")
+          else:
+              print("No Strawberry Perl entries found on PATH (nothing to remove).")
+          filtered_path = ";".join(kept)
+
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
               f.write(f"TCL_LIBRARY={tcl_library}\n")
               f.write(f"TK_LIBRARY={tk_library}\n")
+              f.write(f"PATH={filtered_path}\n")
           PY
 
       - name: Build bootstrapper executable
