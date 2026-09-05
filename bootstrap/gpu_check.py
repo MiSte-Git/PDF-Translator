@@ -39,6 +39,8 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+
+from bootstrap.subprocess_utils import no_window_kwargs
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -100,6 +102,7 @@ def detect_driver_cuda_version() -> str | None:
             text=True,
             timeout=_NVIDIA_SMI_TIMEOUT_SECONDS,
             check=True,
+            **no_window_kwargs(),
         )
         parsed = parse_cuda_version(result.stdout)
         return f"{parsed[0]}.{parsed[1]}" if parsed else None
@@ -167,6 +170,7 @@ def detect_nvidia_gpu() -> GpuInfo | None:
             text=True,
             timeout=_NVIDIA_SMI_TIMEOUT_SECONDS,
             check=True,
+            **no_window_kwargs(),
         )
 
         first_line = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""

@@ -43,6 +43,8 @@ import os
 import platform
 import stat
 import subprocess
+
+from bootstrap.subprocess_utils import no_window_kwargs
 import sys
 from pathlib import Path
 
@@ -183,6 +185,7 @@ def create_windows_shortcut(
             text=True,
             timeout=_WINDOWS_SHORTCUT_TIMEOUT_SECONDS,
             check=True,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise DesktopIntegrationError(f"Could not create the Start Menu shortcut: {exc}") from exc
@@ -305,6 +308,7 @@ def _can_import_app_deps(python: Path) -> bool:
             [str(python), "-c", "import PySide6"],
             capture_output=True,
             timeout=30,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return False

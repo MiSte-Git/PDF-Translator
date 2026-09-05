@@ -56,6 +56,27 @@ class BootstrapApp(tk.Tk):
 
         self._show_welcome()
 
+    def report_callback_exception(self, exc, val, tb) -> None:
+        """Overrides tkinter's own hook for exceptions raised inside a
+        widget callback (a button command, an .after() poll, ...) - by
+        default tkinter just prints these to stderr and carries on, which
+        in a --windowed build (no console, stderr goes nowhere) means the
+        callback silently does nothing and whatever screen it was
+        supposed to finish building is left half-drawn, with no error
+        visible anywhere. 04.09.2026: exactly this happened on a real
+        install - the credentials screen's checkboxes+buttons never
+        appeared after an exception partway through _show_credentials'
+        build(), leaving only its title and intro text with no way
+        forward except closing the window. Routing these through the
+        same _report_startup_crash() used for a startup failure at least
+        gets a real traceback into bootstrap-crash.log and in front of
+        the user instead of vanishing.
+        """
+        import traceback
+
+        formatted = "".join(traceback.format_exception(exc, val, tb))
+        _report_startup_crash(formatted)
+
     # --- frame helpers -----------------------------------------------------
 
     def _set_frame(self, build: Callable[[ttk.Frame], None]) -> None:
@@ -488,15 +509,20 @@ def _win_file_version(path: str) -> str:
         return f"<error: {exc!r}>"
 
 
-def _report_startup_crash() -> None:
-    """Writes the current exception to a log file and shows it in a way
-    the user can actually copy - as opposed to PyInstaller's own
-    --windowed crash dialog ("Unhandled exception in script"), which a
-    user hit repeatedly during Windows testing (04.09.2026, Tcl/Tk
-    version-mismatch bug - see .github/workflows/build-bootstrap.yml's
-    Windows smoke-test step for the CI-side half of that story) and
-    could only get to us as screenshots, since that particular dialog's
-    text cannot be selected or saved.
+def _report_startup_crash(formatted_traceback: str | None = None) -> None:
+    """Writes an exception to a log file and shows it in a way the user
+    can actually copy - as opposed to PyInstaller's own --windowed crash
+    dialog ("Unhandled exception in script"), which a user hit repeatedly
+    during Windows testing (04.09.2026, Tcl/Tk version-mismatch bug - see
+    .github/workflows/build-bootstrap.yml's Windows smoke-test step for
+    the CI-side half of that story) and could only get to us as
+    screenshots, since that particular dialog's text cannot be selected
+    or saved. Called from two places: main()'s except block (no argument,
+    formats sys.exc_info() itself) for a crash during startup, and
+    BootstrapApp.report_callback_exception (formatted_traceback given
+    explicitly, since tkinter hands that hook exc/val/tb directly rather
+    than leaving them in sys.exc_info()) for a crash inside a widget
+    callback partway through the wizard.
 
     Deliberately does not touch tkinter: the exception that lands here
     can be tkinter/Tcl itself failing during BootstrapApp.__init__'s
@@ -515,7 +541,7 @@ def _report_startup_crash() -> None:
     import tempfile
     import traceback
 
-    tb = traceback.format_exc()
+    tb = formatted_traceback if formatted_traceback is not None else traceback.format_exc()
     log_dir = _os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
     log_path = _os.path.join(log_dir, "PDF-Translator", "bootstrap-crash.log")
     log_written = False

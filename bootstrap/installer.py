@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from bootstrap import bundled_python, desktop_integration, gpu_check, paths, release_source
+from bootstrap.subprocess_utils import no_window_kwargs
 
 _PIP_INSTALL_TIMEOUT_SECONDS = 60 * 30  # large ML wheels (torch, etc.) are slow to fetch
 _VENV_CREATE_TIMEOUT_SECONDS = 60 * 5  # venv + ensurepip is normally seconds, not minutes
@@ -127,6 +128,7 @@ def create_venv(venv_dir: Path, base_python: Path | None = None) -> None:
             text=True,
             timeout=_VENV_CREATE_TIMEOUT_SECONDS,
             check=True,
+            **no_window_kwargs(),
         )
     except subprocess.CalledProcessError as exc:
         raise InstallError(
@@ -148,6 +150,7 @@ def pip_install(venv_python: Path, requirements_file: Path, no_deps: bool = Fals
             text=True,
             timeout=_PIP_INSTALL_TIMEOUT_SECONDS,
             check=True,
+            **no_window_kwargs(),
         )
     except subprocess.CalledProcessError as exc:
         raise InstallError(
@@ -183,6 +186,7 @@ def install_torch(venv_python: Path, cuda_version: str | None) -> None:
             text=True,
             timeout=_PIP_INSTALL_TIMEOUT_SECONDS,
             check=True,
+            **no_window_kwargs(),
         )
     except subprocess.CalledProcessError as exc:
         raise InstallError(f"Installing torch failed: {exc.stderr.strip() if exc.stderr else exc}") from exc
