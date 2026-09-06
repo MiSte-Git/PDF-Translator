@@ -97,9 +97,17 @@ def _base_python() -> Path:
     bootstrap/bundled_python.py's module docstring for the full story. Use
     the bundled CPython there. Running from source (dev/tests),
     sys.executable already IS a real interpreter, same as before this fix.
+
+    06.09.2026: switched from bundled_python.bundled_python_executable()
+    (inside sys._MEIPASS, gone as soon as this process exits) to
+    bundled_python.ensure_stable_python_runtime() (copies it next to the
+    venv first) - see that function's docstring for the real-install
+    failure this caused: the venv's pyvenv.cfg baked in the transient
+    path, so the installed app could never start again once the
+    bootstrapper itself closed.
     """
     if paths.is_frozen():
-        python = bundled_python.bundled_python_executable()
+        python = bundled_python.ensure_stable_python_runtime(paths.install_root())
         if python is None:
             raise InstallError(
                 "This build is missing its bundled Python runtime "

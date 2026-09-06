@@ -124,16 +124,30 @@ def test_base_python_uses_sys_executable_when_not_frozen(monkeypatch):
     assert installer._base_python() == Path(sys.executable)
 
 
-def test_base_python_uses_bundled_python_when_frozen(monkeypatch):
-    bundled = Path("/opt/bundled/python")
+def test_base_python_uses_bundled_python_when_frozen(monkeypatch, tmp_path):
+    # 06.09.2026: _base_python() now goes through
+    # ensure_stable_python_runtime() (copies the bundled runtime next to
+    # the venv) rather than bundled_python_executable() (points inside
+    # sys._MEIPASS, gone once the bootstrapper exits) - see
+    # bootstrap/bundled_python.py::ensure_stable_python_runtime for why.
+    stable = tmp_path / "stable-python-runtime" / "python.exe"
+    captured = {}
     monkeypatch.setattr(installer.paths, "is_frozen", lambda: True)
-    monkeypatch.setattr(installer.bundled_python, "bundled_python_executable", lambda: bundled)
-    assert installer._base_python() == bundled
+    monkeypatch.setattr(installer.paths, "install_root", lambda: tmp_path / "install-root")
+
+    def fake_ensure(install_root):
+        captured["install_root"] = install_root
+        return stable
+
+    monkeypatch.setattr(installer.bundled_python, "ensure_stable_python_runtime", fake_ensure)
+    assert installer._base_python() == stable
+    assert captured["install_root"] == tmp_path / "install-root"
 
 
-def test_base_python_raises_when_frozen_and_bundle_missing(monkeypatch):
+def test_base_python_raises_when_frozen_and_bundle_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(installer.paths, "is_frozen", lambda: True)
-    monkeypatch.setattr(installer.bundled_python, "bundled_python_executable", lambda: None)
+    monkeypatch.setattr(installer.paths, "install_root", lambda: tmp_path)
+    monkeypatch.setattr(installer.bundled_python, "ensure_stable_python_runtime", lambda install_root: None)
     with pytest.raises(InstallError, match="python_runtime"):
         installer._base_python()
 

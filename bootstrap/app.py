@@ -315,11 +315,27 @@ class BootstrapApp(tk.Tk):
             )
 
             self._selected_providers = {}
+
+            # 06.09.2026: "Weiter" used to be always enabled, so clicking
+            # it with nothing checked silently behaved exactly like "Später
+            # in den Einstellungen" - not wrong, just confusing (a real
+            # user asked whether that was intentional). Disabling it until
+            # at least one provider is checked makes the two buttons'
+            # difference visible instead of only discoverable by clicking.
+            def update_continue_state() -> None:
+                any_selected = any(v.get() for v in self._selected_providers.values())
+                continue_button.state(["!disabled"] if any_selected else ["disabled"])
+
             for provider in self.controller.list_providers():
                 var = tk.BooleanVar(value=False)
                 self._selected_providers[provider] = var
                 label_key = f"bootstrap.credentials_provider_{provider}"
-                ttk.Checkbutton(frame, text=self.controller.text(label_key), variable=var).pack(anchor="w")
+                ttk.Checkbutton(
+                    frame,
+                    text=self.controller.text(label_key),
+                    variable=var,
+                    command=update_continue_state,
+                ).pack(anchor="w")
 
             def on_continue() -> None:
                 self._provider_queue = [p for p, v in self._selected_providers.items() if v.get()]
@@ -330,9 +346,11 @@ class BootstrapApp(tk.Tk):
             ttk.Button(row, text=self.controller.text("bootstrap.credentials_skip_all_button"), command=self._show_finish).pack(
                 side="left"
             )
-            ttk.Button(row, text=self.controller.text("bootstrap.credentials_continue_button"), command=on_continue).pack(
-                side="right"
+            continue_button = ttk.Button(
+                row, text=self.controller.text("bootstrap.credentials_continue_button"), command=on_continue
             )
+            continue_button.pack(side="right")
+            update_continue_state()
 
         self._set_frame(build)
 

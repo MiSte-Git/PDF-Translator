@@ -33,6 +33,7 @@ within budget.
 from __future__ import annotations
 
 import platform
+import shutil
 import sys
 from pathlib import Path
 
@@ -51,20 +52,13 @@ def bundled_python_dir() -> Path | None:
     return Path(meipass) / _BUNDLE_DIR_NAME
 
 
-def bundled_python_executable() -> Path | None:
-    """Path to the bundled python executable, or None if this is not a
-    frozen build or the bundle is missing/incomplete (e.g. a dev build of
-    the bootstrapper .exe that skipped the "Download bundled Python
-    runtime" CI step - see bootstrap/installer.py::_base_python(), which
-    turns None into a clear InstallError rather than a confusing crash).
-
-    python-build-standalone's "install_only" archives use the platform's
-    normal install layout: python.exe directly under the install root on
-    Windows, bin/python3.<minor> (usually also symlinked as bin/python3)
-    on Linux/macOS - see docs/distributions.rst in that project.
-    """
-    root = bundled_python_dir()
-    if root is None or not root.is_dir():
+def _python_executable_in(root: Path) -> Path | None:
+    """python.exe / bin/python3(.<minor>) under a python-build-standalone
+    "install_only" archive's root - shared by bundled_python_executable()
+    (looking inside the transient sys._MEIPASS copy) and
+    ensure_stable_python_runtime() (looking inside the persistent copy),
+    since both are the exact same on-disk layout."""
+    if not root.is_dir():
         return None
 
     if platform.system() == "Windows":
@@ -82,3 +76,61 @@ def bundled_python_executable() -> Path | None:
     # convenience symlink.
     versioned = sorted(bin_dir.glob("python3.*"))
     return versioned[0] if versioned else None
+
+
+def bundled_python_executable() -> Path | None:
+    """Path to the bundled python executable *inside sys._MEIPASS*, or
+    None if this is not a frozen build or the bundle is missing/incomplete
+    (e.g. a dev build of the bootstrapper .exe that skipped the "Download
+    bundled Python runtime" CI step).
+
+    06.09.2026: do not use this to create the Stage-2 venv directly - see
+    ensure_stable_python_runtime()'s docstring for why a real end-to-end
+    Windows test showed the app could never start when this was used for
+    that. It is still correct for anything that only needs the bundled
+    interpreter for the lifetime of the current bootstrapper process
+    (there is nothing like that today, but the distinction matters enough
+    to keep both functions and not quietly merge them).
+    """
+    root = bundled_python_dir()
+    if root is None:
+        return None
+    return _python_executable_in(root)
+
+
+def ensure_stable_python_runtime(install_root: Path) -> Path | None:
+    """Copies the bundled CPython runtime out of sys._MEIPASS into
+    install_root/python_runtime - a location that outlives this process -
+    and returns *that* copy's python executable. Use this (not
+    bundled_python_executable()) for anything that must still work after
+    the bootstrapper has exited, i.e. building the Stage-2 venv.
+
+    06.09.2026 (first real end-to-end Windows test - install finished,
+    but the installed app then refused to start, and so did the bundled
+    "Jetzt starten" button): bootstrap/installer.py::create_venv() used to
+    run `<bundled_python_executable()> -m venv <venv_dir>` directly. `-m
+    venv` bakes the exact interpreter path it was invoked with into the
+    new venv's own pyvenv.cfg ("home = ..."), so the venv permanently
+    pointed at sys._MEIPASS/python_runtime - PyInstaller's own onefile
+    extraction directory for that one run, which PyInstaller deletes the
+    moment the bootstrapper process exits. Every later attempt to run the
+    venv's python(w).exe - a fresh "Jetzt starten" click, a Start Menu
+    shortcut, the app trying to relaunch itself - hit that venv's
+    python(w).exe launcher stub, which failed with "Python venv launcher
+    is sorry to say ... did not find executable at ...\_MEIxxxxx\
+    python_runtime\pythonw.exe": the path was real for the few seconds
+    the installer ran, and gone forever after.
+
+    Always re-copies (removing any previous copy first) rather than
+    reusing one that happens to already exist, so an update/reinstall
+    that ships a newer bundled runtime can never end up mixing an old
+    runtime copy with a freshly rebuilt venv.
+    """
+    source_dir = bundled_python_dir()
+    if source_dir is None or not source_dir.is_dir():
+        return None
+    target_dir = install_root / _BUNDLE_DIR_NAME
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    shutil.copytree(source_dir, target_dir)
+    return _python_executable_in(target_dir)
