@@ -438,7 +438,85 @@ class BootstrapApp(tk.Tk):
         self._set_frame(build)
 
 
+def _is_running_elevated() -> bool:
+    """True if this process itself has Windows Administrator privileges.
+    Always False elsewhere - elevation is a Windows/UAC-specific concept,
+    there is nothing equivalent to guard against on macOS/Linux here."""
+    import sys
+
+    if sys.platform != "win32":
+        return False
+    import ctypes
+
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        # Fail open (assume not elevated): an unrelated ctypes/API problem
+        # here should not block a normal, non-elevated install - it just
+        # means this one safeguard silently does not run.
+        return False
+
+
+def _warn_and_exit_if_elevated() -> bool:
+    """Refuses to start if this process is running as Administrator, with
+    a clear explanation instead of the confusing failure this causes
+    hours or days later. Returns True if the caller should stop (a
+    message was already shown and nothing else should run).
+
+    06.09.2026 (real Windows install): a user's Start Menu shortcut and
+    taskbar pin both failed completely silently - no window, no error, no
+    bootstrap-crash.log or launch.log entry, not even a process appearing
+    in Task Manager - while "Run as administrator" on the exact same
+    shortcut worked. icacls on the venv's pythonw.exe showed only NT
+    AUTHORITY\SYSTEM and BUILTIN\Administrators had any access to it at
+    all - not the user's own account. bootstrap/paths.py's whole design
+    is a per-user, admin-free install living under %LOCALAPPDATA% (see
+    that module's docstring) - it already belongs to the current user
+    without elevation. Running the *installer itself* "Als Administrator
+    ausfuehren" defeats that: everything it then creates (the venv, the
+    copied Python runtime, the extracted app, the Start Menu shortcut)
+    ends up effectively owned by the Administrators group, so every
+    later attempt to use any of it *without* elevation is denied by
+    Windows before the process can even start - which is exactly why
+    nothing could be observed anywhere, in any log, from a normal-
+    privilege process afterwards.
+
+    There is no reliable way to detect or repair this after the fact
+    (a normal-privilege process cannot even read why it failed), so the
+    only fix is to never let it happen: check at startup, before doing
+    any work, and refuse with a clear explanation if elevated.
+    """
+    import sys
+
+    if not _is_running_elevated():
+        return False
+
+    message = (
+        "PDF-Translator wurde als Administrator gestartet.\n\n"
+        "Dieses Programm braucht keine Administratorrechte und sollte "
+        "nicht damit ausgefuehrt werden: Dateien, die der Installer dann "
+        "anlegt (venv, heruntergeladene App, Verknuepfung), wuerden "
+        "danach nur noch fuer Administratoren nutzbar sein - beim "
+        "normalen Start ohne Administratorrechte wuerde die App gar "
+        "nicht mehr starten.\n\n"
+        'Bitte dieses Fenster schliessen und den Installer per normalem '
+        'Doppelklick (ohne "Als Administrator ausfuehren") erneut '
+        "starten."
+    )
+    title = "PDF-Translator Setup"
+    if sys.platform == "win32":
+        import ctypes
+
+        # MB_OK | MB_ICONWARNING.
+        ctypes.windll.user32.MessageBoxW(0, message, title, 0x30)
+    else:
+        print(f"{title}\n\n{message}", file=sys.stderr)
+    return True
+
+
 def main() -> None:
+    if _warn_and_exit_if_elevated():
+        return
     try:
         app = BootstrapApp()
         app.mainloop()
