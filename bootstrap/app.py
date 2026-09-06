@@ -27,12 +27,14 @@ from typing import Callable
 
 from bootstrap.controller import BootstrapController
 from bootstrap.installer import InstallMode, InstallProgress, InstallStep
+from ui.i18n_data import LOCALES
 
-_WINDOW_SIZE = "560x440"
-# 06.09.2026: matches _WINDOW_SIZE's usable width (560 minus the
-# container's own padding=16 on each side, with a little breathing
-# room) - was a bare "560" repeated at every call site.
-_TEXT_WRAP = 480
+_WINDOW_SIZE = "500x380"
+# 07.09.2026: shrunk again from 560x440 ("noch kleiner und moderner") -
+# matches _WINDOW_SIZE's usable width (500 minus the container's own
+# padding=16 on each side, with a little breathing room). Was a bare
+# "560" repeated at every call site before 06.09.2026.
+_TEXT_WRAP = 440
 
 # bootstrap.install_step_* i18n keys, keyed by InstallStep - see
 # ui/i18n_data.py's "Geführter Bootstrapper" block.
@@ -55,6 +57,18 @@ class BootstrapApp(tk.Tk):
         # with extra empty space or a squeezed wraplength.
         self.resizable(False, False)
         self.title(self.controller.text("bootstrap.window_title"))
+
+        # 07.09.2026: default ttk button/checkbox padding is quite tight
+        # (a few pixels), which reads as cramped rather than "modern" -
+        # especially now that the window itself is smaller. This only
+        # widens click targets and breathing room; it deliberately does
+        # NOT switch ttk themes (e.g. to "clam"), which would fight the
+        # OS's own native widget rendering on Windows/macOS rather than
+        # complement it.
+        style = ttk.Style(self)
+        style.configure("TButton", padding=(14, 8))
+        style.configure("TCheckbutton", padding=(0, 5))
+        style.configure("TRadiobutton", padding=(0, 5))
 
         self._container = ttk.Frame(self, padding=16)
         self._container.pack(fill="both", expand=True)
@@ -121,13 +135,34 @@ class BootstrapApp(tk.Tk):
             # off to the left instead of centered under the welcome text.
             lang_row.pack(anchor="center")
             ttk.Label(lang_row, text=self.controller.text("bootstrap.language_label") + ":").pack(side="left")
-            lang_var = tk.StringVar(value=self.controller.language)
+
+            # 06.09.2026 ("alle Sprachen sollten beim Installer verfuegbar
+            # sein"): this used to hardcode values=["de", "en"], left over
+            # from before ui/i18n_data.py grew to 9 locales. LOCALES (the
+            # same Qt-free source ui/app.py's own language switcher and
+            # bootstrap/controller.py's CATALOGUES import already use) is
+            # the single place that list is defined - reading it here
+            # means a tenth language added there needs no change in this
+            # file. The combobox shows each language's own native_name
+            # (Deutsch, English, Français, ...) rather than raw codes, so
+            # a name_to_code lookup translates the selection back.
+            name_to_code = {loc.native_name: loc.code for loc in LOCALES}
+            code_to_name = {loc.code: loc.native_name for loc in LOCALES}
+            lang_var = tk.StringVar(value=code_to_name.get(self.controller.language, self.controller.language))
 
             def on_language_change(*_args: object) -> None:
-                self.controller.set_language(lang_var.get())
+                code = name_to_code.get(lang_var.get())
+                if code is not None:
+                    self.controller.set_language(code)
                 self._show_welcome()  # rebuild so every label re-renders in the new language
 
-            combo = ttk.Combobox(lang_row, textvariable=lang_var, values=["de", "en"], state="readonly", width=6)
+            combo = ttk.Combobox(
+                lang_row,
+                textvariable=lang_var,
+                values=[loc.native_name for loc in LOCALES],
+                state="readonly",
+                width=13,
+            )
             combo.pack(side="left", padx=(8, 0))
             combo.bind("<<ComboboxSelected>>", on_language_change)
 
