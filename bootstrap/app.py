@@ -28,7 +28,11 @@ from typing import Callable
 from bootstrap.controller import BootstrapController
 from bootstrap.installer import InstallMode, InstallProgress, InstallStep
 
-_WINDOW_SIZE = "640x480"
+_WINDOW_SIZE = "560x440"
+# 06.09.2026: matches _WINDOW_SIZE's usable width (560 minus the
+# container's own padding=16 on each side, with a little breathing
+# room) - was a bare "560" repeated at every call site.
+_TEXT_WRAP = 480
 
 # bootstrap.install_step_* i18n keys, keyed by InstallStep - see
 # ui/i18n_data.py's "Geführter Bootstrapper" block.
@@ -45,6 +49,11 @@ class BootstrapApp(tk.Tk):
         super().__init__()
         self.controller = controller if controller is not None else BootstrapController()
         self.geometry(_WINDOW_SIZE)
+        # 06.09.2026 ("können wir jetzt kleiner und hübscher machen"): a
+        # fixed-size wizard window is the normal convention for an
+        # installer - not resizable also means no layout ever has to cope
+        # with extra empty space or a squeezed wraplength.
+        self.resizable(False, False)
         self.title(self.controller.text("bootstrap.window_title"))
 
         self._container = ttk.Frame(self, padding=16)
@@ -101,12 +110,16 @@ class BootstrapApp(tk.Tk):
     def _show_welcome(self) -> None:
         def build(frame: ttk.Frame) -> None:
             ttk.Label(frame, text=self.controller.text("bootstrap.welcome_title"), font=("", 16, "bold")).pack(anchor="w")
-            ttk.Label(frame, text=self.controller.text("bootstrap.welcome_text"), wraplength=560, justify="left").pack(
+            ttk.Label(frame, text=self.controller.text("bootstrap.welcome_text"), wraplength=_TEXT_WRAP, justify="left").pack(
                 anchor="w", pady=(8, 16)
             )
 
             lang_row = ttk.Frame(frame)
-            lang_row.pack(anchor="w")
+            # 06.09.2026 ("Sprachenleiste sollte mittig sein"): pack()'s
+            # own default is anchor="center" - this was previously
+            # overridden to "w" (left-aligned), which is what made it look
+            # off to the left instead of centered under the welcome text.
+            lang_row.pack(anchor="center")
             ttk.Label(lang_row, text=self.controller.text("bootstrap.language_label") + ":").pack(side="left")
             lang_var = tk.StringVar(value=self.controller.language)
 
@@ -127,7 +140,7 @@ class BootstrapApp(tk.Tk):
     def _show_mode(self) -> None:
         def build(frame: ttk.Frame) -> None:
             ttk.Label(frame, text=self.controller.text("bootstrap.mode_title"), font=("", 16, "bold")).pack(anchor="w")
-            ttk.Label(frame, text=self.controller.text("bootstrap.mode_intro"), wraplength=560, justify="left").pack(
+            ttk.Label(frame, text=self.controller.text("bootstrap.mode_intro"), wraplength=_TEXT_WRAP, justify="left").pack(
                 anchor="w", pady=(8, 16)
             )
 
@@ -147,7 +160,7 @@ class BootstrapApp(tk.Tk):
             ttk.Radiobutton(
                 online_frame, text=self.controller.text("bootstrap.mode_online_label"), variable=mode_var, value=InstallMode.ONLINE.value
             ).pack(anchor="w")
-            ttk.Label(online_frame, text=self.controller.text("bootstrap.mode_online_desc"), wraplength=560, justify="left").pack(
+            ttk.Label(online_frame, text=self.controller.text("bootstrap.mode_online_desc"), wraplength=_TEXT_WRAP, justify="left").pack(
                 anchor="w", padx=(24, 0)
             )
 
@@ -161,7 +174,7 @@ class BootstrapApp(tk.Tk):
                 state="disabled" if is_mac else "normal",
             ).pack(anchor="w")
             local_desc_key = "bootstrap.gpu_mac_unsupported" if is_mac else "bootstrap.mode_local_desc"
-            ttk.Label(local_frame, text=self.controller.text(local_desc_key), wraplength=560, justify="left").pack(
+            ttk.Label(local_frame, text=self.controller.text(local_desc_key), wraplength=_TEXT_WRAP, justify="left").pack(
                 anchor="w", padx=(24, 0)
             )
 
@@ -182,7 +195,7 @@ class BootstrapApp(tk.Tk):
         def build(frame: ttk.Frame) -> None:
             ttk.Label(frame, text=self.controller.text("bootstrap.mode_local_label"), font=("", 16, "bold")).pack(anchor="w")
             status_var = tk.StringVar(value=self.controller.text("bootstrap.gpu_checking"))
-            ttk.Label(frame, textvariable=status_var, wraplength=560, justify="left").pack(anchor="w", pady=(8, 16))
+            ttk.Label(frame, textvariable=status_var, wraplength=_TEXT_WRAP, justify="left").pack(anchor="w", pady=(8, 16))
 
             button_row = ttk.Frame(frame)
 
@@ -245,7 +258,7 @@ class BootstrapApp(tk.Tk):
         def build(frame: ttk.Frame) -> None:
             ttk.Label(frame, text=self.controller.text("bootstrap.install_title"), font=("", 16, "bold")).pack(anchor="w")
             status_var = tk.StringVar(value="")
-            ttk.Label(frame, textvariable=status_var, wraplength=560, justify="left").pack(anchor="w", pady=(8, 16))
+            ttk.Label(frame, textvariable=status_var, wraplength=_TEXT_WRAP, justify="left").pack(anchor="w", pady=(8, 16))
             progress = ttk.Progressbar(frame, mode="indeterminate")
             progress.pack(fill="x", pady=(0, 16))
             progress.start(12)
@@ -298,7 +311,7 @@ class BootstrapApp(tk.Tk):
             ttk.Label(
                 frame,
                 text=self.controller.text("bootstrap.install_failed", error=error_message),
-                wraplength=560,
+                wraplength=_TEXT_WRAP,
                 justify="left",
             ).pack(anchor="w", pady=(8, 16))
             self._nav_row(frame, back=self._show_mode, next_=None)
@@ -310,7 +323,7 @@ class BootstrapApp(tk.Tk):
     def _show_credentials(self) -> None:
         def build(frame: ttk.Frame) -> None:
             ttk.Label(frame, text=self.controller.text("bootstrap.credentials_title"), font=("", 16, "bold")).pack(anchor="w")
-            ttk.Label(frame, text=self.controller.text("bootstrap.credentials_intro"), wraplength=560, justify="left").pack(
+            ttk.Label(frame, text=self.controller.text("bootstrap.credentials_intro"), wraplength=_TEXT_WRAP, justify="left").pack(
                 anchor="w", pady=(8, 16)
             )
 
@@ -366,7 +379,7 @@ class BootstrapApp(tk.Tk):
             provider_label = self.controller.text(f"bootstrap.credentials_provider_{provider}")
             ttk.Label(frame, text=provider_label, font=("", 16, "bold")).pack(anchor="w")
             explain_key = f"bootstrap.credentials_explain_{provider}"
-            ttk.Label(frame, text=self.controller.text(explain_key), wraplength=560, justify="left").pack(
+            ttk.Label(frame, text=self.controller.text(explain_key), wraplength=_TEXT_WRAP, justify="left").pack(
                 anchor="w", pady=(8, 16)
             )
             ttk.Button(
@@ -409,7 +422,7 @@ class BootstrapApp(tk.Tk):
     def _show_finish(self) -> None:
         def build(frame: ttk.Frame) -> None:
             ttk.Label(frame, text=self.controller.text("bootstrap.finish_title"), font=("", 16, "bold")).pack(anchor="w")
-            ttk.Label(frame, text=self.controller.text("bootstrap.finish_text"), wraplength=560, justify="left").pack(
+            ttk.Label(frame, text=self.controller.text("bootstrap.finish_text"), wraplength=_TEXT_WRAP, justify="left").pack(
                 anchor="w", pady=(8, 16)
             )
 
