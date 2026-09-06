@@ -150,7 +150,18 @@ class SettingsDialog(QDialog):
         self.secret = QLineEdit()
         self.secret.setEchoMode(QLineEdit.Password)
         self.target = QComboBox()
-        for target in ("environment", "keyring", "both"):
+        # 07.09.2026 (Michael: nach der env-var/keyring-Verwechslung bei
+        # DeepL - "der Punkt mit Umgebungsvariable/Keyring/beides ist doch
+        # eigentlich nicht nötig, oder?"): Keyring bleibt die einzig
+        # dauerhafte, für den Normalfall richtige Wahl - "Umgebungsvariable"
+        # existiert nur für TMEs dokumentiertes Env-Var-Override beim
+        # image_translate_cli-Subprozessaufruf (siehe
+        # image_translate_cli/CLI.md), nicht für den Desktop-Dialog hier.
+        # Keyring deshalb zuerst in der Liste (nicht mehr "environment"),
+        # damit die Standardauswahl auch beim Aufklappen als DIE normale
+        # Option erscheint statt als zweiter Eintrag hinter einer Sitzungs-
+        # only-Variante.
+        for target in ("keyring", "environment", "both"):
             self.target.addItem("", target)
         # 07.09.2026 (Michael: "sollte als Standard Key-Ring ausgewählt
         # sein"): restores the last saved choice if there is one, and
@@ -249,7 +260,7 @@ class SettingsDialog(QDialog):
         for label, key in zip(self.credentials_labels, keys): label.setText(t(key))
         self.general_labels[0].setText(t("settings.run_limit"))
         self.secret.setPlaceholderText(t("settings.key_placeholder"))
-        for index, key in enumerate(("settings.environment", "settings.keyring", "settings.both")):
+        for index, key in enumerate(("settings.keyring", "settings.environment", "settings.both")):
             self.target.setItemText(index, t(key))
         self.save_key.setText(t("settings.save_key"))
         self.open_log_button.setText(t("settings.open_log"))
@@ -264,8 +275,11 @@ class SettingsDialog(QDialog):
         # ui/settings.py::save_credential - it only ever sets os.environ
         # for the current process) - showing it regardless of the
         # actually selected target made it read like a general disclaimer
-        # about this whole dialog instead.
-        self.note.setVisible(self.target.currentData() == "environment")
+        # about this whole dialog instead. "both" ALSO writes that
+        # non-persistent environment variable in addition to the durable
+        # keyring entry (see save_credential()), so the same caveat
+        # applies there too - only "keyring" alone needs no caveat at all.
+        self.note.setVisible(self.target.currentData() in ("environment", "both"))
 
     def _refresh_status(self) -> None:
         status_key = credential_status(self.provider.currentText())
