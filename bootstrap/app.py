@@ -57,6 +57,98 @@ _INSTALL_STEP_KEYS = {
 }
 
 
+class _Tooltip:
+    """Lightweight hover tooltip for a single tk/ttk widget.
+
+    07.09.2026 (Michael: "Ausserdem haette ich noch gerne zu jeder Option
+    in der App eine klare Nutzerfreundliche Tooltip und eine Hilfe. So
+    das automatisch zu jedem Button, Option usw. auch ein richtiger
+    Hilfetext existiert."): tkinter has no built-in equivalent to Qt's
+    setToolTip()/setWhatsThis() (see ui/app.py's MainWindow._help_widgets/
+    SettingsDialog._settings_help_widgets/HardwareCheckDialog.
+    _hw_check_help_widgets for that side), and this wizard has neither a
+    menu bar to hang a "Direkthilfe"/WhatsThis-mode entry on nor a second
+    interaction model beyond hovering - so the short tooltip and the
+    longer explanation are combined into ONE popup per widget (see the
+    "bootstrap.help.*" i18n keys: a blank line separates the short cue
+    from the longer paragraph) rather than two separate mechanisms.
+
+    Re-created fresh every time a screen is built (see BootstrapApp._set_
+    frame - each _show_*() tears down the previous frame's widgets
+    entirely and builds new ones), so there is no retranslate() to wire
+    up here unlike the Qt app: the tooltip text is simply read via
+    self.controller.text(...) at the point the widget is created, already
+    in whatever language is current then.
+    """
+
+    _DELAY_MS = 500
+    _WRAP_LENGTH = 360
+
+    def __init__(self, widget: tk.Widget, text: str) -> None:
+        self.widget = widget
+        self.text = text
+        self._after_id: str | None = None
+        self._tip: tk.Toplevel | None = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+        widget.bind("<Destroy>", self._hide, add="+")
+
+    def _schedule(self, _event: object = None) -> None:
+        self._cancel_scheduled()
+        self._after_id = self.widget.after(self._DELAY_MS, self._show)
+
+    def _cancel_scheduled(self) -> None:
+        if self._after_id is not None:
+            try:
+                self.widget.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
+
+    def _show(self) -> None:
+        if self._tip is not None or not self.text:
+            return
+        try:
+            x = self.widget.winfo_rootx() + 12
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 8
+        except Exception:
+            return
+        self._tip = tk.Toplevel(self.widget)
+        self._tip.wm_overrideredirect(True)
+        try:
+            self._tip.wm_attributes("-topmost", True)
+        except Exception:
+            pass
+        self._tip.wm_geometry(f"+{x}+{y}")
+        tk.Label(
+            self._tip,
+            text=self.text,
+            justify="left",
+            background="#ffffe0",
+            relief="solid",
+            borderwidth=1,
+            wraplength=self._WRAP_LENGTH,
+            padx=6,
+            pady=4,
+        ).pack()
+
+    def _hide(self, _event: object = None) -> None:
+        self._cancel_scheduled()
+        if self._tip is not None:
+            self._tip.destroy()
+            self._tip = None
+
+
+def _tip(widget: tk.Widget, text: str) -> None:
+    """Attaches a hover tooltip to `widget` - short helper so call sites
+    below read as a one-liner (`_tip(button, self.controller.text(...))`)
+    rather than needing to hold on to the _Tooltip instance themselves
+    (nothing after construction is ever called on it again - see
+    _Tooltip's own docstring on why there is no retranslate() path)."""
+    _Tooltip(widget, text)
+
+
 class BootstrapApp(tk.Tk):
     def __init__(self, controller: BootstrapController | None = None) -> None:
         super().__init__()
@@ -97,9 +189,11 @@ class BootstrapApp(tk.Tk):
         # install has succeeded there is nothing left to cancel.
         self._cancel_bar = ttk.Frame(self, padding=(16, 8))
         self._cancel_bar.pack(side="bottom", fill="x")
-        ttk.Button(
+        cancel_button = ttk.Button(
             self._cancel_bar, text=self.controller.text("bootstrap.cancel_button"), command=self._on_cancel
-        ).pack(side="left")
+        )
+        cancel_button.pack(side="left")
+        _tip(cancel_button, self.controller.text("bootstrap.help.cancel_button"))
 
         self._container = ttk.Frame(self, padding=16)
         self._container.pack(fill="both", expand=True)
@@ -170,10 +264,14 @@ class BootstrapApp(tk.Tk):
         row = ttk.Frame(frame)
         row.pack(side="bottom", fill="x", pady=(16, 0))
         if back is not None:
-            ttk.Button(row, text=self.controller.text("bootstrap.back_button"), command=back).pack(side="left")
+            back_button = ttk.Button(row, text=self.controller.text("bootstrap.back_button"), command=back)
+            back_button.pack(side="left")
+            _tip(back_button, self.controller.text("bootstrap.help.back_button"))
         if next_ is not None:
             label = next_label if next_label is not None else self.controller.text("bootstrap.next_button")
-            ttk.Button(row, text=label, command=next_).pack(side="right")
+            next_button = ttk.Button(row, text=label, command=next_)
+            next_button.pack(side="right")
+            _tip(next_button, self.controller.text("bootstrap.help.next_button"))
 
     # --- step 1: welcome / language ----------------------------------------
 
@@ -232,6 +330,7 @@ class BootstrapApp(tk.Tk):
             )
             combo.pack(side="left", padx=(8, 0))
             combo.bind("<<ComboboxSelected>>", on_language_change)
+            _tip(combo, self.controller.text("bootstrap.help.language_combo"))
 
             self._nav_row(frame, back=None, next_=self._show_mode)
 
@@ -259,22 +358,26 @@ class BootstrapApp(tk.Tk):
 
             online_frame = ttk.Frame(frame)
             online_frame.pack(anchor="w", fill="x", pady=(0, 12))
-            ttk.Radiobutton(
+            online_radio = ttk.Radiobutton(
                 online_frame, text=self.controller.text("bootstrap.mode_online_label"), variable=mode_var, value=InstallMode.ONLINE.value
-            ).pack(anchor="w")
+            )
+            online_radio.pack(anchor="w")
+            _tip(online_radio, self.controller.text("bootstrap.help.mode_online_radio"))
             ttk.Label(online_frame, text=self.controller.text("bootstrap.mode_online_desc"), wraplength=_TEXT_WRAP, justify="left").pack(
                 anchor="w", padx=(24, 0)
             )
 
             local_frame = ttk.Frame(frame)
             local_frame.pack(anchor="w", fill="x")
-            ttk.Radiobutton(
+            local_radio = ttk.Radiobutton(
                 local_frame,
                 text=self.controller.text("bootstrap.mode_local_label"),
                 variable=mode_var,
                 value=InstallMode.LOCAL.value,
                 state="disabled" if is_mac else "normal",
-            ).pack(anchor="w")
+            )
+            local_radio.pack(anchor="w")
+            _tip(local_radio, self.controller.text("bootstrap.help.mode_local_radio"))
             local_desc_key = "bootstrap.gpu_mac_unsupported" if is_mac else "bootstrap.mode_local_desc"
             ttk.Label(local_frame, text=self.controller.text(local_desc_key), wraplength=_TEXT_WRAP, justify="left").pack(
                 anchor="w", padx=(24, 0)
@@ -340,19 +443,25 @@ class BootstrapApp(tk.Tk):
     def _render_gpu_buttons(self, row: ttk.Frame, ok: bool, mac: bool) -> None:
         for child in row.winfo_children():
             child.destroy()
-        ttk.Button(row, text=self.controller.text("bootstrap.back_button"), command=self._show_mode).pack(side="left")
+        gpu_back_button = ttk.Button(row, text=self.controller.text("bootstrap.back_button"), command=self._show_mode)
+        gpu_back_button.pack(side="left")
+        _tip(gpu_back_button, self.controller.text("bootstrap.help.back_button"))
         if not mac:
-            ttk.Button(
+            continue_local_button = ttk.Button(
                 row, text=self.controller.text("bootstrap.gpu_continue_local_button"), command=self._show_install
-            ).pack(side="right")
+            )
+            continue_local_button.pack(side="right")
+            _tip(continue_local_button, self.controller.text("bootstrap.help.gpu_continue_local_button"))
 
         def switch_online() -> None:
             self.controller.set_mode(InstallMode.ONLINE)
             self._show_install()
 
-        ttk.Button(row, text=self.controller.text("bootstrap.gpu_switch_online_button"), command=switch_online).pack(
-            side="right", padx=(0, 8) if not mac else (0, 0)
+        switch_online_button = ttk.Button(
+            row, text=self.controller.text("bootstrap.gpu_switch_online_button"), command=switch_online
         )
+        switch_online_button.pack(side="right", padx=(0, 8) if not mac else (0, 0))
+        _tip(switch_online_button, self.controller.text("bootstrap.help.gpu_switch_online_button"))
 
     # --- step 4: install ------------------------------------------------
 
@@ -454,12 +563,15 @@ class BootstrapApp(tk.Tk):
                 var = tk.BooleanVar(value=provider in self._credential_providers)
                 self._selected_providers[provider] = var
                 label_key = f"bootstrap.credentials_provider_{provider}"
-                ttk.Checkbutton(
+                provider_label = self.controller.text(label_key)
+                checkbox = ttk.Checkbutton(
                     frame,
-                    text=self.controller.text(label_key),
+                    text=provider_label,
                     variable=var,
                     command=update_continue_state,
-                ).pack(anchor="w")
+                )
+                checkbox.pack(anchor="w")
+                _tip(checkbox, self.controller.text("bootstrap.help.credentials_checkbox", provider=provider_label))
 
             def on_continue() -> None:
                 self._credential_providers = [p for p, v in self._selected_providers.items() if v.get()]
@@ -468,13 +580,16 @@ class BootstrapApp(tk.Tk):
 
             row = ttk.Frame(frame)
             row.pack(side="bottom", fill="x", pady=(16, 0))
-            ttk.Button(row, text=self.controller.text("bootstrap.credentials_skip_all_button"), command=self._show_finish).pack(
-                side="left"
+            skip_all_button = ttk.Button(
+                row, text=self.controller.text("bootstrap.credentials_skip_all_button"), command=self._show_finish
             )
+            skip_all_button.pack(side="left")
+            _tip(skip_all_button, self.controller.text("bootstrap.help.credentials_skip_all_button"))
             continue_button = ttk.Button(
                 row, text=self.controller.text("bootstrap.credentials_continue_button"), command=on_continue
             )
             continue_button.pack(side="right")
+            _tip(continue_button, self.controller.text("bootstrap.help.credentials_continue_button"))
             update_continue_state()
 
         self._set_frame(build)
@@ -503,11 +618,13 @@ class BootstrapApp(tk.Tk):
             ttk.Label(frame, text=self.controller.text(explain_key), wraplength=_TEXT_WRAP, justify="left").pack(
                 anchor="w", pady=(8, 16)
             )
-            ttk.Button(
+            open_signup_button = ttk.Button(
                 frame,
                 text=self.controller.text("bootstrap.credentials_open_signup_button"),
                 command=lambda: self.controller.open_signup_page(provider),
-            ).pack(anchor="w", pady=(0, 16))
+            )
+            open_signup_button.pack(anchor="w", pady=(0, 16))
+            _tip(open_signup_button, self.controller.text("bootstrap.help.credential_open_signup_button"))
 
             ttk.Label(frame, text=self.controller.text("bootstrap.credentials_key_label", provider=provider_label)).pack(
                 anchor="w"
@@ -515,6 +632,7 @@ class BootstrapApp(tk.Tk):
             key_var = tk.StringVar(value="")
             entry = ttk.Entry(frame, textvariable=key_var, show="*", width=50)
             entry.pack(anchor="w", pady=(4, 8))
+            _tip(entry, self.controller.text("bootstrap.help.credential_key_entry"))
             status_var = tk.StringVar(value="")
             ttk.Label(frame, textvariable=status_var).pack(anchor="w")
 
@@ -525,9 +643,9 @@ class BootstrapApp(tk.Tk):
                 self.controller.save_provider_credential(provider, value)
                 status_var.set(self.controller.text("bootstrap.credentials_saved"))
 
-            ttk.Button(frame, text=self.controller.text("bootstrap.credentials_save_button"), command=on_save).pack(
-                anchor="w", pady=(0, 16)
-            )
+            save_button = ttk.Button(frame, text=self.controller.text("bootstrap.credentials_save_button"), command=on_save)
+            save_button.pack(anchor="w", pady=(0, 16))
+            _tip(save_button, self.controller.text("bootstrap.help.credential_save_button"))
 
             # 07.09.2026 ("Standard Vorstellung: Weiter deaktiviert wenn
             # nichts eingegeben ist"): this provider was explicitly
@@ -562,11 +680,14 @@ class BootstrapApp(tk.Tk):
 
             row = ttk.Frame(frame)
             row.pack(side="bottom", fill="x", pady=(16, 0))
-            ttk.Button(row, text=self.controller.text("bootstrap.back_button"), command=go_back).pack(side="left")
+            back_button = ttk.Button(row, text=self.controller.text("bootstrap.back_button"), command=go_back)
+            back_button.pack(side="left")
+            _tip(back_button, self.controller.text("bootstrap.help.back_button"))
             next_button = ttk.Button(
                 row, text=self.controller.text("bootstrap.credentials_continue_button"), command=go_next
             )
             next_button.pack(side="right")
+            _tip(next_button, self.controller.text("bootstrap.help.credentials_continue_button"))
             update_next_state()
 
         self._set_frame(build)
@@ -586,8 +707,12 @@ class BootstrapApp(tk.Tk):
 
             row = ttk.Frame(frame)
             row.pack(side="bottom", fill="x", pady=(16, 0))
-            ttk.Button(row, text=self.controller.text("bootstrap.finish_close_button"), command=self.destroy).pack(side="left")
-            ttk.Button(row, text=self.controller.text("bootstrap.finish_launch_button"), command=on_launch).pack(side="right")
+            close_button = ttk.Button(row, text=self.controller.text("bootstrap.finish_close_button"), command=self.destroy)
+            close_button.pack(side="left")
+            _tip(close_button, self.controller.text("bootstrap.help.finish_close_button"))
+            launch_button = ttk.Button(row, text=self.controller.text("bootstrap.finish_launch_button"), command=on_launch)
+            launch_button.pack(side="right")
+            _tip(launch_button, self.controller.text("bootstrap.help.finish_launch_button"))
 
         self._set_frame(build, window_size=_FINISH_WINDOW_SIZE, show_cancel=False)
 
