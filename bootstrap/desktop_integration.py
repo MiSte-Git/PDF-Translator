@@ -151,7 +151,7 @@ def _windows_shortcut_script(
     icon_path: Path | None,
     display_name: str = APP_DISPLAY_NAME,
 ) -> str:
-    icon_location = str(icon_path) if icon_path else str(venv_python)
+    icon_location = f"{icon_path},0" if icon_path else str(venv_python)
     # WScript.Shell is a built-in Windows COM object; no extra package
     # (e.g. pywin32) needed just to create one .lnk file.
     return (
@@ -166,6 +166,23 @@ def _windows_shortcut_script(
     )
 
 
+def _windows_pythonw(venv_python: Path) -> Path:
+    """venv_python (python.exe) with pythonw.exe substituted in, if it
+    exists next to it.
+
+    06.09.2026: the shortcut this builds used venv_python (the console
+    interpreter) as TargetPath, so double-clicking the Start Menu entry
+    or a taskbar pin flashed a console window before the PySide6 app
+    appeared - the same console-flash bug launch_app() had (see
+    bootstrap/paths.py::venv_pythonw's docstring for the full story).
+    Takes a bare Path rather than a venv directory because that is all
+    create_windows_shortcut() is given; paths.venv_pythonw() cannot be
+    reused directly here for that reason.
+    """
+    candidate = venv_python.with_name("pythonw.exe")
+    return candidate if candidate.is_file() else venv_python
+
+
 def create_windows_shortcut(
     app_source_dir: Path,
     venv_python: Path,
@@ -177,7 +194,9 @@ def create_windows_shortcut(
     target_dir = windows_start_menu_programs_dir()
     target_dir.mkdir(parents=True, exist_ok=True)
     shortcut_path = target_dir / f"{display_name}.lnk"
-    script = _windows_shortcut_script(shortcut_path, venv_python, app_source_dir, icon_path, display_name)
+    script = _windows_shortcut_script(
+        shortcut_path, _windows_pythonw(venv_python), app_source_dir, icon_path, display_name
+    )
     try:
         subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],

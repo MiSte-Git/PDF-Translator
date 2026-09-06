@@ -62,6 +62,37 @@ def venv_python(venv: Path | None = None) -> Path:
     return venv / "bin" / "python"
 
 
+def venv_pythonw(venv: Path | None = None) -> Path:
+    """Path to the venv's *windowed* interpreter (Windows only - pythonw.exe,
+    no console window) for launching the GUI app itself.
+
+    06.09.2026: bootstrap/controller.py::launch_app() used venv_python()
+    (python.exe, the console interpreter) to start the finished PySide6
+    app. Since bootstrap.exe itself is a --windowed build with no console
+    of its own, spawning python.exe as its child makes Windows allocate a
+    brand new console window for it - the "kurz kommt wieder eine Shell
+    hoch" a real user saw right after clicking "Jetzt starten". pythonw.exe
+    is the same interpreter built without a console subsystem, so no
+    window is created at all, on success or failure.
+
+    On any platform other than Windows this is identical to venv_python()
+    - pythonw.exe/console-vs-windowed is a Windows-only distinction, every
+    other OS has one interpreter binary.
+    """
+    venv = venv if venv is not None else venv_dir()
+    if platform.system() == "Windows":
+        candidate = venv / "Scripts" / "pythonw.exe"
+        if candidate.is_file():
+            return candidate
+        # Extremely defensive: every CPython Windows install ships
+        # pythonw.exe next to python.exe, but if some future/stripped
+        # runtime doesn't, falling back to the console interpreter is
+        # still a working app (just with the console-flash back) rather
+        # than a launch that can never succeed.
+        return venv_python(venv)
+    return venv_python(venv)
+
+
 def app_source_dir() -> Path:
     """Directory the downloaded/extracted app source (pipeline/, ui/,
     requirements*.txt, ...) is installed into - see bootstrap/release_source.py.

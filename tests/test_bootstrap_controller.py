@@ -142,12 +142,19 @@ def test_credentials_delegation(controller, monkeypatch):
 
 
 def test_launch_app_uses_stored_venv_python(controller, monkeypatch, tmp_path):
+    # 06.09.2026: launch_app() now also writes a launch.log next to the
+    # venv (see bootstrap/controller.py::launch_app docstring) and passes
+    # stdout/stderr/stdin kwargs to Popen - ensure_install_root() is
+    # redirected into tmp_path so the test never touches this machine's
+    # real per-user PDF-Translator directory.
+    monkeypatch.setattr("bootstrap.controller.paths.ensure_install_root", lambda: tmp_path)
     controller.venv_python = tmp_path / "venv" / "bin" / "python"
     captured = {}
 
-    def fake_popen(cmd, cwd):
+    def fake_popen(cmd, cwd, **kwargs):
         captured["cmd"] = cmd
         captured["cwd"] = cwd
+        captured["kwargs"] = kwargs
         return "process-handle"
 
     monkeypatch.setattr("bootstrap.controller.subprocess.Popen", fake_popen)
@@ -155,12 +162,36 @@ def test_launch_app_uses_stored_venv_python(controller, monkeypatch, tmp_path):
     assert result == "process-handle"
     assert captured["cmd"] == [str(controller.venv_python), "-m", "ui.app"]
     assert captured["cwd"] == str(controller.app_source_dir)
+    assert "stdout" in captured["kwargs"]
+    assert (tmp_path / "launch.log").is_file()
 
 
-def test_launch_app_falls_back_to_paths_venv_python(controller, monkeypatch):
-    monkeypatch.setattr("bootstrap.controller.subprocess.Popen", lambda cmd, cwd: cmd)
+def test_launch_app_falls_back_to_paths_venv_python(controller, monkeypatch, tmp_path):
+    monkeypatch.setattr("bootstrap.controller.paths.ensure_install_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        "bootstrap.controller.subprocess.Popen", lambda cmd, cwd, **kwargs: cmd
+    )
     result = controller.launch_app()
     assert str(controller.venv_dir) in result[0]
+
+
+def test_launch_app_uses_pythonw_on_windows(controller, monkeypatch, tmp_path):
+    # The actual bug report this guards against: launch_app() used to spawn
+    # the console python.exe from a --windowed bootstrapper, which made
+    # Windows pop up a new console window for it ("kurz kommt wieder eine
+    # Shell hoch") right before the app should have appeared.
+    monkeypatch.setattr("bootstrap.controller.paths.ensure_install_root", lambda: tmp_path)
+    monkeypatch.setattr("bootstrap.controller.sys.platform", "win32")
+    monkeypatch.setattr(
+        "bootstrap.controller.paths.venv_pythonw", lambda venv: tmp_path / "pythonw.exe"
+    )
+    captured = {}
+    monkeypatch.setattr(
+        "bootstrap.controller.subprocess.Popen",
+        lambda cmd, cwd, **kwargs: captured.setdefault("cmd", cmd),
+    )
+    controller.launch_app()
+    assert captured["cmd"][0] == str(tmp_path / "pythonw.exe")
 
 
 # --- 03.09.2026: driver CUDA version reaches run_install ----------------------

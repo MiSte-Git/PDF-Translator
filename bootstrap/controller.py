@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -126,7 +127,26 @@ class BootstrapController:
     # --- finish ----------------------------------------------------------
 
     def launch_app(self) -> subprocess.Popen:
+        """Starts the installed app and returns immediately - the wizard
+        closes right after calling this (see bootstrap/app.py::on_launch),
+        so there is no one left to show a crash dialog if the app fails to
+        start. Everything the app itself would have printed on stdout/
+        stderr (import errors, Qt platform-plugin failures, ...) is
+        redirected into launch.log next to the venv instead of vanishing
+        with the console window: on Windows, pythonw.exe never allocates
+        one to begin with, so anything not captured here is simply lost.
+        """
         venv_python = self.venv_python if self.venv_python is not None else paths.venv_python(self.venv_dir)
+        if sys.platform == "win32":
+            venv_python = paths.venv_pythonw(self.venv_dir)
+        log_path = paths.ensure_install_root() / "launch.log"
+        log_file = open(log_path, "a", encoding="utf-8", errors="replace")
+        log_file.write(f"\n--- launching {venv_python} -m ui.app ---\n")
+        log_file.flush()
         return subprocess.Popen(
-            [str(venv_python), "-m", "ui.app"], cwd=str(self.app_source_dir)
+            [str(venv_python), "-m", "ui.app"],
+            cwd=str(self.app_source_dir),
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
         )
