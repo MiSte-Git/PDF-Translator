@@ -9,11 +9,12 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, QSize, QThreadPool, QTimer, QUrl, Qt
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QFrame, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
-    QMessageBox, QProgressBar, QPushButton, QScrollArea, QSpinBox, QTextEdit, QToolButton, QVBoxLayout, QWidget,
+    QMessageBox, QProgressBar, QPushButton, QScrollArea, QSpinBox, QTextEdit, QToolButton, QVBoxLayout,
+    QWhatsThis, QWidget,
 )
 
 from _version import __version__
@@ -860,6 +861,49 @@ class MainWindow(QMainWindow):
         scroll.setWidget(widget)
         self.setCentralWidget(scroll)
         self._fit_initial_size_to_screen()
+        # 07.09.2026 (Michael: "zu jedem Button, Option usw. auch ein
+        # richtiger Hilfetext"): jedes Element bekommt sowohl einen kurzen
+        # Tooltip (Hover) als auch einen ausführlicheren WhatsThis-Text,
+        # abrufbar über "Hilfe" -> "Direkthilfe" bzw. Umschalt+F1 (siehe
+        # _rebuild_help_menu()). (widget, tooltip_key, whatsthis_key) statt
+        # einzelner setToolTip()/setWhatsThis()-Aufrufe verstreut über
+        # retranslate() - eine Liste hier lässt sich auf einen Blick
+        # überprüfen (z. B. per Test: "hat wirklich jedes Element einen
+        # Eintrag?") und macht retranslate() selbst nicht länger.
+        # Wo schon ein eigenständiger *.tooltip-Key existiert (ico_mode/
+        # side_by_side/exclude_header/exclude_footer/protected.load_file -
+        # bereits vor dieser Änderung mehrsätzig und ausführlich), wird
+        # dieser unverändert gelassen und zusätzlich 1:1 als WhatsThis
+        # wiederverwendet (whatsthis_key == tooltip_key) statt einen
+        # zweiten, nur leicht anders formulierten Text zu pflegen.
+        self._help_widgets: list[tuple[object, str, str]] = [
+            (self.mode, "mode.tooltip", "mode.whatsthis"),
+            (self.choose, "source.tooltip", "source.whatsthis"),
+            (self.source_label, "source_label.tooltip", "source_label.whatsthis"),
+            (self.image_mode, "image_mode.tooltip", "image_mode.whatsthis"),
+            (self.provider, "provider.tooltip", "provider.whatsthis"),
+            (self.source_lang, "source_lang.tooltip", "source_lang.whatsthis"),
+            (self.target_lang, "target_lang.tooltip", "target_lang.whatsthis"),
+            (self.protected, "protected.tooltip", "protected.whatsthis"),
+            (self.protected_load, "protected.load_file.tooltip", "protected.load_file.tooltip"),
+            (self.ico_mode, "ico_mode.tooltip", "ico_mode.tooltip"),
+            (self.side_by_side, "side_by_side.tooltip", "side_by_side.tooltip"),
+            (self.exclude_header, "exclude_header.tooltip", "exclude_header.tooltip"),
+            (self.exclude_footer, "exclude_footer.tooltip", "exclude_footer.tooltip"),
+            (self.ocr_engine, "ocr_engine_field.tooltip", "ocr_engine_field.whatsthis"),
+            (self.inpainting_backend, "inpainting_backend_field.tooltip", "inpainting_backend_field.whatsthis"),
+            (self.merge_button, "merge.tooltip", "merge.whatsthis"),
+            (self.word_merge_button, "word_merge.tooltip", "word_merge.whatsthis"),
+            (self.analyze, "analysis.button.tooltip", "analysis.button.whatsthis"),
+            (self.confirm, "analysis.checked.tooltip", "analysis.checked.whatsthis"),
+            (self.start, "start.tooltip", "start.whatsthis"),
+            (self.cancel_button, "job.cancel.tooltip", "job.cancel.whatsthis"),
+            (self.open_folder_button, "job.open_folder.tooltip", "job.open_folder.whatsthis"),
+            (self.open_report_button, "job.open_report.tooltip", "job.open_report.whatsthis"),
+            (self.correct_translation_button, "job.correct_translation.tooltip", "job.correct_translation.whatsthis"),
+            (self.settings_button, "settings.button.tooltip", "settings.button.whatsthis"),
+            (self.update_hint, "update_hint.tooltip", "update_hint.whatsthis"),
+        ]
         self.language.changed.connect(self.retranslate)
         self.retranslate()
         # Self-update: fired once, shortly after the window is up rather
@@ -977,6 +1021,13 @@ class MainWindow(QMainWindow):
         t = self.language.text
         for code, button in self.flag_buttons.items():
             button.setChecked(code == self.language.language)
+            # native_name is already each flag's tooltip (see __init__) -
+            # it names the language, not what the row DOES. WhatsThis
+            # explains the mechanism instead, same text on every flag.
+            button.setWhatsThis(t("flag_row.whatsthis"))
+        for widget, tooltip_key, whatsthis_key in self._help_widgets:
+            widget.setToolTip(t(tooltip_key))
+            widget.setWhatsThis(t(whatsthis_key))
         self.setWindowTitle(t("app.title"))
         self.merge_box.setTitle(t("merge_box.group"))
         self.config_box.setTitle(t("config.group"))
@@ -1115,6 +1166,17 @@ class MainWindow(QMainWindow):
         hw_check_action.triggered.connect(self._open_hardware_check)
         update_action = self.help_menu.addAction(t("menu.help.check_updates"))
         update_action.triggered.connect(self._check_for_update_manual)
+        # 07.09.2026 (Michael: "zu jedem Button, Option usw. auch ein
+        # richtiger Hilfetext"): aktiviert Qts eingebauten WhatsThis-Modus
+        # (Cursor wird zum Fragezeichen, ein Klick auf ein Element zeigt
+        # dessen WhatsThis-Text als Popup) - der Standard-Weg, jedes
+        # einzelne Element ansprechbar zu machen, ohne für jedes einen
+        # eigenen sichtbaren "?"-Button zu bauen. QKeySequence.WhatsThis
+        # bindet die auf den meisten Plattformen übliche Umschalt+F1-Taste
+        # gleich mit.
+        whats_this_action = self.help_menu.addAction(t("menu.help.whats_this"))
+        whats_this_action.setShortcut(QKeySequence(QKeySequence.WhatsThis))
+        whats_this_action.triggered.connect(QWhatsThis.enterWhatsThisMode)
         about_action = self.help_menu.addAction(t("menu.help.about"))
         about_action.triggered.connect(self._about)
 

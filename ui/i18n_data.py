@@ -802,6 +802,159 @@ DE = {
     ),
     "bootstrap.finish_launch_button": "Jetzt starten",
     "bootstrap.finish_close_button": "Schließen",
+
+    # 07.09.2026 (Michael: "zu jedem Button, Option usw. auch ein
+    # richtiger Hilfetext"): kurzer Tooltip (Hover) + ausführlicher
+    # WhatsThis-Text (Hilfe -> Direkthilfe / Umschalt+F1) pro
+    # Bedienelement im Hauptfenster. Wo schon ein *.tooltip existiert
+    # (ico_mode/side_by_side/exclude_header/exclude_footer/
+    # protected.load_file), bleibt der unverändert und wird zusätzlich
+    # 1:1 als WhatsThis wiederverwendet (siehe retranslate()) - diese
+    # Texte sind bereits ausführlich genug, eine zweite, nur leicht
+    # andere Formulierung hätte keinen echten Mehrwert.
+    "mode.tooltip": "Art des zu übersetzenden Dokuments",
+    "mode.whatsthis": (
+        "Bestimmt, welcher Übersetzungsablauf verwendet wird: PDF, "
+        "PowerPoint/Impress, Word/Writer oder einzelne Bilder. Je nach "
+        "Auswahl blenden sich weiter unten nur die dafür relevanten Felder "
+        "ein, z. B. die OCR-Einstellungen nur im Modus „Bilder“."
+    ),
+    "source.tooltip": "Datei(en) zum Übersetzen auswählen",
+    "source.whatsthis": (
+        "Öffnet den Dateiauswahl-Dialog für die Quelldatei (im "
+        "Bilder-Modus auch mehrere Dateien gleichzeitig). Der gewählte "
+        "Dateiname erscheint anschließend links daneben."
+    ),
+    "source_label.tooltip": "Aktuell ausgewählte Quelldatei",
+    "source_label.whatsthis": (
+        "Zeigt den Namen der zuletzt über „Datei wählen …“ ausgesuchten "
+        "Datei. Steht hier „Keine Datei ausgewählt“, muss zuerst eine "
+        "Datei gewählt werden, bevor eine Kostenanalyse möglich ist."
+    ),
+    "image_mode.tooltip": "Umgang mit eingebetteten Bildern im Dokument",
+    "image_mode.whatsthis": (
+        "„Nicht übersetzen“ lässt eingebettete Bilder unverändert. "
+        "„Einzeln auswählen“ zeigt nach der Kostenanalyse eine Liste, aus "
+        "der gezielt Bilder ausgewählt werden. „Alle übersetzen“ "
+        "verarbeitet automatisch jedes eingebettete Bild mit."
+    ),
+    "provider.tooltip": "Übersetzungsanbieter für diesen Lauf",
+    "provider.whatsthis": (
+        "DeepL, Google, OpenAI oder Grok - jeweils mit eigenem "
+        "API-Schlüssel, verwaltet in den Einstellungen. Fehlt für den "
+        "gewählten Anbieter ein Schlüssel, erscheint direkt darunter ein "
+        "Hinweis mit Link zu den Einstellungen."
+    ),
+    "source_lang.tooltip": "Sprachcode der Ausgangssprache, z. B. EN",
+    "source_lang.whatsthis": (
+        "Zweibuchstabiger Sprachcode nach ISO 639-1 (z. B. EN für "
+        "Englisch, FR für Französisch). Muss zur tatsächlichen Sprache "
+        "des Dokuments passen, sonst liefert der Übersetzungsanbieter "
+        "falsche oder gar keine Ergebnisse."
+    ),
+    "target_lang.tooltip": "Sprachcode der Zielsprache, z. B. DE",
+    "target_lang.whatsthis": (
+        "Zweibuchstabiger Sprachcode nach ISO 639-1, in den übersetzt "
+        "werden soll (z. B. DE für Deutsch, ES für Spanisch)."
+    ),
+    "protected.tooltip": "Begriffe, die unübersetzt bleiben sollen",
+    "protected.whatsthis": (
+        "Ein Begriff pro Zeile, z. B. Firmen- oder Produktnamen. Der "
+        "Übersetzungsanbieter lässt diese Begriffe unangetastet. Über den "
+        "Button rechts daneben lässt sich zusätzlich eine Liste aus einer "
+        "Datei nachladen."
+    ),
+    "ocr_engine_field.tooltip": "Texterkennung (OCR) für Bilder",
+    "ocr_engine_field.whatsthis": (
+        "Nur im Modus „Bilder“ sichtbar. Erkennt Text in den Bildern, "
+        "bevor er übersetzt und zurückgeschrieben wird. Steht eine Engine "
+        "auf diesem Rechner nicht zur Verfügung, erscheint direkt "
+        "darunter ein Hinweis."
+    ),
+    "inpainting_backend_field.tooltip": (
+        "Methode zum Zurückschreiben des übersetzten Texts ins Bild"
+    ),
+    "inpainting_backend_field.whatsthis": (
+        "Nur im Modus „Bilder“ sichtbar. „Box-Overlay“ und "
+        "„CV-Inpainting“ laufen immer lokal, ohne besondere Hardware. "
+        "„GPU-Inpainting“ nutzt eine lokale Grafikkarte (CUDA) für das "
+        "beste Ergebnis und ist nur verfügbar, wenn PyTorch mit "
+        "CUDA-Unterstützung installiert ist - andernfalls erscheint "
+        "darunter ein Hinweis. Den Hardware-Status jederzeit über Hilfe "
+        "-> Hardware-Test prüfen."
+    ),
+    "merge.tooltip": "Mehrere PDF-Dateien zusammenführen",
+    "merge.whatsthis": (
+        "Öffnet einen eigenen Dialog zum Zusammenführen mehrerer "
+        "PDF-Dateien in eine gemeinsame Datei. Unabhängig vom Formular "
+        "oben - es wird dabei nichts übersetzt."
+    ),
+    "word_merge.tooltip": "Mehrere Word-Dateien zusammenführen",
+    "word_merge.whatsthis": (
+        "Öffnet einen eigenen Dialog zum Zusammenführen mehrerer "
+        "Word-Dateien in eine gemeinsame Datei. Unabhängig vom Formular "
+        "oben - es wird dabei nichts übersetzt."
+    ),
+    "analysis.button.tooltip": "Kosten des Übersetzungslaufs schätzen",
+    "analysis.button.whatsthis": (
+        "Zählt die zu übersetzenden Zeichen und schätzt anhand des "
+        "gewählten Anbieters die ungefähren Kosten, ohne bereits etwas zu "
+        "übersetzen. Erst danach lässt sich der Haken daneben setzen und "
+        "„Start“ freischalten."
+    ),
+    "analysis.checked.tooltip": "Geschätzte Kosten bestätigen",
+    "analysis.checked.whatsthis": (
+        "Muss angehakt werden, bevor „Start“ klickbar wird - eine "
+        "bewusste Sicherheitsstufe, damit kein Lauf versehentlich ohne "
+        "vorherigen Blick auf die geschätzten Kosten gestartet wird."
+    ),
+    "start.tooltip": "Übersetzungslauf starten",
+    "start.whatsthis": (
+        "Erst aktiv, nachdem die Kosten analysiert und bestätigt wurden. "
+        "Der Fortschritt erscheint im Bereich darunter; ein laufender "
+        "Lauf lässt sich über „Abbrechen“ stoppen."
+    ),
+    "job.cancel.tooltip": "Laufenden Übersetzungslauf abbrechen",
+    "job.cancel.whatsthis": (
+        "Stoppt den aktuellen Lauf so schnell wie möglich. Bereits "
+        "verarbeitete Teile bleiben nicht automatisch als vollständige "
+        "Datei erhalten - je nach Format kann eine unvollständige Datei "
+        "zurückbleiben."
+    ),
+    "job.open_folder.tooltip": "Ausgabeordner öffnen",
+    "job.open_folder.whatsthis": (
+        "Öffnet den Datei-Explorer im Zielordner des gerade "
+        "abgeschlossenen Laufs."
+    ),
+    "job.open_report.tooltip": "QA-Bericht zum letzten Lauf öffnen",
+    "job.open_report.whatsthis": (
+        "Zeigt Auffälligkeiten aus der automatischen Qualitätsprüfung des "
+        "letzten Laufs, z. B. Textstellen, die möglicherweise überprüft "
+        "werden sollten."
+    ),
+    "job.correct_translation.tooltip": "Einzelne Übersetzungen korrigieren",
+    "job.correct_translation.whatsthis": (
+        "Nur bei PDF-Läufen mit korrigierbaren Textblöcken sichtbar. "
+        "Ermöglicht es, einzelne übersetzte Textstellen gezielt "
+        "nachzubearbeiten, ohne den ganzen Lauf zu wiederholen."
+    ),
+    "settings.button.tooltip": "Einstellungen öffnen",
+    "settings.button.whatsthis": (
+        "API-Schlüssel je Anbieter (empfohlen: Keyring), das "
+        "Zeichenlimit pro Lauf und der Zugriff auf die Logdatei."
+    ),
+    "update_hint.tooltip": "Neue Version verfügbar",
+    "update_hint.whatsthis": (
+        "Erscheint automatisch, wenn beim Start eine neuere Version von "
+        "PDF-Translator gefunden wurde. Anklicken bietet die "
+        "Installation der neuen Version an."
+    ),
+    "flag_row.whatsthis": (
+        "Wechselt sofort und dauerhaft die Sprache der Bedienoberfläche "
+        "selbst - nicht die Übersetzungssprachen im Formular. Die "
+        "Auswahl wird sofort gespeichert."
+    ),
+    "menu.help.whats_this": "Direkthilfe",
 }
 
 EN = {
@@ -1448,6 +1601,142 @@ EN = {
     "bootstrap.finish_text": "PDF-Translator is set up and ready to find in your application menu.",
     "bootstrap.finish_launch_button": "Launch now",
     "bootstrap.finish_close_button": "Close",
+    "mode.tooltip": "Type of document to translate",
+    "mode.whatsthis": (
+        "Determines which translation workflow is used: PDF, "
+        "PowerPoint/Impress, Word/Writer, or individual images. Depending "
+        "on the selection, only the relevant fields below are shown, e.g. "
+        "the OCR settings only appear in \"Images\" mode."
+    ),
+    "source.tooltip": "Select the file(s) to translate",
+    "source.whatsthis": (
+        "Opens the file picker for the source file (in Images mode, "
+        "several files at once). The chosen file name then appears to "
+        "the left."
+    ),
+    "source_label.tooltip": "Currently selected source file",
+    "source_label.whatsthis": (
+        "Shows the name of the file last chosen via \"Select file …\". "
+        "If it still says \"No file selected\", pick a file first before "
+        "a cost analysis is possible."
+    ),
+    "image_mode.tooltip": "How to handle images embedded in the document",
+    "image_mode.whatsthis": (
+        "\"Do not translate\" leaves embedded images unchanged. \"Select "
+        "individually later\" shows a list after the cost analysis from "
+        "which to pick specific images. \"Translate all\" automatically "
+        "processes every embedded image."
+    ),
+    "provider.tooltip": "Translation provider for this run",
+    "provider.whatsthis": (
+        "DeepL, Google, OpenAI, or Grok - each with its own API key, "
+        "managed in Settings. If no key is configured for the selected "
+        "provider, a hint with a link to Settings appears right below."
+    ),
+    "source_lang.tooltip": "Source language code, e.g. EN",
+    "source_lang.whatsthis": (
+        "Two-letter ISO 639-1 language code (e.g. EN for English, FR for "
+        "French). Must match the document's actual language, otherwise "
+        "the translation provider returns wrong or no results."
+    ),
+    "target_lang.tooltip": "Target language code, e.g. DE",
+    "target_lang.whatsthis": (
+        "Two-letter ISO 639-1 language code to translate into (e.g. DE "
+        "for German, ES for Spanish)."
+    ),
+    "protected.tooltip": "Terms that should stay untranslated",
+    "protected.whatsthis": (
+        "One term per line, e.g. company or product names. The "
+        "translation provider leaves these terms untouched. The button "
+        "next to the field can also load a list from a file."
+    ),
+    "ocr_engine_field.tooltip": "Text recognition (OCR) for images",
+    "ocr_engine_field.whatsthis": (
+        "Only shown in \"Images\" mode. Recognizes text in the images "
+        "before it is translated and written back. If an engine is not "
+        "available on this machine, a hint appears right below."
+    ),
+    "inpainting_backend_field.tooltip": (
+        "Method for writing the translated text back into the image"
+    ),
+    "inpainting_backend_field.whatsthis": (
+        "Only shown in \"Images\" mode. \"Box overlay\" and \"CV "
+        "inpainting\" always run locally, with no special hardware "
+        "required. \"GPU inpainting\" uses a local graphics card (CUDA) "
+        "for the best result and is only available if PyTorch with CUDA "
+        "support is installed - otherwise a hint appears below. Check "
+        "the hardware status any time via Help -> Hardware test."
+    ),
+    "merge.tooltip": "Merge several PDF files",
+    "merge.whatsthis": (
+        "Opens a separate dialog for merging several PDF files into "
+        "one. Independent of the form above - nothing is translated "
+        "here."
+    ),
+    "word_merge.tooltip": "Merge several Word files",
+    "word_merge.whatsthis": (
+        "Opens a separate dialog for merging several Word files into "
+        "one. Independent of the form above - nothing is translated "
+        "here."
+    ),
+    "analysis.button.tooltip": "Estimate the cost of this translation run",
+    "analysis.button.whatsthis": (
+        "Counts the characters to be translated and estimates the "
+        "approximate cost for the selected provider, without translating "
+        "anything yet. Only after this can the checkbox next to it be "
+        "ticked and \"Start\" enabled."
+    ),
+    "analysis.checked.tooltip": "Confirm the estimated cost",
+    "analysis.checked.whatsthis": (
+        "Must be ticked before \"Start\" becomes clickable - a "
+        "deliberate safety step so no run is ever started accidentally "
+        "without first looking at the estimated cost."
+    ),
+    "start.tooltip": "Start the translation run",
+    "start.whatsthis": (
+        "Only enabled after the cost has been analyzed and confirmed. "
+        "Progress appears in the area below; a running job can be "
+        "stopped via \"Cancel\"."
+    ),
+    "job.cancel.tooltip": "Cancel the running translation job",
+    "job.cancel.whatsthis": (
+        "Stops the current run as quickly as possible. Parts already "
+        "processed are not automatically kept as a complete file - "
+        "depending on the format, an incomplete file may remain."
+    ),
+    "job.open_folder.tooltip": "Open the output folder",
+    "job.open_folder.whatsthis": (
+        "Opens the file explorer in the destination folder of the run "
+        "that just finished."
+    ),
+    "job.open_report.tooltip": "Open the QA report for the last run",
+    "job.open_report.whatsthis": (
+        "Shows findings from the automatic quality check of the last "
+        "run, e.g. passages that may be worth reviewing."
+    ),
+    "job.correct_translation.tooltip": "Correct individual translations",
+    "job.correct_translation.whatsthis": (
+        "Only shown for PDF runs with correctable text blocks. Lets you "
+        "rework individual translated passages without repeating the "
+        "whole run."
+    ),
+    "settings.button.tooltip": "Open settings",
+    "settings.button.whatsthis": (
+        "API keys per provider (recommended: keyring), the character "
+        "limit per run, and access to the log file."
+    ),
+    "update_hint.tooltip": "A new version is available",
+    "update_hint.whatsthis": (
+        "Appears automatically when a newer version of PDF-Translator "
+        "was found at startup. Clicking it offers to install the new "
+        "version."
+    ),
+    "flag_row.whatsthis": (
+        "Immediately and permanently switches the language of the "
+        "interface itself - not the translation languages in the form. "
+        "The choice is saved right away."
+    ),
+    "menu.help.whats_this": "What's This?",
 }
 
 
@@ -1877,6 +2166,151 @@ FR = {
     "bootstrap.finish_text": "PDF-Translator est configuré et disponible dans le menu des applications.",
     "bootstrap.finish_launch_button": "Lancer maintenant",
     "bootstrap.finish_close_button": "Fermer",
+    "mode.tooltip": "Type de document à traduire",
+    "mode.whatsthis": (
+        "Détermine le flux de traduction utilisé : PDF, PowerPoint/"
+        "Impress, Word/Writer ou images individuelles. Selon le choix, "
+        "seuls les champs pertinents s'affichent plus bas, par exemple "
+        "les réglages OCR uniquement en mode « Images »."
+    ),
+    "source.tooltip": "Sélectionner le(s) fichier(s) à traduire",
+    "source.whatsthis": (
+        "Ouvre la boîte de dialogue de sélection de fichier pour le "
+        "fichier source (plusieurs fichiers à la fois en mode Images). "
+        "Le nom du fichier choisi apparaît ensuite à gauche."
+    ),
+    "source_label.tooltip": "Fichier source actuellement sélectionné",
+    "source_label.whatsthis": (
+        "Affiche le nom du fichier choisi via « Sélectionner un "
+        "fichier … ». S'il indique encore « Aucun fichier sélectionné », "
+        "il faut d'abord choisir un fichier avant qu'une analyse des "
+        "coûts soit possible."
+    ),
+    "image_mode.tooltip": "Traitement des images intégrées au document",
+    "image_mode.whatsthis": (
+        "« Ne pas traduire » laisse les images intégrées inchangées. "
+        "« Sélectionner individuellement plus tard » affiche une liste "
+        "après l'analyse des coûts pour choisir des images précises. "
+        "« Traduire toutes » traite automatiquement chaque image "
+        "intégrée."
+    ),
+    "provider.tooltip": "Fournisseur de traduction pour cette exécution",
+    "provider.whatsthis": (
+        "DeepL, Google, OpenAI ou Grok - chacun avec sa propre clé API, "
+        "gérée dans les Paramètres. Si aucune clé n'est configurée pour "
+        "le fournisseur choisi, un message avec un lien vers les "
+        "Paramètres apparaît juste en dessous."
+    ),
+    "source_lang.tooltip": "Code de la langue source, p. ex. EN",
+    "source_lang.whatsthis": (
+        "Code de langue à deux lettres selon ISO 639-1 (p. ex. EN pour "
+        "l'anglais, FR pour le français). Doit correspondre à la langue "
+        "réelle du document, sinon le fournisseur de traduction renvoie "
+        "des résultats erronés ou aucun résultat."
+    ),
+    "target_lang.tooltip": "Code de la langue cible, p. ex. DE",
+    "target_lang.whatsthis": (
+        "Code de langue à deux lettres selon ISO 639-1 vers laquelle "
+        "traduire (p. ex. DE pour l'allemand, ES pour l'espagnol)."
+    ),
+    "protected.tooltip": "Termes à ne pas traduire",
+    "protected.whatsthis": (
+        "Un terme par ligne, p. ex. des noms d'entreprise ou de produit. "
+        "Le fournisseur de traduction laisse ces termes inchangés. Le "
+        "bouton juste à côté permet aussi de charger une liste depuis un "
+        "fichier."
+    ),
+    "ocr_engine_field.tooltip": "Reconnaissance de texte (OCR) pour les images",
+    "ocr_engine_field.whatsthis": (
+        "Visible uniquement en mode « Images ». Reconnaît le texte dans "
+        "les images avant qu'il ne soit traduit puis réinséré. Si un "
+        "moteur n'est pas disponible sur cette machine, un message "
+        "apparaît juste en dessous."
+    ),
+    "inpainting_backend_field.tooltip": (
+        "Méthode de réinsertion du texte traduit dans l'image"
+    ),
+    "inpainting_backend_field.whatsthis": (
+        "Visible uniquement en mode « Images ». « Superposition de "
+        "boîte » et « CV Inpainting » fonctionnent toujours localement, "
+        "sans matériel particulier. « GPU Inpainting » utilise une carte "
+        "graphique locale (CUDA) pour le meilleur résultat et n'est "
+        "disponible que si PyTorch avec support CUDA est installé - "
+        "sinon un message apparaît en dessous. L'état du matériel peut "
+        "être vérifié à tout moment via Aide -> Test matériel."
+    ),
+    "merge.tooltip": "Fusionner plusieurs fichiers PDF",
+    "merge.whatsthis": (
+        "Ouvre une boîte de dialogue séparée pour fusionner plusieurs "
+        "fichiers PDF en un seul. Indépendant du formulaire ci-dessus - "
+        "rien n'est traduit ici."
+    ),
+    "word_merge.tooltip": "Fusionner plusieurs fichiers Word",
+    "word_merge.whatsthis": (
+        "Ouvre une boîte de dialogue séparée pour fusionner plusieurs "
+        "fichiers Word en un seul. Indépendant du formulaire ci-dessus - "
+        "rien n'est traduit ici."
+    ),
+    "analysis.button.tooltip": "Estimer le coût de cette traduction",
+    "analysis.button.whatsthis": (
+        "Compte les caractères à traduire et estime le coût approximatif "
+        "selon le fournisseur choisi, sans encore rien traduire. Ce "
+        "n'est qu'ensuite que la case à cocher juste à côté peut être "
+        "cochée et « Démarrer » activé."
+    ),
+    "analysis.checked.tooltip": "Confirmer les coûts estimés",
+    "analysis.checked.whatsthis": (
+        "Doit être cochée avant que « Démarrer » ne devienne cliquable - "
+        "une étape de sécurité volontaire pour qu'aucune exécution ne "
+        "démarre par accident sans avoir d'abord vu les coûts estimés."
+    ),
+    "start.tooltip": "Démarrer la traduction",
+    "start.whatsthis": (
+        "Activé seulement après analyse et confirmation des coûts. La "
+        "progression apparaît dans la zone en dessous ; une exécution en "
+        "cours peut être arrêtée via « Annuler »."
+    ),
+    "job.cancel.tooltip": "Annuler la traduction en cours",
+    "job.cancel.whatsthis": (
+        "Arrête l'exécution en cours aussi vite que possible. Les "
+        "parties déjà traitées ne sont pas automatiquement conservées "
+        "comme fichier complet - selon le format, un fichier incomplet "
+        "peut subsister."
+    ),
+    "job.open_folder.tooltip": "Ouvrir le dossier de sortie",
+    "job.open_folder.whatsthis": (
+        "Ouvre l'explorateur de fichiers dans le dossier de destination "
+        "de l'exécution qui vient de se terminer."
+    ),
+    "job.open_report.tooltip": "Ouvrir le rapport qualité de la dernière exécution",
+    "job.open_report.whatsthis": (
+        "Affiche les points relevés par le contrôle qualité automatique "
+        "de la dernière exécution, par exemple des passages qu'il "
+        "pourrait être utile de vérifier."
+    ),
+    "job.correct_translation.tooltip": "Corriger des traductions individuelles",
+    "job.correct_translation.whatsthis": (
+        "Visible uniquement pour les exécutions PDF avec des blocs de "
+        "texte corrigibles. Permet de retravailler des passages traduits "
+        "précis sans refaire toute l'exécution."
+    ),
+    "settings.button.tooltip": "Ouvrir les paramètres",
+    "settings.button.whatsthis": (
+        "Clés API par fournisseur (recommandé : trousseau), limite de "
+        "caractères par exécution et accès au fichier journal."
+    ),
+    "update_hint.tooltip": "Une nouvelle version est disponible",
+    "update_hint.whatsthis": (
+        "Apparaît automatiquement lorsqu'une version plus récente de "
+        "PDF-Translator a été trouvée au démarrage. Cliquer dessus "
+        "propose d'installer la nouvelle version."
+    ),
+    "flag_row.whatsthis": (
+        "Change immédiatement et durablement la langue de l'interface "
+        "elle-même - pas les langues de traduction du formulaire. Le "
+        "choix est enregistré aussitôt."
+    ),
+    "menu.help.whats_this": "Qu'est-ce que c'est ?",
 }
 
 
@@ -2305,6 +2739,150 @@ ES = {
     "bootstrap.finish_text": "PDF-Translator está configurado y disponible en el menú de aplicaciones.",
     "bootstrap.finish_launch_button": "Iniciar ahora",
     "bootstrap.finish_close_button": "Cerrar",
+    "mode.tooltip": "Tipo de documento a traducir",
+    "mode.whatsthis": (
+        "Determina el flujo de traducción utilizado: PDF, PowerPoint/"
+        "Impress, Word/Writer o imágenes individuales. Según la "
+        "selección, solo se muestran los campos relevantes más abajo, p. "
+        "ej. los ajustes de OCR solo en el modo «Imágenes»."
+    ),
+    "source.tooltip": "Seleccionar el/los archivo(s) a traducir",
+    "source.whatsthis": (
+        "Abre el selector de archivos para el archivo de origen (varios "
+        "archivos a la vez en modo Imágenes). El nombre del archivo "
+        "elegido aparece luego a la izquierda."
+    ),
+    "source_label.tooltip": "Archivo de origen seleccionado actualmente",
+    "source_label.whatsthis": (
+        "Muestra el nombre del archivo elegido por última vez mediante "
+        "«Seleccionar archivo…». Si todavía indica «Ningún archivo "
+        "seleccionado», primero hay que elegir un archivo antes de poder "
+        "analizar los costes."
+    ),
+    "image_mode.tooltip": "Tratamiento de las imágenes incrustadas en el documento",
+    "image_mode.whatsthis": (
+        "«No traducir» deja las imágenes incrustadas sin cambios. "
+        "«Seleccionar individualmente más tarde» muestra una lista tras "
+        "el análisis de costes para elegir imágenes concretas. "
+        "«Traducir todas» procesa automáticamente cada imagen "
+        "incrustada."
+    ),
+    "provider.tooltip": "Proveedor de traducción para esta ejecución",
+    "provider.whatsthis": (
+        "DeepL, Google, OpenAI o Grok, cada uno con su propia clave API, "
+        "gestionada en Ajustes. Si no hay clave configurada para el "
+        "proveedor elegido, aparece un aviso justo debajo con un enlace "
+        "a Ajustes."
+    ),
+    "source_lang.tooltip": "Código del idioma de origen, p. ej. EN",
+    "source_lang.whatsthis": (
+        "Código de idioma de dos letras según ISO 639-1 (p. ej. EN para "
+        "inglés, FR para francés). Debe coincidir con el idioma real del "
+        "documento; de lo contrario, el proveedor de traducción devuelve "
+        "resultados incorrectos o ninguno."
+    ),
+    "target_lang.tooltip": "Código del idioma de destino, p. ej. DE",
+    "target_lang.whatsthis": (
+        "Código de idioma de dos letras según ISO 639-1 al que traducir "
+        "(p. ej. DE para alemán, ES para español)."
+    ),
+    "protected.tooltip": "Términos que deben quedar sin traducir",
+    "protected.whatsthis": (
+        "Un término por línea, p. ej. nombres de empresa o de producto. "
+        "El proveedor de traducción deja estos términos intactos. El "
+        "botón de al lado también permite cargar una lista desde un "
+        "archivo."
+    ),
+    "ocr_engine_field.tooltip": "Reconocimiento de texto (OCR) para imágenes",
+    "ocr_engine_field.whatsthis": (
+        "Solo visible en modo «Imágenes». Reconoce el texto en las "
+        "imágenes antes de traducirlo y volver a insertarlo. Si un motor "
+        "no está disponible en este equipo, aparece un aviso justo "
+        "debajo."
+    ),
+    "inpainting_backend_field.tooltip": (
+        "Método para reinsertar el texto traducido en la imagen"
+    ),
+    "inpainting_backend_field.whatsthis": (
+        "Solo visible en modo «Imágenes». «Superposición de caja» y «CV "
+        "Inpainting» siempre se ejecutan localmente, sin hardware "
+        "especial. «GPU Inpainting» usa una tarjeta gráfica local (CUDA) "
+        "para el mejor resultado y solo está disponible si PyTorch con "
+        "soporte CUDA está instalado; si no, aparece un aviso debajo. El "
+        "estado del hardware se puede comprobar en cualquier momento en "
+        "Ayuda -> Prueba de hardware."
+    ),
+    "merge.tooltip": "Combinar varios archivos PDF",
+    "merge.whatsthis": (
+        "Abre un diálogo independiente para combinar varios archivos "
+        "PDF en uno solo. Independiente del formulario de arriba: aquí "
+        "no se traduce nada."
+    ),
+    "word_merge.tooltip": "Combinar varios archivos Word",
+    "word_merge.whatsthis": (
+        "Abre un diálogo independiente para combinar varios archivos "
+        "Word en uno solo. Independiente del formulario de arriba: aquí "
+        "no se traduce nada."
+    ),
+    "analysis.button.tooltip": "Estimar el coste de esta traducción",
+    "analysis.button.whatsthis": (
+        "Cuenta los caracteres a traducir y estima el coste aproximado "
+        "según el proveedor elegido, sin traducir todavía nada. Solo "
+        "después se puede marcar la casilla de al lado y habilitar "
+        "«Iniciar»."
+    ),
+    "analysis.checked.tooltip": "Confirmar los costes estimados",
+    "analysis.checked.whatsthis": (
+        "Debe marcarse antes de que «Iniciar» sea pulsable: un paso de "
+        "seguridad deliberado para que ninguna ejecución se inicie por "
+        "accidente sin haber visto antes los costes estimados."
+    ),
+    "start.tooltip": "Iniciar la traducción",
+    "start.whatsthis": (
+        "Solo se activa después de analizar y confirmar los costes. El "
+        "progreso aparece en el área de abajo; una ejecución en curso "
+        "puede detenerse con «Cancelar»."
+    ),
+    "job.cancel.tooltip": "Cancelar la traducción en curso",
+    "job.cancel.whatsthis": (
+        "Detiene la ejecución actual lo antes posible. Las partes ya "
+        "procesadas no se conservan automáticamente como un archivo "
+        "completo; según el formato, puede quedar un archivo incompleto."
+    ),
+    "job.open_folder.tooltip": "Abrir la carpeta de salida",
+    "job.open_folder.whatsthis": (
+        "Abre el explorador de archivos en la carpeta de destino de la "
+        "ejecución recién finalizada."
+    ),
+    "job.open_report.tooltip": "Abrir el informe de control de calidad de la última ejecución",
+    "job.open_report.whatsthis": (
+        "Muestra hallazgos del control de calidad automático de la "
+        "última ejecución, p. ej. pasajes que podría valer la pena "
+        "revisar."
+    ),
+    "job.correct_translation.tooltip": "Corregir traducciones individuales",
+    "job.correct_translation.whatsthis": (
+        "Solo visible en ejecuciones de PDF con bloques de texto "
+        "corregibles. Permite retocar pasajes traducidos concretos sin "
+        "repetir toda la ejecución."
+    ),
+    "settings.button.tooltip": "Abrir los ajustes",
+    "settings.button.whatsthis": (
+        "Claves API por proveedor (recomendado: llavero), el límite de "
+        "caracteres por ejecución y el acceso al archivo de registro."
+    ),
+    "update_hint.tooltip": "Hay una nueva versión disponible",
+    "update_hint.whatsthis": (
+        "Aparece automáticamente cuando al iniciar se encuentra una "
+        "versión más reciente de PDF-Translator. Al hacer clic se ofrece "
+        "instalar la nueva versión."
+    ),
+    "flag_row.whatsthis": (
+        "Cambia de inmediato y de forma permanente el idioma de la "
+        "propia interfaz, no los idiomas de traducción del formulario. "
+        "La elección se guarda al instante."
+    ),
+    "menu.help.whats_this": "¿Qué es esto?",
 }
 
 
@@ -2734,6 +3312,150 @@ IT = {
     "bootstrap.finish_text": "PDF-Translator è configurato ed è disponibile nel menu delle applicazioni.",
     "bootstrap.finish_launch_button": "Avvia ora",
     "bootstrap.finish_close_button": "Chiudi",
+    "mode.tooltip": "Tipo di documento da tradurre",
+    "mode.whatsthis": (
+        "Determina il flusso di traduzione utilizzato: PDF, PowerPoint/"
+        "Impress, Word/Writer o immagini singole. In base alla scelta, "
+        "più in basso vengono mostrati solo i campi pertinenti, ad es. "
+        "le impostazioni OCR solo in modalità «Immagini»."
+    ),
+    "source.tooltip": "Seleziona il/i file da tradurre",
+    "source.whatsthis": (
+        "Apre la finestra di selezione file per il file di origine (più "
+        "file contemporaneamente in modalità Immagini). Il nome del "
+        "file scelto appare poi a sinistra."
+    ),
+    "source_label.tooltip": "File di origine attualmente selezionato",
+    "source_label.whatsthis": (
+        "Mostra il nome del file scelto l'ultima volta tramite "
+        "«Seleziona file…». Se indica ancora «Nessun file selezionato», "
+        "occorre prima scegliere un file prima che sia possibile "
+        "un'analisi dei costi."
+    ),
+    "image_mode.tooltip": "Gestione delle immagini incorporate nel documento",
+    "image_mode.whatsthis": (
+        "«Non tradurre» lascia invariate le immagini incorporate. "
+        "«Seleziona singolarmente in seguito» mostra un elenco dopo "
+        "l'analisi dei costi per scegliere immagini specifiche. "
+        "«Traduci tutte» elabora automaticamente ogni immagine "
+        "incorporata."
+    ),
+    "provider.tooltip": "Provider di traduzione per questa esecuzione",
+    "provider.whatsthis": (
+        "DeepL, Google, OpenAI o Grok, ciascuno con una propria chiave "
+        "API, gestita in Impostazioni. Se per il provider scelto non è "
+        "configurata alcuna chiave, subito sotto appare un avviso con un "
+        "link alle Impostazioni."
+    ),
+    "source_lang.tooltip": "Codice della lingua di origine, ad es. EN",
+    "source_lang.whatsthis": (
+        "Codice lingua di due lettere secondo ISO 639-1 (ad es. EN per "
+        "l'inglese, FR per il francese). Deve corrispondere alla lingua "
+        "reale del documento, altrimenti il provider di traduzione "
+        "restituisce risultati errati o nessun risultato."
+    ),
+    "target_lang.tooltip": "Codice della lingua di destinazione, ad es. DE",
+    "target_lang.whatsthis": (
+        "Codice lingua di due lettere secondo ISO 639-1 verso cui "
+        "tradurre (ad es. DE per il tedesco, ES per lo spagnolo)."
+    ),
+    "protected.tooltip": "Termini che devono restare non tradotti",
+    "protected.whatsthis": (
+        "Un termine per riga, ad es. nomi di aziende o prodotti. Il "
+        "provider di traduzione lascia questi termini invariati. Il "
+        "pulsante accanto permette anche di caricare un elenco da un "
+        "file."
+    ),
+    "ocr_engine_field.tooltip": "Riconoscimento del testo (OCR) per le immagini",
+    "ocr_engine_field.whatsthis": (
+        "Visibile solo in modalità «Immagini». Riconosce il testo nelle "
+        "immagini prima che venga tradotto e riscritto. Se un motore non "
+        "è disponibile su questo computer, subito sotto appare un "
+        "avviso."
+    ),
+    "inpainting_backend_field.tooltip": (
+        "Metodo per riscrivere il testo tradotto nell'immagine"
+    ),
+    "inpainting_backend_field.whatsthis": (
+        "Visibile solo in modalità «Immagini». «Sovrapposizione box» e "
+        "«CV Inpainting» funzionano sempre localmente, senza hardware "
+        "particolare. «GPU Inpainting» usa una scheda grafica locale "
+        "(CUDA) per il miglior risultato ed è disponibile solo se è "
+        "installato PyTorch con supporto CUDA, altrimenti sotto appare "
+        "un avviso. Lo stato dell'hardware può essere verificato in "
+        "qualsiasi momento tramite Guida -> Test hardware."
+    ),
+    "merge.tooltip": "Unisci più file PDF",
+    "merge.whatsthis": (
+        "Apre una finestra separata per unire più file PDF in uno solo. "
+        "Indipendente dal modulo sopra: qui non viene tradotto nulla."
+    ),
+    "word_merge.tooltip": "Unisci più file Word",
+    "word_merge.whatsthis": (
+        "Apre una finestra separata per unire più file Word in uno "
+        "solo. Indipendente dal modulo sopra: qui non viene tradotto "
+        "nulla."
+    ),
+    "analysis.button.tooltip": "Stima il costo di questa traduzione",
+    "analysis.button.whatsthis": (
+        "Conta i caratteri da tradurre e stima il costo approssimativo "
+        "in base al provider scelto, senza ancora tradurre nulla. Solo "
+        "dopo è possibile spuntare la casella accanto e abilitare "
+        "«Avvia»."
+    ),
+    "analysis.checked.tooltip": "Conferma i costi stimati",
+    "analysis.checked.whatsthis": (
+        "Deve essere spuntata prima che «Avvia» diventi cliccabile: un "
+        "passaggio di sicurezza deliberato affinché nessuna esecuzione "
+        "parta per errore senza aver prima visto i costi stimati."
+    ),
+    "start.tooltip": "Avvia la traduzione",
+    "start.whatsthis": (
+        "Si attiva solo dopo che i costi sono stati analizzati e "
+        "confermati. L'avanzamento appare nell'area sottostante; "
+        "un'esecuzione in corso può essere interrotta con «Annulla»."
+    ),
+    "job.cancel.tooltip": "Annulla la traduzione in corso",
+    "job.cancel.whatsthis": (
+        "Interrompe l'esecuzione corrente il più rapidamente possibile. "
+        "Le parti già elaborate non vengono automaticamente conservate "
+        "come file completo: a seconda del formato può rimanere un file "
+        "incompleto."
+    ),
+    "job.open_folder.tooltip": "Apri la cartella di output",
+    "job.open_folder.whatsthis": (
+        "Apre l'esplora file nella cartella di destinazione "
+        "dell'esecuzione appena conclusa."
+    ),
+    "job.open_report.tooltip": "Apri il report QA dell'ultima esecuzione",
+    "job.open_report.whatsthis": (
+        "Mostra le rilevazioni del controllo qualità automatico "
+        "dell'ultima esecuzione, ad es. passaggi che potrebbe valere la "
+        "pena controllare."
+    ),
+    "job.correct_translation.tooltip": "Correggi singole traduzioni",
+    "job.correct_translation.whatsthis": (
+        "Visibile solo per esecuzioni PDF con blocchi di testo "
+        "correggibili. Permette di rielaborare singoli passaggi tradotti "
+        "senza ripetere l'intera esecuzione."
+    ),
+    "settings.button.tooltip": "Apri le impostazioni",
+    "settings.button.whatsthis": (
+        "Chiavi API per provider (consigliato: keyring), il limite di "
+        "caratteri per esecuzione e l'accesso al file di log."
+    ),
+    "update_hint.tooltip": "È disponibile una nuova versione",
+    "update_hint.whatsthis": (
+        "Appare automaticamente quando all'avvio viene trovata una "
+        "versione più recente di PDF-Translator. Cliccandolo si propone "
+        "di installare la nuova versione."
+    ),
+    "flag_row.whatsthis": (
+        "Cambia immediatamente e in modo permanente la lingua "
+        "dell'interfaccia stessa, non le lingue di traduzione nel "
+        "modulo. La scelta viene salvata subito."
+    ),
+    "menu.help.whats_this": "Che cos'è?",
 }
 
 
@@ -3162,6 +3884,150 @@ NL = {
     "bootstrap.finish_text": "PDF-Translator is ingesteld en te vinden in het toepassingenmenu.",
     "bootstrap.finish_launch_button": "Nu starten",
     "bootstrap.finish_close_button": "Sluiten",
+    "mode.tooltip": "Type document dat vertaald moet worden",
+    "mode.whatsthis": (
+        "Bepaalt welke vertaalworkflow wordt gebruikt: PDF, PowerPoint/"
+        "Impress, Word/Writer of losse afbeeldingen. Afhankelijk van de "
+        "keuze worden hieronder alleen de relevante velden getoond, "
+        "bijv. de OCR-instellingen alleen in de modus \"Afbeeldingen\"."
+    ),
+    "source.tooltip": "Bestand(en) selecteren om te vertalen",
+    "source.whatsthis": (
+        "Opent de bestandskiezer voor het bronbestand (in de modus "
+        "Afbeeldingen ook meerdere bestanden tegelijk). De gekozen "
+        "bestandsnaam verschijnt daarna links ernaast."
+    ),
+    "source_label.tooltip": "Momenteel geselecteerd bronbestand",
+    "source_label.whatsthis": (
+        "Toont de naam van het bestand dat laatst is gekozen via "
+        "\"Bestand selecteren …\". Staat hier nog \"Geen bestand "
+        "geselecteerd\", kies dan eerst een bestand voordat een "
+        "kostenanalyse mogelijk is."
+    ),
+    "image_mode.tooltip": "Omgang met afbeeldingen die in het document zijn ingesloten",
+    "image_mode.whatsthis": (
+        "\"Niet vertalen\" laat ingesloten afbeeldingen ongewijzigd. "
+        "\"Later afzonderlijk selecteren\" toont na de kostenanalyse een "
+        "lijst waaruit specifieke afbeeldingen gekozen worden. \"Alles "
+        "vertalen\" verwerkt automatisch elke ingesloten afbeelding."
+    ),
+    "provider.tooltip": "Vertaalprovider voor deze run",
+    "provider.whatsthis": (
+        "DeepL, Google, OpenAI of Grok - elk met een eigen API-sleutel, "
+        "beheerd in Instellingen. Ontbreekt er een sleutel voor de "
+        "gekozen provider, dan verschijnt daaronder direct een melding "
+        "met een link naar Instellingen."
+    ),
+    "source_lang.tooltip": "Taalcode van de brontaal, bijv. EN",
+    "source_lang.whatsthis": (
+        "Tweeletterige taalcode volgens ISO 639-1 (bijv. EN voor Engels, "
+        "FR voor Frans). Moet overeenkomen met de daadwerkelijke taal "
+        "van het document, anders levert de vertaalprovider onjuiste of "
+        "geen resultaten."
+    ),
+    "target_lang.tooltip": "Taalcode van de doeltaal, bijv. DE",
+    "target_lang.whatsthis": (
+        "Tweeletterige taalcode volgens ISO 639-1 waarnaar vertaald moet "
+        "worden (bijv. DE voor Duits, ES voor Spaans)."
+    ),
+    "protected.tooltip": "Termen die onvertaald moeten blijven",
+    "protected.whatsthis": (
+        "Eén term per regel, bijv. bedrijfs- of productnamen. De "
+        "vertaalprovider laat deze termen ongemoeid. Via de knop "
+        "ernaast kan ook een lijst uit een bestand worden geladen."
+    ),
+    "ocr_engine_field.tooltip": "Tekstherkenning (OCR) voor afbeeldingen",
+    "ocr_engine_field.whatsthis": (
+        "Alleen zichtbaar in de modus \"Afbeeldingen\". Herkent tekst in "
+        "de afbeeldingen voordat deze wordt vertaald en teruggeschreven. "
+        "Is een engine op deze computer niet beschikbaar, dan verschijnt "
+        "daaronder een melding."
+    ),
+    "inpainting_backend_field.tooltip": (
+        "Methode om de vertaalde tekst terug te schrijven in de afbeelding"
+    ),
+    "inpainting_backend_field.whatsthis": (
+        "Alleen zichtbaar in de modus \"Afbeeldingen\". "
+        "\"Box-overlay\" en \"CV-inpainting\" draaien altijd lokaal, "
+        "zonder bijzondere hardware. \"GPU-inpainting\" gebruikt een "
+        "lokale videokaart (CUDA) voor het beste resultaat en is alleen "
+        "beschikbaar als PyTorch met CUDA-ondersteuning is "
+        "geïnstalleerd - anders verschijnt daaronder een melding. De "
+        "hardwarestatus is altijd te controleren via Help -> "
+        "Hardwaretest."
+    ),
+    "merge.tooltip": "Meerdere PDF-bestanden samenvoegen",
+    "merge.whatsthis": (
+        "Opent een apart dialoogvenster om meerdere PDF-bestanden tot "
+        "één samen te voegen. Onafhankelijk van het formulier hierboven "
+        "- hier wordt niets vertaald."
+    ),
+    "word_merge.tooltip": "Meerdere Word-bestanden samenvoegen",
+    "word_merge.whatsthis": (
+        "Opent een apart dialoogvenster om meerdere Word-bestanden tot "
+        "één samen te voegen. Onafhankelijk van het formulier hierboven "
+        "- hier wordt niets vertaald."
+    ),
+    "analysis.button.tooltip": "Kosten van deze vertaalrun inschatten",
+    "analysis.button.whatsthis": (
+        "Telt de te vertalen tekens en schat op basis van de gekozen "
+        "provider de globale kosten, zonder al iets te vertalen. Pas "
+        "daarna kan het vakje ernaast worden aangevinkt en \"Starten\" "
+        "worden vrijgegeven."
+    ),
+    "analysis.checked.tooltip": "Geschatte kosten bevestigen",
+    "analysis.checked.whatsthis": (
+        "Moet aangevinkt zijn voordat \"Starten\" klikbaar wordt - een "
+        "bewuste veiligheidsstap zodat een run nooit per ongeluk start "
+        "zonder eerst naar de geschatte kosten te hebben gekeken."
+    ),
+    "start.tooltip": "Vertaalrun starten",
+    "start.whatsthis": (
+        "Wordt pas actief nadat de kosten zijn geanalyseerd en "
+        "bevestigd. De voortgang verschijnt in het gebied eronder; een "
+        "lopende run kan via \"Annuleren\" worden gestopt."
+    ),
+    "job.cancel.tooltip": "Lopende vertaalrun annuleren",
+    "job.cancel.whatsthis": (
+        "Stopt de huidige run zo snel mogelijk. Al verwerkte delen "
+        "blijven niet automatisch bewaard als compleet bestand - "
+        "afhankelijk van het formaat kan een onvolledig bestand "
+        "achterblijven."
+    ),
+    "job.open_folder.tooltip": "Uitvoermap openen",
+    "job.open_folder.whatsthis": (
+        "Opent de bestandsverkenner in de doelmap van de zojuist "
+        "voltooide run."
+    ),
+    "job.open_report.tooltip": "QA-rapport van de laatste run openen",
+    "job.open_report.whatsthis": (
+        "Toont bevindingen van de automatische kwaliteitscontrole van de "
+        "laatste run, bijv. passages die het waard kunnen zijn om te "
+        "controleren."
+    ),
+    "job.correct_translation.tooltip": "Afzonderlijke vertalingen corrigeren",
+    "job.correct_translation.whatsthis": (
+        "Alleen zichtbaar bij PDF-runs met corrigeerbare tekstblokken. "
+        "Hiermee kunnen afzonderlijke vertaalde passages gericht worden "
+        "bijgewerkt, zonder de hele run te herhalen."
+    ),
+    "settings.button.tooltip": "Instellingen openen",
+    "settings.button.whatsthis": (
+        "API-sleutels per provider (aanbevolen: keyring), het "
+        "tekenlimiet per run en toegang tot het logbestand."
+    ),
+    "update_hint.tooltip": "Er is een nieuwe versie beschikbaar",
+    "update_hint.whatsthis": (
+        "Verschijnt automatisch wanneer bij het opstarten een nieuwere "
+        "versie van PDF-Translator is gevonden. Erop klikken biedt aan "
+        "de nieuwe versie te installeren."
+    ),
+    "flag_row.whatsthis": (
+        "Wijzigt onmiddellijk en blijvend de taal van de interface zelf "
+        "- niet de vertaaltalen in het formulier. De keuze wordt meteen "
+        "opgeslagen."
+    ),
+    "menu.help.whats_this": "Wat is dit?",
 }
 
 
@@ -3591,6 +4457,143 @@ FI = {
     "bootstrap.finish_text": "PDF-Translator on määritetty ja löytyy sovellusvalikosta.",
     "bootstrap.finish_launch_button": "Käynnistä nyt",
     "bootstrap.finish_close_button": "Sulje",
+    "mode.tooltip": "Käännettävän asiakirjan tyyppi",
+    "mode.whatsthis": (
+        "Määrittää käytettävän käännöskulun: PDF, PowerPoint/Impress, "
+        "Word/Writer tai yksittäiset kuvat. Valinnan mukaan alla näkyvät "
+        "vain siihen liittyvät kentät, esim. OCR-asetukset vain "
+        "\"Kuvat\"-tilassa."
+    ),
+    "source.tooltip": "Valitse käännettävä(t) tiedosto(t)",
+    "source.whatsthis": (
+        "Avaa tiedostonvalintaikkunan lähdetiedostolle (Kuvat-tilassa "
+        "myös useita tiedostoja kerralla). Valittu tiedostonimi näkyy "
+        "sen jälkeen vasemmalla."
+    ),
+    "source_label.tooltip": "Tällä hetkellä valittu lähdetiedosto",
+    "source_label.whatsthis": (
+        "Näyttää viimeksi kohdasta \"Valitse tiedosto …\" valitun "
+        "tiedoston nimen. Jos siinä lukee vielä \"Ei tiedostoa "
+        "valittu\", valitse ensin tiedosto ennen kuin kustannusanalyysi "
+        "on mahdollinen."
+    ),
+    "image_mode.tooltip": "Asiakirjaan upotettujen kuvien käsittely",
+    "image_mode.whatsthis": (
+        "\"Älä käännä\" jättää upotetut kuvat ennalleen. \"Valitse "
+        "yksitellen myöhemmin\" näyttää kustannusanalyysin jälkeen "
+        "luettelon, josta valitaan tietyt kuvat. \"Käännä kaikki\" "
+        "käsittelee automaattisesti jokaisen upotetun kuvan."
+    ),
+    "provider.tooltip": "Käännöspalvelu tälle ajolle",
+    "provider.whatsthis": (
+        "DeepL, Google, OpenAI tai Grok - kullakin oma API-avain, jota "
+        "hallitaan Asetuksissa. Jos valitulle palveluntarjoajalle ei ole "
+        "määritetty avainta, sen alle ilmestyy heti huomautus linkillä "
+        "Asetuksiin."
+    ),
+    "source_lang.tooltip": "Lähdekielen koodi, esim. EN",
+    "source_lang.whatsthis": (
+        "Kaksikirjaiminen ISO 639-1 -kielikoodi (esim. EN englannille, "
+        "FR ranskalle). Täytyy vastata asiakirjan todellista kieltä, "
+        "muuten käännöspalvelu antaa vääriä tai ei lainkaan tuloksia."
+    ),
+    "target_lang.tooltip": "Kohdekielen koodi, esim. DE",
+    "target_lang.whatsthis": (
+        "Kaksikirjaiminen ISO 639-1 -kielikoodi, jolle käännetään (esim. "
+        "DE saksalle, ES espanjalle)."
+    ),
+    "protected.tooltip": "Termit, joiden ei tule kääntyä",
+    "protected.whatsthis": (
+        "Yksi termi per rivi, esim. yritys- tai tuotenimet. "
+        "Käännöspalvelu jättää nämä termit koskemattomiksi. Vierestä "
+        "löytyvällä painikkeella voi myös ladata luettelon tiedostosta."
+    ),
+    "ocr_engine_field.tooltip": "Tekstintunnistus (OCR) kuville",
+    "ocr_engine_field.whatsthis": (
+        "Näkyy vain \"Kuvat\"-tilassa. Tunnistaa tekstin kuvista ennen "
+        "kuin se käännetään ja kirjoitetaan takaisin. Jos moottori ei "
+        "ole käytettävissä tällä koneella, sen alle ilmestyy huomautus."
+    ),
+    "inpainting_backend_field.tooltip": (
+        "Menetelmä käännetyn tekstin kirjoittamiseksi takaisin kuvaan"
+    ),
+    "inpainting_backend_field.whatsthis": (
+        "Näkyy vain \"Kuvat\"-tilassa. \"Laatikkopeite\" ja "
+        "\"CV-inpainting\" toimivat aina paikallisesti ilman erityistä "
+        "laitteistoa. \"GPU-inpainting\" käyttää paikallista "
+        "näytönohjainta (CUDA) parhaan tuloksen saamiseksi, ja se on "
+        "käytettävissä vain, jos CUDA-tuella varustettu PyTorch on "
+        "asennettu - muuten alle ilmestyy huomautus. Laitteiston tilan "
+        "voi tarkistaa milloin tahansa kohdasta Ohje -> Laitteistotesti."
+    ),
+    "merge.tooltip": "Yhdistä useita PDF-tiedostoja",
+    "merge.whatsthis": (
+        "Avaa erillisen ikkunan useiden PDF-tiedostojen yhdistämiseksi "
+        "yhdeksi. Riippumaton yllä olevasta lomakkeesta - tässä ei "
+        "käännetä mitään."
+    ),
+    "word_merge.tooltip": "Yhdistä useita Word-tiedostoja",
+    "word_merge.whatsthis": (
+        "Avaa erillisen ikkunan useiden Word-tiedostojen yhdistämiseksi "
+        "yhdeksi. Riippumaton yllä olevasta lomakkeesta - tässä ei "
+        "käännetä mitään."
+    ),
+    "analysis.button.tooltip": "Arvioi tämän käännösajon kustannukset",
+    "analysis.button.whatsthis": (
+        "Laskee käännettävät merkit ja arvioi valitun palveluntarjoajan "
+        "mukaan suuntaa-antavat kustannukset kääntämättä vielä mitään. "
+        "Vasta tämän jälkeen vieressä olevan valintaruudun voi rastia ja "
+        "\"Aloita\" vapautuu."
+    ),
+    "analysis.checked.tooltip": "Vahvista arvioidut kustannukset",
+    "analysis.checked.whatsthis": (
+        "Täytyy rastia, ennen kuin \"Aloita\" tulee klikattavaksi - "
+        "tarkoituksellinen varmistus, ettei ajoa koskaan käynnistetä "
+        "vahingossa katsomatta ensin arvioituja kustannuksia."
+    ),
+    "start.tooltip": "Aloita käännösajo",
+    "start.whatsthis": (
+        "Aktivoituu vasta, kun kustannukset on analysoitu ja "
+        "vahvistettu. Eteneminen näkyy alla olevalla alueella; käynnissä "
+        "olevan ajon voi pysäyttää kohdasta \"Peruuta\"."
+    ),
+    "job.cancel.tooltip": "Peruuta käynnissä oleva käännösajo",
+    "job.cancel.whatsthis": (
+        "Pysäyttää nykyisen ajon mahdollisimman nopeasti. Jo käsitellyt "
+        "osat eivät automaattisesti säily täydellisenä tiedostona - "
+        "muodosta riippuen jäljelle voi jäädä keskeneräinen tiedosto."
+    ),
+    "job.open_folder.tooltip": "Avaa tulostekansio",
+    "job.open_folder.whatsthis": (
+        "Avaa tiedostoselaimen juuri valmistuneen ajon kohdekansiossa."
+    ),
+    "job.open_report.tooltip": "Avaa viimeisimmän ajon QA-raportti",
+    "job.open_report.whatsthis": (
+        "Näyttää viimeisimmän ajon automaattisen laadunvarmistuksen "
+        "havainnot, esim. kohdat, jotka voi olla syytä tarkistaa."
+    ),
+    "job.correct_translation.tooltip": "Korjaa yksittäisiä käännöksiä",
+    "job.correct_translation.whatsthis": (
+        "Näkyy vain PDF-ajoissa, joissa on korjattavia tekstilohkoja. "
+        "Mahdollistaa yksittäisten käännettyjen kohtien jälkikäsittelyn "
+        "ilman koko ajon toistamista."
+    ),
+    "settings.button.tooltip": "Avaa asetukset",
+    "settings.button.whatsthis": (
+        "API-avaimet palveluntarjoajittain (suositus: avainnippu), "
+        "merkkiraja ajoa kohden sekä pääsy lokitiedostoon."
+    ),
+    "update_hint.tooltip": "Uusi versio on saatavilla",
+    "update_hint.whatsthis": (
+        "Ilmestyy automaattisesti, kun käynnistyksen yhteydessä löytyy "
+        "uudempi PDF-Translator-versio. Klikkaaminen tarjoaa uuden "
+        "version asentamista."
+    ),
+    "flag_row.whatsthis": (
+        "Vaihtaa heti ja pysyvästi käyttöliittymän oman kielen - ei "
+        "lomakkeen käännöskieliä. Valinta tallentuu välittömästi."
+    ),
+    "menu.help.whats_this": "Mikä tämä on?",
 }
 
 
@@ -4018,6 +5021,142 @@ HR = {
     "bootstrap.finish_text": "PDF-Translator je postavljen i dostupan je u izborniku aplikacija.",
     "bootstrap.finish_launch_button": "Pokreni sada",
     "bootstrap.finish_close_button": "Zatvori",
+    "mode.tooltip": "Vrsta dokumenta za prevođenje",
+    "mode.whatsthis": (
+        "Određuje koji se tijek prevođenja koristi: PDF, PowerPoint/"
+        "Impress, Word/Writer ili pojedinačne slike. Ovisno o odabiru, "
+        "ispod se prikazuju samo relevantna polja, npr. postavke OCR-a "
+        "samo u načinu \"Slike\"."
+    ),
+    "source.tooltip": "Odaberi datoteku/e za prevođenje",
+    "source.whatsthis": (
+        "Otvara dijalog za odabir izvorne datoteke (u načinu Slike i "
+        "više datoteka odjednom). Odabrani naziv datoteke zatim se "
+        "prikazuje lijevo pored."
+    ),
+    "source_label.tooltip": "Trenutačno odabrana izvorna datoteka",
+    "source_label.whatsthis": (
+        "Prikazuje naziv datoteke posljednji put odabrane putem "
+        "\"Odaberi datoteku …\". Ako još uvijek piše \"Nijedna datoteka "
+        "nije odabrana\", prvo je potrebno odabrati datoteku prije nego "
+        "što je moguća procjena troškova."
+    ),
+    "image_mode.tooltip": "Postupanje sa slikama ugrađenima u dokument",
+    "image_mode.whatsthis": (
+        "\"Ne prevodi\" ostavlja ugrađene slike nepromijenjene. "
+        "\"Kasnije pojedinačno odaberi\" nakon procjene troškova "
+        "prikazuje popis za odabir određenih slika. \"Prevedi sve\" "
+        "automatski obrađuje svaku ugrađenu sliku."
+    ),
+    "provider.tooltip": "Pružatelj usluge prevođenja za ovo pokretanje",
+    "provider.whatsthis": (
+        "DeepL, Google, OpenAI ili Grok - svaki sa svojim API ključem, "
+        "kojim se upravlja u Postavkama. Ako za odabranog pružatelja "
+        "nije postavljen ključ, odmah ispod pojavljuje se napomena s "
+        "poveznicom na Postavke."
+    ),
+    "source_lang.tooltip": "Kôd izvornog jezika, npr. EN",
+    "source_lang.whatsthis": (
+        "Dvoslovni jezični kôd prema ISO 639-1 (npr. EN za engleski, FR "
+        "za francuski). Mora odgovarati stvarnom jeziku dokumenta, "
+        "inače pružatelj usluge prevođenja vraća pogrešne ili nikakve "
+        "rezultate."
+    ),
+    "target_lang.tooltip": "Kôd ciljnog jezika, npr. DE",
+    "target_lang.whatsthis": (
+        "Dvoslovni jezični kôd prema ISO 639-1 na koji se prevodi (npr. "
+        "DE za njemački, ES za španjolski)."
+    ),
+    "protected.tooltip": "Pojmovi koji trebaju ostati neprevedeni",
+    "protected.whatsthis": (
+        "Jedan pojam po retku, npr. nazivi tvrtki ili proizvoda. "
+        "Pružatelj usluge prevođenja ostavlja te pojmove netaknutima. "
+        "Gumb pored omogućuje i učitavanje popisa iz datoteke."
+    ),
+    "ocr_engine_field.tooltip": "Prepoznavanje teksta (OCR) za slike",
+    "ocr_engine_field.whatsthis": (
+        "Prikazano samo u načinu \"Slike\". Prepoznaje tekst na slikama "
+        "prije nego što se prevede i vrati natrag. Ako alat nije "
+        "dostupan na ovom računalu, odmah ispod pojavljuje se napomena."
+    ),
+    "inpainting_backend_field.tooltip": (
+        "Metoda vraćanja prevedenog teksta natrag u sliku"
+    ),
+    "inpainting_backend_field.whatsthis": (
+        "Prikazano samo u načinu \"Slike\". \"Prekrivanje okvirom\" i "
+        "\"CV Inpainting\" uvijek rade lokalno, bez posebnog hardvera. "
+        "\"GPU Inpainting\" koristi lokalnu grafičku karticu (CUDA) za "
+        "najbolji rezultat i dostupan je samo ako je instaliran PyTorch "
+        "s podrškom za CUDA - inače se ispod pojavljuje napomena. "
+        "Stanje hardvera moguće je provjeriti u bilo kojem trenutku "
+        "putem Pomoć -> Test hardvera."
+    ),
+    "merge.tooltip": "Spoji više PDF datoteka",
+    "merge.whatsthis": (
+        "Otvara zaseban dijalog za spajanje više PDF datoteka u jednu. "
+        "Neovisno o obrascu iznad - ovdje se ništa ne prevodi."
+    ),
+    "word_merge.tooltip": "Spoji više Word datoteka",
+    "word_merge.whatsthis": (
+        "Otvara zaseban dijalog za spajanje više Word datoteka u jednu. "
+        "Neovisno o obrascu iznad - ovdje se ništa ne prevodi."
+    ),
+    "analysis.button.tooltip": "Procijeni trošak ovog prijevoda",
+    "analysis.button.whatsthis": (
+        "Broji znakove za prevođenje i prema odabranom pružatelju "
+        "procjenjuje okvirni trošak, bez stvarnog prevođenja. Tek nakon "
+        "toga moguće je označiti kvačicu pored i omogućiti \"Pokreni\"."
+    ),
+    "analysis.checked.tooltip": "Potvrdi procijenjene troškove",
+    "analysis.checked.whatsthis": (
+        "Mora biti označeno prije nego \"Pokreni\" postane klikabilno - "
+        "namjerni sigurnosni korak kako se pokretanje nikada ne bi "
+        "slučajno pokrenulo bez prethodnog uvida u procijenjene "
+        "troškove."
+    ),
+    "start.tooltip": "Pokreni prijevod",
+    "start.whatsthis": (
+        "Aktivira se tek nakon što su troškovi analizirani i "
+        "potvrđeni. Napredak se prikazuje u području ispod; pokrenuto "
+        "izvršavanje moguće je zaustaviti putem \"Prekini\"."
+    ),
+    "job.cancel.tooltip": "Prekini pokrenuti prijevod",
+    "job.cancel.whatsthis": (
+        "Zaustavlja trenutačno izvršavanje što je brže moguće. Već "
+        "obrađeni dijelovi ne čuvaju se automatski kao potpuna datoteka "
+        "- ovisno o formatu, može ostati nepotpuna datoteka."
+    ),
+    "job.open_folder.tooltip": "Otvori izlaznu mapu",
+    "job.open_folder.whatsthis": (
+        "Otvara preglednik datoteka u ciljnoj mapi upravo završenog "
+        "izvršavanja."
+    ),
+    "job.open_report.tooltip": "Otvori QA izvještaj posljednjeg izvršavanja",
+    "job.open_report.whatsthis": (
+        "Prikazuje nalaze automatske provjere kvalitete posljednjeg "
+        "izvršavanja, npr. dijelove koje bi vrijedilo provjeriti."
+    ),
+    "job.correct_translation.tooltip": "Ispravi pojedinačne prijevode",
+    "job.correct_translation.whatsthis": (
+        "Prikazano samo kod PDF izvršavanja s ispravljivim tekstualnim "
+        "blokovima. Omogućuje naknadnu obradu pojedinačnih prevedenih "
+        "dijelova bez ponavljanja cijelog izvršavanja."
+    ),
+    "settings.button.tooltip": "Otvori postavke",
+    "settings.button.whatsthis": (
+        "API ključevi po pružatelju (preporučeno: keyring), ograničenje "
+        "znakova po izvršavanju i pristup datoteci zapisnika."
+    ),
+    "update_hint.tooltip": "Dostupna je nova verzija",
+    "update_hint.whatsthis": (
+        "Prikazuje se automatski kada se pri pokretanju pronađe novija "
+        "verzija PDF-Translatora. Klik nudi instalaciju nove verzije."
+    ),
+    "flag_row.whatsthis": (
+        "Odmah i trajno mijenja jezik samog sučelja - ne jezike "
+        "prijevoda u obrascu. Odabir se odmah sprema."
+    ),
+    "menu.help.whats_this": "Što je ovo?",
 }
 
 
@@ -4447,6 +5586,150 @@ RU = {
     "bootstrap.finish_text": "PDF-Translator настроен и доступен в меню приложений.",
     "bootstrap.finish_launch_button": "Запустить сейчас",
     "bootstrap.finish_close_button": "Закрыть",
+    "mode.tooltip": "Тип документа для перевода",
+    "mode.whatsthis": (
+        "Определяет, какой процесс перевода используется: PDF, "
+        "PowerPoint/Impress, Word/Writer или отдельные изображения. В "
+        "зависимости от выбора ниже показываются только "
+        "соответствующие поля, например настройки OCR - только в "
+        "режиме «Изображения»."
+    ),
+    "source.tooltip": "Выбрать файл(ы) для перевода",
+    "source.whatsthis": (
+        "Открывает диалог выбора исходного файла (в режиме "
+        "«Изображения» - сразу несколько файлов). Выбранное имя файла "
+        "затем появляется слева."
+    ),
+    "source_label.tooltip": "Текущий выбранный исходный файл",
+    "source_label.whatsthis": (
+        "Показывает имя файла, выбранного последним через «Выбрать "
+        "файл …». Если там ещё стоит «Файл не выбран», сначала нужно "
+        "выбрать файл, прежде чем станет возможен анализ стоимости."
+    ),
+    "image_mode.tooltip": "Обработка изображений, встроенных в документ",
+    "image_mode.whatsthis": (
+        "«Не переводить» оставляет встроенные изображения без "
+        "изменений. «Выбрать позже по отдельности» после анализа "
+        "стоимости показывает список для выбора конкретных изображений. "
+        "«Перевести все» автоматически обрабатывает каждое встроенное "
+        "изображение."
+    ),
+    "provider.tooltip": "Поставщик перевода для этого запуска",
+    "provider.whatsthis": (
+        "DeepL, Google, OpenAI или Grok - у каждого свой API-ключ, "
+        "управляемый в Настройках. Если для выбранного поставщика ключ "
+        "не настроен, прямо под полем появляется подсказка со ссылкой "
+        "на Настройки."
+    ),
+    "source_lang.tooltip": "Код исходного языка, напр. EN",
+    "source_lang.whatsthis": (
+        "Двухбуквенный код языка по ISO 639-1 (напр. EN для "
+        "английского, FR для французского). Должен соответствовать "
+        "реальному языку документа, иначе поставщик перевода вернёт "
+        "неверные результаты или не вернёт их вовсе."
+    ),
+    "target_lang.tooltip": "Код целевого языка, напр. DE",
+    "target_lang.whatsthis": (
+        "Двухбуквенный код языка по ISO 639-1, на который нужно "
+        "перевести (напр. DE для немецкого, ES для испанского)."
+    ),
+    "protected.tooltip": "Термины, которые не должны переводиться",
+    "protected.whatsthis": (
+        "По одному термину на строку, напр. названия компаний или "
+        "продуктов. Поставщик перевода оставляет эти термины без "
+        "изменений. Кнопка рядом также позволяет загрузить список из "
+        "файла."
+    ),
+    "ocr_engine_field.tooltip": "Распознавание текста (OCR) для изображений",
+    "ocr_engine_field.whatsthis": (
+        "Отображается только в режиме «Изображения». Распознаёт текст "
+        "на изображениях перед переводом и обратной записью. Если "
+        "модуль недоступен на этом компьютере, прямо под полем "
+        "появляется подсказка."
+    ),
+    "inpainting_backend_field.tooltip": (
+        "Метод записи переведённого текста обратно в изображение"
+    ),
+    "inpainting_backend_field.whatsthis": (
+        "Отображается только в режиме «Изображения». «Наложение "
+        "прямоугольника» и «CV Inpainting» всегда работают локально, "
+        "без особого оборудования. «GPU Inpainting» использует "
+        "локальную видеокарту (CUDA) для лучшего результата и доступен "
+        "только при установленном PyTorch с поддержкой CUDA - иначе "
+        "снизу появляется подсказка. Состояние оборудования можно в "
+        "любой момент проверить через Справка -> Проверка оборудования."
+    ),
+    "merge.tooltip": "Объединить несколько PDF-файлов",
+    "merge.whatsthis": (
+        "Открывает отдельный диалог для объединения нескольких "
+        "PDF-файлов в один. Не зависит от формы выше - здесь ничего не "
+        "переводится."
+    ),
+    "word_merge.tooltip": "Объединить несколько файлов Word",
+    "word_merge.whatsthis": (
+        "Открывает отдельный диалог для объединения нескольких файлов "
+        "Word в один. Не зависит от формы выше - здесь ничего не "
+        "переводится."
+    ),
+    "analysis.button.tooltip": "Оценить стоимость этого перевода",
+    "analysis.button.whatsthis": (
+        "Подсчитывает символы для перевода и оценивает примерную "
+        "стоимость исходя из выбранного поставщика, пока ничего не "
+        "переводя. Только после этого можно поставить галочку рядом и "
+        "разблокировать «Начать»."
+    ),
+    "analysis.checked.tooltip": "Подтвердить оценённую стоимость",
+    "analysis.checked.whatsthis": (
+        "Должно быть отмечено, прежде чем «Начать» станет доступной для "
+        "нажатия - осознанная мера безопасности, чтобы запуск никогда "
+        "не начинался случайно без предварительного просмотра "
+        "оценённой стоимости."
+    ),
+    "start.tooltip": "Начать перевод",
+    "start.whatsthis": (
+        "Становится доступной только после анализа и подтверждения "
+        "стоимости. Прогресс отображается в области ниже; "
+        "выполняющийся процесс можно остановить кнопкой «Отмена»."
+    ),
+    "job.cancel.tooltip": "Отменить выполняющийся перевод",
+    "job.cancel.whatsthis": (
+        "Останавливает текущий запуск как можно быстрее. Уже "
+        "обработанные части не сохраняются автоматически как полный "
+        "файл - в зависимости от формата может остаться неполный файл."
+    ),
+    "job.open_folder.tooltip": "Открыть папку с результатом",
+    "job.open_folder.whatsthis": (
+        "Открывает проводник в целевой папке только что завершённого "
+        "запуска."
+    ),
+    "job.open_report.tooltip": "Открыть отчёт QA последнего запуска",
+    "job.open_report.whatsthis": (
+        "Показывает результаты автоматической проверки качества "
+        "последнего запуска, напр. места, которые может быть стоит "
+        "проверить."
+    ),
+    "job.correct_translation.tooltip": "Исправить отдельные переводы",
+    "job.correct_translation.whatsthis": (
+        "Отображается только для запусков PDF с исправляемыми "
+        "текстовыми блоками. Позволяет доработать отдельные переведённые "
+        "фрагменты без повторения всего запуска."
+    ),
+    "settings.button.tooltip": "Открыть настройки",
+    "settings.button.whatsthis": (
+        "API-ключи по поставщикам (рекомендуется: хранилище ключей), "
+        "лимит символов на запуск и доступ к файлу журнала."
+    ),
+    "update_hint.tooltip": "Доступна новая версия",
+    "update_hint.whatsthis": (
+        "Появляется автоматически, если при запуске найдена более новая "
+        "версия PDF-Translator. Нажатие предлагает установить новую "
+        "версию."
+    ),
+    "flag_row.whatsthis": (
+        "Немедленно и навсегда меняет язык самого интерфейса - не языки "
+        "перевода в форме. Выбор сохраняется сразу же."
+    ),
+    "menu.help.whats_this": "Что это?",
 }
 
 CATALOGUES = {"de": DE, "en": EN, "fr": FR, "es": ES, "it": IT, "nl": NL, "fi": FI, "hr": HR, "ru": RU}

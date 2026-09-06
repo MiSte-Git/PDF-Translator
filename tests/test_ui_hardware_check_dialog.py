@@ -146,6 +146,7 @@ def test_help_menu_has_three_actions_in_german(qapp, monkeypatch, tmp_path):
         assert labels == [
             "Hardware-Test anzeigen/wiederholen …",
             "Nach Updates suchen …",
+            "Direkthilfe",
             "Über …",
         ]
     finally:
@@ -162,6 +163,7 @@ def test_help_menu_retranslates_on_language_change(qapp, monkeypatch, tmp_path):
         assert labels == [
             "Show/repeat hardware test …",
             "Check for updates …",
+            "What's This?",
             "About …",
         ]
     finally:
