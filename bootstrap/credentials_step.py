@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+import time
 import webbrowser
 from pathlib import Path
 from types import ModuleType
@@ -41,11 +42,66 @@ PROVIDER_SIGNUP_URLS = {
 }
 
 
+# 05.09.2026: on a real Windows machine, this import failed with "No
+# module named 'ui.settings'" immediately after extraction, even though
+# the file demonstrably existed on disk with the right content moments
+# later (a manual PowerShell listing confirmed it: correct size, correct
+# timestamp). A recursive directory listing taken around the same time
+# showed the identical symptom one level up: it came back completely
+# empty for every freshly-extracted app/* subdirectory (ui, bootstrap,
+# pipeline, ...) while a much larger, already-settled sibling tree
+# (venv/, populated by pip over the previous ~70 seconds) enumerated
+# perfectly, deeply and correctly. That points at antivirus real-time
+# scanning racing the installer: files this fresh can briefly appear
+# missing or locked to any process that tries to read the directory,
+# including Python's own import machinery. The fix is a short, bounded
+# retry - and critically, importlib.invalidate_caches() before each
+# retry, because once FileFinder sees a package directory as empty it
+# caches that verdict in sys.path_importer_cache, so a bare retry alone
+# would keep failing even after the antivirus scan releases the files.
+_IMPORT_RETRY_ATTEMPTS = 5
+_IMPORT_RETRY_DELAY_SECONDS = 0.4
+
+
 def _import_from_app_source(app_source_dir: Path, module_name: str) -> ModuleType:
     app_source_str = str(app_source_dir)
     if app_source_str not in sys.path:
         sys.path.insert(0, app_source_str)
-    return importlib.import_module(module_name)
+
+    last_exc: ImportError | None = None
+    for attempt in range(1, _IMPORT_RETRY_ATTEMPTS + 1):
+        if attempt > 1:
+            importlib.invalidate_caches()
+            time.sleep(_IMPORT_RETRY_DELAY_SECONDS)
+        try:
+            return importlib.import_module(module_name)
+        except ImportError as exc:
+            last_exc = exc
+
+    # All attempts exhausted - gather diagnostics and raise. Whatever the
+    # crash log captures next time should already have the answer: does
+    # app_source_dir actually exist on disk at this point, what is in it,
+    # does the specific expected .py file exist, and what does sys.path
+    # (which PyInstaller's frozen import machinery treats specially) look
+    # like when this failed.
+    assert last_exc is not None
+    expected_file = app_source_dir.joinpath(*module_name.split(".")).with_suffix(".py")
+    parent_init = app_source_dir / module_name.split(".")[0] / "__init__.py"
+    try:
+        top_level = sorted(p.name for p in app_source_dir.iterdir()) if app_source_dir.is_dir() else None
+    except OSError as list_exc:
+        top_level = f"<listdir failed: {list_exc}>"
+    diagnostic = (
+        f"Could not import {module_name!r} from {app_source_dir} after "
+        f"{_IMPORT_RETRY_ATTEMPTS} attempts: {last_exc}\n"
+        f"  app_source_dir.is_dir(): {app_source_dir.is_dir()}\n"
+        f"  app_source_dir top-level entries: {top_level}\n"
+        f"  expected file {expected_file}: exists={expected_file.is_file()}\n"
+        f"  parent package init {parent_init}: exists={parent_init.is_file()}\n"
+        f"  sys.path[:5]: {sys.path[:5]}\n"
+        f"  sys.frozen: {getattr(sys, 'frozen', False)}, _MEIPASS: {getattr(sys, '_MEIPASS', None)}"
+    )
+    raise ImportError(diagnostic) from last_exc
 
 
 def load_settings_module(app_source_dir: Path) -> ModuleType:
