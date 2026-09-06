@@ -192,11 +192,30 @@ class SettingsDialog(QDialog):
             self.credentials_form.addRow(label, field)
         self.note = QLabel()
         self.note.setWordWrap(True)
+        # 07.09.2026 (Michael: Kosten-Analyse griff trotz "nur Key-Ring"
+        # gespeichertem DeepL-Schluessel auf DeepL zu und bekam ein 403 -
+        # Ursache war eine auf dem Windows-Testrechner gesetzte
+        # DEEPL_API_KEY-Umgebungsvariable, die laut
+        # pipeline/credentials.py::get_api_key()s bewusstem env_first=True
+        # fuer Uebersetzer-Provider IMMER vor dem Schluesselbund gewinnt -
+        # siehe dessen Docstring, derselbe Bug wie schon einmal bei
+        # Google-Drive-OAuth). credential_status() erkennt das bereits
+        # zuverlaessig (self.status zeigt dann "Umgebungsvariable
+        # (Sitzung)" statt "OS-Keyring"), aber als kleines Statuslabel
+        # neben einem Dropdown faellt das leicht nicht auf. Dieses Label
+        # macht denselben, bereits vorhandenen Befund unuebersehbar -
+        # sichtbar unabhaengig vom gewaehlten Speicherort, denn die
+        # Umgebungsvariable gewinnt so oder so, bis sie am Betriebssystem
+        # entfernt wird (siehe _refresh_status()).
+        self.env_override_warning = QLabel()
+        self.env_override_warning.setWordWrap(True)
+        self.env_override_warning.setStyleSheet("font-weight: bold; padding-left: 2px;")
 
         self.credentials_box = QGroupBox()
         credentials_layout = QVBoxLayout(self.credentials_box)
         credentials_layout.addLayout(self.credentials_form)
         credentials_layout.addWidget(self.note)
+        credentials_layout.addWidget(self.env_override_warning)
         credentials_layout.addWidget(self.save_key)
 
         self.general_form = QFormLayout()
@@ -235,6 +254,7 @@ class SettingsDialog(QDialog):
         self.save_key.setText(t("settings.save_key"))
         self.open_log_button.setText(t("settings.open_log"))
         self.note.setText(t("settings.session_note"))
+        self.env_override_warning.setText(t("settings.env_override_warning"))
 
     def _update_note_visibility(self) -> None:
         # 07.09.2026 (Michael: "Der Hinweis unten in diesem Dialog ist nur
@@ -248,7 +268,9 @@ class SettingsDialog(QDialog):
         self.note.setVisible(self.target.currentData() == "environment")
 
     def _refresh_status(self) -> None:
-        self.status.setText(self.language.text(credential_status(self.provider.currentText())))
+        status_key = credential_status(self.provider.currentText())
+        self.status.setText(self.language.text(status_key))
+        self.env_override_warning.setVisible(status_key == "credential.environment")
 
     def _open_log_file(self) -> None:
         # configure_logging() (aufgerufen aus main(), bevor irgendein
@@ -501,6 +523,13 @@ class MainWindow(QMainWindow):
         self._flag_button_group.setExclusive(True)
         self.flag_row = QHBoxLayout()
         self.flag_row.setSpacing(4)
+        # 07.09.2026 (Michael: "Die Sprachenleiste ist auch hier lokal
+        # nicht in der Mitte"): a leading stretch, symmetric with the
+        # trailing one added after the loop below, centers the flags as
+        # a group instead of anchoring them to the left edge under the
+        # stretch's own default lopsided behaviour (only a trailing
+        # stretch pushes content left, not center it).
+        self.flag_row.addStretch(1)
         for info in LOCALES:
             if not info.available:
                 continue
