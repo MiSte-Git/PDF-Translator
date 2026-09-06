@@ -247,6 +247,22 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.credentials_box)
         layout.addWidget(self.general_box)
         layout.addWidget(self.buttons)
+        # 07.09.2026 (Michael: "Ausserdem haette ich noch gerne zu jeder
+        # Option in der App eine klare Nutzerfreundliche Tooltip und eine
+        # Hilfe."): same tooltip+WhatsThis pattern as MainWindow's
+        # self._help_widgets (see there) - one short tooltip plus a
+        # longer setWhatsThis() text per field, both retranslated in
+        # retranslate() below and reachable via Hilfe -> Direkthilfe
+        # (Shift+F1).
+        self._settings_help_widgets: list[tuple[object, str, str]] = [
+            (self.provider, "settings.provider.tooltip", "settings.provider.whatsthis"),
+            (self.status, "settings.status.tooltip", "settings.status.whatsthis"),
+            (self.secret, "settings.secret.tooltip", "settings.secret.whatsthis"),
+            (self.target, "settings.target_field.tooltip", "settings.target_field.whatsthis"),
+            (self.max_chars, "settings.max_chars.tooltip", "settings.max_chars.whatsthis"),
+            (self.save_key, "settings.save_key.tooltip", "settings.save_key.whatsthis"),
+            (self.open_log_button, "settings.open_log.tooltip", "settings.open_log.whatsthis"),
+        ]
         self.language.changed.connect(self.retranslate)
         self.retranslate()
         self._refresh_status()
@@ -267,6 +283,9 @@ class SettingsDialog(QDialog):
         self.open_log_button.setText(t("settings.open_log"))
         self.note.setText(t("settings.session_note"))
         self.env_override_warning.setText(t("settings.env_override_warning"))
+        for widget, tooltip_key, whatsthis_key in self._settings_help_widgets:
+            widget.setToolTip(t(tooltip_key))
+            widget.setWhatsThis(t(whatsthis_key))
 
     def _update_note_visibility(self) -> None:
         # 07.09.2026 (Michael: "Der Hinweis unten in diesem Dialog ist nur
@@ -377,6 +396,14 @@ class HardwareCheckDialog(QDialog):
         layout.addWidget(self.note)
         layout.addWidget(self.recheck_button)
         layout.addWidget(self.buttons)
+        # 07.09.2026 (Michael: "Ausserdem haette ich noch gerne zu jeder
+        # Option in der App eine klare Nutzerfreundliche Tooltip und eine
+        # Hilfe."): gleiches Muster wie MainWindow._help_widgets/
+        # SettingsDialog._settings_help_widgets (siehe dort).
+        self._hw_check_help_widgets: list[tuple[object, str, str]] = [
+            (self.status, "hw_check.status.tooltip", "hw_check.status.whatsthis"),
+            (self.recheck_button, "hw_check.recheck_button.tooltip", "hw_check.recheck_button.whatsthis"),
+        ]
         self.language.changed.connect(self.retranslate)
         self._load_last_result()
         self.retranslate()
@@ -401,6 +428,9 @@ class HardwareCheckDialog(QDialog):
         self.setWindowTitle(self.language.text("hw_check.title"))
         self.note.setText(self.language.text("hw_check.note"))
         self.recheck_button.setText(self.language.text("hw_check.recheck_button"))
+        for widget, tooltip_key, whatsthis_key in self._hw_check_help_widgets:
+            widget.setToolTip(self.language.text(tooltip_key))
+            widget.setWhatsThis(self.language.text(whatsthis_key))
         self._render_status()
 
     def _render_status(self) -> None:

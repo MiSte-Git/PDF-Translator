@@ -358,6 +358,139 @@ DE = {
     "settings.credentials_group": "API-Zugang",
     "settings.general_group": "Allgemein",
     "settings.env_override_warning": "Für diesen Anbieter wird aktuell ein Wert aus einer Umgebungsvariable verwendet – nicht der hier gespeicherte Schlüsselbund-Eintrag. Um den gespeicherten Schlüssel zu nutzen, muss diese Umgebungsvariable im Betriebssystem entfernt werden.",
+
+    "settings.provider.tooltip": "Anbieter, für den unten ein Schlüssel verwaltet wird",
+    "settings.provider.whatsthis": (
+        "Wählt, für welchen Übersetzungsanbieter (DeepL, Google, OpenAI, "
+        "Grok) Status, neuer Schlüssel und Speicherort unten gelten. "
+        "Jeder Anbieter hat einen eigenen, getrennt gespeicherten "
+        "Schlüssel."
+    ),
+    "settings.status.tooltip": "Woher der aktuell verwendete Schlüssel stammt",
+    "settings.status.whatsthis": (
+        "Zeigt, ob für den gewählten Anbieter gerade ein Schlüssel aus "
+        "dem OS-Keyring, aus einer Umgebungsvariable oder gar keiner "
+        "gefunden wird. Eine Umgebungsvariable hat immer Vorrang vor dem "
+        "Keyring - siehe die Warnung weiter unten, falls das hier "
+        "zutrifft."
+    ),
+    "settings.secret.tooltip": "Neuer API-Schlüssel für den gewählten Anbieter",
+    "settings.secret.whatsthis": (
+        "Hier den vom Anbieter erhaltenen API-Schlüssel einfügen und "
+        "auf „Speichern“ klicken. Die Eingabe wird beim Tippen als "
+        "Punkte dargestellt, aber nicht automatisch übernommen - erst "
+        "der Speichern-Button schreibt sie in den gewählten Speicherort."
+    ),
+    "settings.target_field.tooltip": "Wo der neue Schlüssel gespeichert wird",
+    "settings.target_field.whatsthis": (
+        "„OS-Keyring“ ist die empfohlene, dauerhafte Wahl. "
+        "„Umgebungsvariable“ gilt nur für die laufende Sitzung und ist "
+        "hauptsächlich für Sonderfälle/Fehlersuche gedacht - siehe den "
+        "Hinweis darunter. „Beides“ schreibt zusätzlich ebenfalls eine "
+        "solche Sitzungsvariable."
+    ),
+    "settings.max_chars.tooltip": "Obergrenze der Zeichen pro Übersetzungslauf",
+    "settings.max_chars.whatsthis": (
+        "Ein Lauf, der mehr Zeichen enthält als hier eingestellt, wird "
+        "mit einem Hinweis abgebrochen statt unerwartet hohe Kosten zu "
+        "verursachen. Bei Bedarf hier erhöhen."
+    ),
+    "settings.save_key.tooltip": "Neuen Schlüssel speichern",
+    "settings.save_key.whatsthis": (
+        "Schreibt den oben eingegebenen Schlüssel für den gewählten "
+        "Anbieter an den gewählten Speicherort. Das Eingabefeld wird "
+        "danach geleert, der Status darüber aktualisiert sich."
+    ),
+    "settings.open_log.tooltip": "Logdatei der App öffnen",
+    "settings.open_log.whatsthis": (
+        "Öffnet die aktuelle Logdatei im Standardprogramm des Systems - "
+        "hilfreich, um Fehlermeldungen für einen Bugreport zu kopieren, "
+        "ohne einen Screenshot machen zu müssen."
+    ),
+
+    "hw_check.status.tooltip": "Ergebnis der letzten GPU-Prüfung",
+    "hw_check.status.whatsthis": (
+        "Zeigt, ob eine unterstützte NVIDIA-GPU mit ausreichend VRAM "
+        "gefunden wurde, wann zuletzt geprüft wurde, und ob der "
+        "installierte Treiber (CUDA-Version) lokales GPU-Inpainting "
+        "unterstützt. Ohne passende GPU/Treiber funktioniert lokales "
+        "Inpainting trotzdem - nur langsamer, auf der CPU."
+    ),
+    "hw_check.recheck_button.tooltip": "GPU-Prüfung jetzt erneut ausführen",
+    "hw_check.recheck_button.whatsthis": (
+        "Führt dieselbe Prüfung erneut aus, die auch der Installer "
+        "durchgeführt hat - sinnvoll nach einem Treiber-Update oder "
+        "Grafikkarten-Wechsel, ohne die App neu installieren zu müssen."
+    ),
+
+    "bootstrap.help.back_button": (
+        "Zurück zum vorherigen Schritt\n\n"
+        "Bereits gemachte Eingaben auf diesem und dem vorherigen Schritt "
+        "bleiben dabei erhalten."
+    ),
+    "bootstrap.help.next_button": "Weiter zum nächsten Schritt",
+    "bootstrap.help.cancel_button": (
+        "Schließt diesen Assistenten\n\n"
+        "Vor einer laufenden Installation wird noch einmal nachgefragt. "
+        "Die Einrichtung kann jederzeit erneut gestartet werden."
+    ),
+    "bootstrap.help.language_combo": (
+        "Sprache dieses Assistenten\n\n"
+        "Wirkt sofort auf alle Bildschirme dieses Assistenten. Die "
+        "eigentliche App hat später eine eigene, unabhängige "
+        "Sprachauswahl."
+    ),
+    "bootstrap.help.mode_online_radio": (
+        "Übersetzung läuft über Cloud-Anbieter (DeepL, Google, OpenAI, "
+        "Grok)\n\n"
+        "Schnellste und einfachste Installation, funktioniert auf jedem "
+        "Rechner. Benötigt einen eigenen API-Schlüssel des gewählten "
+        "Anbieters und eine Internetverbindung während der Übersetzung."
+    ),
+    "bootstrap.help.mode_local_radio": (
+        "Bildbearbeitung läuft lokal auf der Grafikkarte, ohne Cloud\n\n"
+        "Benötigt eine unterstützte NVIDIA-Grafikkarte mit ausreichend "
+        "Videospeicher (wird im nächsten Schritt geprüft) - dafür bleiben "
+        "Bilder vollständig auf diesem Rechner."
+    ),
+    "bootstrap.help.gpu_continue_local_button": (
+        "Installation trotzdem lokal fortsetzen\n\n"
+        "Sinnvoll, wenn die Prüfung fälschlich fehlschlug oder ein "
+        "Treiber-Update noch aussteht - lokales Verarbeiten kann danach "
+        "jederzeit über Hilfe -> Hardware-Test erneut geprüft werden."
+    ),
+    "bootstrap.help.gpu_switch_online_button": (
+        "Stattdessen die Online-Variante installieren\n\n"
+        "Wechselt für diese Installation auf Cloud-Anbieter, ohne "
+        "Rückfrage zur Grafikkarte. Kann später jederzeit über die "
+        "Einstellungen ergänzt werden."
+    ),
+    "bootstrap.help.credentials_checkbox": (
+        "Im nächsten Schritt einen API-Schlüssel für {provider} "
+        "hinterlegen\n\n"
+        "Nicht angehakte Anbieter können jederzeit später in den "
+        "Einstellungen der App ergänzt werden."
+    ),
+    "bootstrap.help.credentials_skip_all_button": (
+        "Ohne Schlüssel-Eingabe fortfahren\n\n"
+        "Schlüssel können jederzeit später in den Einstellungen der App "
+        "nachgetragen werden - ohne sie funktioniert allerdings noch "
+        "keine Übersetzung."
+    ),
+    "bootstrap.help.credentials_continue_button": "Weiter zur Schlüssel-Eingabe bzw. zum nächsten Anbieter",
+    "bootstrap.help.credential_open_signup_button": (
+        "Öffnet die Registrierungsseite dieses Anbieters im Browser\n\n"
+        "Dort wird der API-Schlüssel erzeugt, der anschließend hier "
+        "eingefügt wird."
+    ),
+    "bootstrap.help.credential_key_entry": (
+        "API-Schlüssel dieses Anbieters einfügen\n\n"
+        "Die Eingabe wird als Punkte dargestellt. Erst der "
+        "Speichern-Button unten übernimmt sie tatsächlich."
+    ),
+    "bootstrap.help.credential_save_button": "Eingegebenen Schlüssel jetzt speichern",
+    "bootstrap.help.finish_close_button": "Assistenten schließen, ohne die App jetzt zu starten",
+    "bootstrap.help.finish_launch_button": "Assistenten schließen und die App direkt starten",
     "credentials.title": "Zugangsdaten",
     "credentials.saved": "API-Schlüssel wurde gespeichert.",
     "credential.environment": "Umgebungsvariable (Sitzung)", "credential.keyring": "OS-Keyring", "credential.missing": "Nicht eingerichtet",
@@ -1247,6 +1380,132 @@ EN = {
     "settings.credentials_group": "API Access",
     "settings.general_group": "General",
     "settings.env_override_warning": "This provider is currently using a value from an environment variable, not the keyring entry saved here. To use the saved key, remove that environment variable at the operating-system level.",
+
+    "settings.provider.tooltip": "Provider whose key is managed below",
+    "settings.provider.whatsthis": (
+        "Selects which translation provider (DeepL, Google, OpenAI, "
+        "Grok) the status, new key, and storage location below apply "
+        "to. Each provider has its own, separately stored key."
+    ),
+    "settings.status.tooltip": "Where the currently used key comes from",
+    "settings.status.whatsthis": (
+        "Shows whether a key was found for the selected provider in "
+        "the OS keyring, in an environment variable, or not at all. An "
+        "environment variable always takes priority over the keyring - "
+        "see the warning further below if that applies here."
+    ),
+    "settings.secret.tooltip": "New API key for the selected provider",
+    "settings.secret.whatsthis": (
+        "Paste the API key you received from the provider here and "
+        "click \"Save\". While typing it is shown as dots but not "
+        "applied automatically - only the Save button writes it to the "
+        "selected storage location."
+    ),
+    "settings.target_field.tooltip": "Where the new key is stored",
+    "settings.target_field.whatsthis": (
+        "\"OS keyring\" is the recommended, persistent choice. "
+        "\"Environment variable\" only lasts for the current session "
+        "and is mainly meant for special cases/troubleshooting - see "
+        "the note below. \"Both\" also writes such a session variable "
+        "in addition."
+    ),
+    "settings.max_chars.tooltip": "Character limit per translation run",
+    "settings.max_chars.whatsthis": (
+        "A run containing more characters than set here is stopped "
+        "with a message instead of causing unexpectedly high costs. "
+        "Increase it here if needed."
+    ),
+    "settings.save_key.tooltip": "Save the new key",
+    "settings.save_key.whatsthis": (
+        "Writes the key entered above for the selected provider to the "
+        "selected storage location. The input field is cleared "
+        "afterwards, and the status above updates."
+    ),
+    "settings.open_log.tooltip": "Open the app's log file",
+    "settings.open_log.whatsthis": (
+        "Opens the current log file in the system's default program - "
+        "useful for copying error messages into a bug report without "
+        "taking a screenshot."
+    ),
+
+    "hw_check.status.tooltip": "Result of the last GPU check",
+    "hw_check.status.whatsthis": (
+        "Shows whether a supported NVIDIA GPU with enough VRAM was "
+        "found, when it was last checked, and whether the installed "
+        "driver's CUDA version supports local GPU inpainting. Without a "
+        "matching GPU/driver, local inpainting still works - just "
+        "slower, on the CPU."
+    ),
+    "hw_check.recheck_button.tooltip": "Run the GPU check again now",
+    "hw_check.recheck_button.whatsthis": (
+        "Runs the same check the installer already ran - useful after a "
+        "driver update or a GPU swap, without having to reinstall the "
+        "app."
+    ),
+
+    "bootstrap.help.back_button": (
+        "Back to the previous step\n\n"
+        "Anything already entered on this and the previous step is kept."
+    ),
+    "bootstrap.help.next_button": "Continue to the next step",
+    "bootstrap.help.cancel_button": (
+        "Closes this wizard\n\n"
+        "You will be asked to confirm if an install is currently "
+        "running. Setup can be started again at any time."
+    ),
+    "bootstrap.help.language_combo": (
+        "Language of this wizard\n\n"
+        "Applies immediately to every screen of this wizard. The app "
+        "itself has its own, independent language choice later on."
+    ),
+    "bootstrap.help.mode_online_radio": (
+        "Translation runs through cloud providers (DeepL, Google, "
+        "OpenAI, Grok)\n\n"
+        "Fastest and simplest install, works on any machine. Needs your "
+        "own API key from the chosen provider and an internet connection "
+        "while translating."
+    ),
+    "bootstrap.help.mode_local_radio": (
+        "Image editing runs locally on your graphics card, no cloud\n\n"
+        "Needs a supported NVIDIA graphics card with enough video memory "
+        "(checked in the next step) - in return, images never leave this "
+        "machine."
+    ),
+    "bootstrap.help.gpu_continue_local_button": (
+        "Continue the local install anyway\n\n"
+        "Useful if the check failed incorrectly or a driver update is "
+        "still pending - local processing can be re-checked at any time "
+        "later via Help -> Hardware test."
+    ),
+    "bootstrap.help.gpu_switch_online_button": (
+        "Install the online variant instead\n\n"
+        "Switches this install to cloud providers, no GPU question "
+        "asked. Can be added later at any time via the app's settings."
+    ),
+    "bootstrap.help.credentials_checkbox": (
+        "Enter an API key for {provider} in the next step\n\n"
+        "Unchecked providers can always be added later in the app's "
+        "settings."
+    ),
+    "bootstrap.help.credentials_skip_all_button": (
+        "Continue without entering any keys\n\n"
+        "Keys can always be added later in the app's settings - but no "
+        "translation will work without at least one."
+    ),
+    "bootstrap.help.credentials_continue_button": "Continue to key entry, or to the next provider",
+    "bootstrap.help.credential_open_signup_button": (
+        "Opens this provider's sign-up page in your browser\n\n"
+        "That's where the API key is generated, to be pasted here "
+        "afterwards."
+    ),
+    "bootstrap.help.credential_key_entry": (
+        "Paste this provider's API key here\n\n"
+        "Shown as dots while typing. Only the Save button below actually "
+        "applies it."
+    ),
+    "bootstrap.help.credential_save_button": "Save the key entered above now",
+    "bootstrap.help.finish_close_button": "Close the wizard without launching the app now",
+    "bootstrap.help.finish_launch_button": "Close the wizard and launch the app right away",
     "credentials.title": "Credentials",
     "credentials.saved": "API key was saved.",
     "credential.environment": "Environment variable (session)", "credential.keyring": "OS keyring", "credential.missing": "Not configured",
@@ -1950,6 +2209,144 @@ FR = {
     "settings.credentials_group": "Accès API",
     "settings.general_group": "Général",
     "settings.env_override_warning": "Ce fournisseur utilise actuellement une valeur provenant d'une variable d'environnement, et non l'entrée du trousseau enregistrée ici. Pour utiliser la clé enregistrée, supprimez cette variable d'environnement au niveau du système d'exploitation.",
+
+    "settings.provider.tooltip": "Fournisseur dont la clé est gérée ci-dessous",
+    "settings.provider.whatsthis": (
+        "Sélectionne le fournisseur de traduction (DeepL, Google, "
+        "OpenAI, Grok) auquel s'appliquent le statut, la nouvelle clé "
+        "et l'emplacement de stockage ci-dessous. Chaque fournisseur a "
+        "sa propre clé, stockée séparément."
+    ),
+    "settings.status.tooltip": "D'où provient la clé actuellement utilisée",
+    "settings.status.whatsthis": (
+        "Indique si une clé a été trouvée pour le fournisseur "
+        "sélectionné dans le trousseau du système, dans une variable "
+        "d'environnement, ou pas du tout. Une variable d'environnement "
+        "a toujours priorité sur le trousseau - voir l'avertissement "
+        "plus bas si c'est le cas ici."
+    ),
+    "settings.secret.tooltip": "Nouvelle clé API pour le fournisseur sélectionné",
+    "settings.secret.whatsthis": (
+        "Collez ici la clé API reçue du fournisseur et cliquez sur "
+        "« Enregistrer ». Pendant la saisie, elle s'affiche sous forme "
+        "de points mais n'est pas appliquée automatiquement - seul le "
+        "bouton Enregistrer l'écrit à l'emplacement de stockage "
+        "sélectionné."
+    ),
+    "settings.target_field.tooltip": "Où la nouvelle clé est stockée",
+    "settings.target_field.whatsthis": (
+        "« Trousseau du système » est le choix recommandé et durable. "
+        "« Variable d'environnement » ne vaut que pour la session en "
+        "cours et sert surtout à des cas particuliers/du dépannage - "
+        "voir la remarque ci-dessous. « Les deux » écrit en plus une "
+        "telle variable de session."
+    ),
+    "settings.max_chars.tooltip": "Limite de caractères par exécution de traduction",
+    "settings.max_chars.whatsthis": (
+        "Une exécution contenant plus de caractères que la valeur "
+        "définie ici est arrêtée avec un message plutôt que "
+        "d'entraîner des coûts inattendus. Augmentez-la ici si besoin."
+    ),
+    "settings.save_key.tooltip": "Enregistrer la nouvelle clé",
+    "settings.save_key.whatsthis": (
+        "Écrit la clé saisie ci-dessus pour le fournisseur sélectionné "
+        "à l'emplacement de stockage choisi. Le champ de saisie est "
+        "ensuite vidé et le statut ci-dessus se met à jour."
+    ),
+    "settings.open_log.tooltip": "Ouvrir le fichier journal de l'application",
+    "settings.open_log.whatsthis": (
+        "Ouvre le fichier journal actuel dans le programme par défaut "
+        "du système - utile pour copier des messages d'erreur dans un "
+        "rapport de bug sans faire de capture d'écran."
+    ),
+
+    "hw_check.status.tooltip": "Résultat de la dernière vérification GPU",
+    "hw_check.status.whatsthis": (
+        "Indique si un GPU NVIDIA pris en charge avec suffisamment de "
+        "VRAM a été trouvé, la date de la dernière vérification, et si "
+        "la version CUDA du pilote installé prend en charge "
+        "l'inpainting GPU local. Sans GPU/pilote adapté, l'inpainting "
+        "local fonctionne quand même - juste plus lentement, sur le "
+        "CPU."
+    ),
+    "hw_check.recheck_button.tooltip": "Relancer la vérification GPU maintenant",
+    "hw_check.recheck_button.whatsthis": (
+        "Relance la même vérification que celle effectuée par "
+        "l'installateur - utile après une mise à jour de pilote ou un "
+        "changement de carte graphique, sans devoir réinstaller "
+        "l'application."
+    ),
+
+    "bootstrap.help.back_button": (
+        "Retour à l'étape précédente\n\n"
+        "Ce qui a déjà été saisi à cette étape et à la précédente est "
+        "conservé."
+    ),
+    "bootstrap.help.next_button": "Passer à l'étape suivante",
+    "bootstrap.help.cancel_button": (
+        "Ferme cet assistant\n\n"
+        "Une confirmation sera demandée si une installation est en "
+        "cours. La configuration peut être relancée à tout moment."
+    ),
+    "bootstrap.help.language_combo": (
+        "Langue de cet assistant\n\n"
+        "S'applique immédiatement à tous les écrans de cet assistant. "
+        "L'application elle-même aura plus tard son propre choix de "
+        "langue, indépendant."
+    ),
+    "bootstrap.help.mode_online_radio": (
+        "La traduction passe par des fournisseurs cloud (DeepL, Google, "
+        "OpenAI, Grok)\n\n"
+        "Installation la plus rapide et la plus simple, fonctionne sur "
+        "n'importe quelle machine. Nécessite votre propre clé API du "
+        "fournisseur choisi et une connexion internet pendant la "
+        "traduction."
+    ),
+    "bootstrap.help.mode_local_radio": (
+        "Le traitement d'image s'exécute localement sur la carte "
+        "graphique, sans cloud\n\n"
+        "Nécessite une carte graphique NVIDIA prise en charge avec "
+        "suffisamment de mémoire vidéo (vérifié à l'étape suivante) - en "
+        "contrepartie, les images ne quittent jamais cette machine."
+    ),
+    "bootstrap.help.gpu_continue_local_button": (
+        "Poursuivre quand même l'installation locale\n\n"
+        "Utile si la vérification a échoué à tort ou si une mise à jour "
+        "de pilote est encore en attente - le traitement local peut être "
+        "revérifié à tout moment via Aide -> Test matériel."
+    ),
+    "bootstrap.help.gpu_switch_online_button": (
+        "Installer plutôt la variante en ligne\n\n"
+        "Bascule cette installation vers les fournisseurs cloud, sans "
+        "question sur le GPU. Peut être ajouté plus tard à tout moment "
+        "via les paramètres de l'application."
+    ),
+    "bootstrap.help.credentials_checkbox": (
+        "Saisir une clé API pour {provider} à l'étape suivante\n\n"
+        "Les fournisseurs non cochés peuvent toujours être ajoutés plus "
+        "tard dans les paramètres de l'application."
+    ),
+    "bootstrap.help.credentials_skip_all_button": (
+        "Continuer sans saisir aucune clé\n\n"
+        "Les clés peuvent toujours être ajoutées plus tard dans les "
+        "paramètres de l'application - mais aucune traduction ne "
+        "fonctionnera sans au moins une clé."
+    ),
+    "bootstrap.help.credentials_continue_button": "Passer à la saisie de la clé, ou au fournisseur suivant",
+    "bootstrap.help.credential_open_signup_button": (
+        "Ouvre la page d'inscription de ce fournisseur dans le "
+        "navigateur\n\n"
+        "C'est là que la clé API est générée, pour être collée ici "
+        "ensuite."
+    ),
+    "bootstrap.help.credential_key_entry": (
+        "Collez ici la clé API de ce fournisseur\n\n"
+        "Affichée sous forme de points pendant la saisie. Seul le bouton "
+        "Enregistrer ci-dessous l'applique réellement."
+    ),
+    "bootstrap.help.credential_save_button": "Enregistrer maintenant la clé saisie ci-dessus",
+    "bootstrap.help.finish_close_button": "Fermer l'assistant sans lancer l'application maintenant",
+    "bootstrap.help.finish_launch_button": "Fermer l'assistant et lancer l'application immédiatement",
     "credentials.title": "Identifiants",
     "credentials.saved": "La clé API a été enregistrée.",
     "credential.environment": "Variable d'environnement (session)",
@@ -2523,6 +2920,140 @@ ES = {
     "settings.credentials_group": "Acceso a la API",
     "settings.general_group": "General",
     "settings.env_override_warning": "Este proveedor está usando actualmente un valor de una variable de entorno, no la entrada del llavero guardada aquí. Para usar la clave guardada, elimina esa variable de entorno a nivel del sistema operativo.",
+
+    "settings.provider.tooltip": "Proveedor cuya clave se gestiona abajo",
+    "settings.provider.whatsthis": (
+        "Selecciona a qué proveedor de traducción (DeepL, Google, "
+        "OpenAI, Grok) se aplican el estado, la nueva clave y la "
+        "ubicación de almacenamiento de abajo. Cada proveedor tiene su "
+        "propia clave, guardada por separado."
+    ),
+    "settings.status.tooltip": "De dónde proviene la clave usada actualmente",
+    "settings.status.whatsthis": (
+        "Muestra si se encontró una clave para el proveedor "
+        "seleccionado en el llavero del sistema, en una variable de "
+        "entorno, o si no se encontró ninguna. Una variable de entorno "
+        "siempre tiene prioridad sobre el llavero; consulta el aviso "
+        "más abajo si es el caso aquí."
+    ),
+    "settings.secret.tooltip": "Nueva clave API para el proveedor seleccionado",
+    "settings.secret.whatsthis": (
+        "Pega aquí la clave API obtenida del proveedor y haz clic en "
+        "«Guardar». Mientras la escribes se muestra como puntos, pero "
+        "no se aplica automáticamente; solo el botón Guardar la "
+        "escribe en la ubicación de almacenamiento seleccionada."
+    ),
+    "settings.target_field.tooltip": "Dónde se guarda la nueva clave",
+    "settings.target_field.whatsthis": (
+        "«Llavero del sistema operativo» es la opción recomendada y "
+        "permanente. «Variable de entorno» solo dura la sesión actual y "
+        "está pensada sobre todo para casos especiales o depuración; "
+        "consulta la nota de abajo. «Ambos» también escribe una "
+        "variable de este tipo."
+    ),
+    "settings.max_chars.tooltip": "Límite de caracteres por ejecución de traducción",
+    "settings.max_chars.whatsthis": (
+        "Una ejecución con más caracteres de los establecidos aquí se "
+        "detiene con un aviso en lugar de generar costes "
+        "inesperadamente altos. Auméntalo aquí si es necesario."
+    ),
+    "settings.save_key.tooltip": "Guardar la nueva clave",
+    "settings.save_key.whatsthis": (
+        "Escribe la clave introducida arriba para el proveedor "
+        "seleccionado en la ubicación de almacenamiento elegida. El "
+        "campo se vacía después y el estado de arriba se actualiza."
+    ),
+    "settings.open_log.tooltip": "Abrir el archivo de registro de la aplicación",
+    "settings.open_log.whatsthis": (
+        "Abre el archivo de registro actual con el programa "
+        "predeterminado del sistema; útil para copiar mensajes de "
+        "error en un informe de errores sin hacer una captura de "
+        "pantalla."
+    ),
+
+    "hw_check.status.tooltip": "Resultado de la última comprobación de GPU",
+    "hw_check.status.whatsthis": (
+        "Muestra si se encontró una GPU NVIDIA compatible con suficiente "
+        "VRAM, cuándo se comprobó por última vez, y si la versión CUDA "
+        "del controlador instalado admite el inpainting local por GPU. "
+        "Sin una GPU/controlador adecuados, el inpainting local sigue "
+        "funcionando, solo que más lento, en la CPU."
+    ),
+    "hw_check.recheck_button.tooltip": "Volver a ejecutar la comprobación de GPU ahora",
+    "hw_check.recheck_button.whatsthis": (
+        "Ejecuta de nuevo la misma comprobación que hizo el instalador; "
+        "útil tras actualizar un controlador o cambiar de tarjeta "
+        "gráfica, sin tener que reinstalar la aplicación."
+    ),
+
+    "bootstrap.help.back_button": (
+        "Volver al paso anterior\n\n"
+        "Lo ya introducido en este paso y en el anterior se conserva."
+    ),
+    "bootstrap.help.next_button": "Continuar al siguiente paso",
+    "bootstrap.help.cancel_button": (
+        "Cierra este asistente\n\n"
+        "Se pedirá confirmación si hay una instalación en curso. La "
+        "configuración se puede reiniciar en cualquier momento."
+    ),
+    "bootstrap.help.language_combo": (
+        "Idioma de este asistente\n\n"
+        "Se aplica de inmediato a todas las pantallas de este asistente. "
+        "La propia aplicación tendrá más adelante su propia selección de "
+        "idioma, independiente."
+    ),
+    "bootstrap.help.mode_online_radio": (
+        "La traducción pasa por proveedores en la nube (DeepL, Google, "
+        "OpenAI, Grok)\n\n"
+        "Instalación más rápida y sencilla, funciona en cualquier "
+        "equipo. Requiere tu propia clave API del proveedor elegido y "
+        "conexión a internet durante la traducción."
+    ),
+    "bootstrap.help.mode_local_radio": (
+        "El procesamiento de imágenes se ejecuta localmente en la "
+        "tarjeta gráfica, sin nube\n\n"
+        "Requiere una tarjeta gráfica NVIDIA compatible con suficiente "
+        "memoria de vídeo (se comprueba en el siguiente paso); a cambio, "
+        "las imágenes nunca salen de este equipo."
+    ),
+    "bootstrap.help.gpu_continue_local_button": (
+        "Continuar la instalación local de todos modos\n\n"
+        "Útil si la comprobación falló por error o falta actualizar un "
+        "controlador - el procesamiento local puede volver a "
+        "comprobarse más adelante desde Ayuda -> Prueba de hardware."
+    ),
+    "bootstrap.help.gpu_switch_online_button": (
+        "Instalar en su lugar la variante en línea\n\n"
+        "Cambia esta instalación a proveedores en la nube, sin "
+        "preguntar por la GPU. Se puede añadir más adelante en "
+        "cualquier momento desde los ajustes de la aplicación."
+    ),
+    "bootstrap.help.credentials_checkbox": (
+        "Introducir una clave API para {provider} en el siguiente "
+        "paso\n\n"
+        "Los proveedores no marcados siempre se pueden añadir más "
+        "adelante en los ajustes de la aplicación."
+    ),
+    "bootstrap.help.credentials_skip_all_button": (
+        "Continuar sin introducir ninguna clave\n\n"
+        "Las claves siempre se pueden añadir más adelante en los "
+        "ajustes de la aplicación, pero ninguna traducción funcionará "
+        "sin al menos una."
+    ),
+    "bootstrap.help.credentials_continue_button": "Continuar a la introducción de la clave, o al siguiente proveedor",
+    "bootstrap.help.credential_open_signup_button": (
+        "Abre la página de registro de este proveedor en el "
+        "navegador\n\n"
+        "Ahí se genera la clave API, que después se pega aquí."
+    ),
+    "bootstrap.help.credential_key_entry": (
+        "Pega aquí la clave API de este proveedor\n\n"
+        "Se muestra como puntos mientras se escribe. Solo el botón "
+        "Guardar de abajo la aplica realmente."
+    ),
+    "bootstrap.help.credential_save_button": "Guardar ahora la clave introducida arriba",
+    "bootstrap.help.finish_close_button": "Cerrar el asistente sin iniciar la aplicación ahora",
+    "bootstrap.help.finish_launch_button": "Cerrar el asistente e iniciar la aplicación de inmediato",
     "credentials.title": "Credenciales",
     "credentials.saved": "La clave de API se ha guardado.",
     "credential.environment": "Variable de entorno (sesión)",
@@ -3095,6 +3626,141 @@ IT = {
     "settings.credentials_group": "Accesso API",
     "settings.general_group": "Generale",
     "settings.env_override_warning": "Questo provider utilizza attualmente un valore proveniente da una variabile d'ambiente, non la voce del keyring salvata qui. Per usare la chiave salvata, rimuovi questa variabile d'ambiente a livello di sistema operativo.",
+
+    "settings.provider.tooltip": "Provider la cui chiave è gestita qui sotto",
+    "settings.provider.whatsthis": (
+        "Seleziona a quale provider di traduzione (DeepL, Google, "
+        "OpenAI, Grok) si applicano lo stato, la nuova chiave e la "
+        "posizione di archiviazione qui sotto. Ogni provider ha una "
+        "propria chiave, salvata separatamente."
+    ),
+    "settings.status.tooltip": "Da dove proviene la chiave attualmente usata",
+    "settings.status.whatsthis": (
+        "Mostra se per il provider selezionato è stata trovata una "
+        "chiave nel keyring del sistema, in una variabile d'ambiente o "
+        "nessuna delle due. Una variabile d'ambiente ha sempre la "
+        "precedenza sul keyring - vedi l'avviso più sotto se è questo "
+        "il caso."
+    ),
+    "settings.secret.tooltip": "Nuova chiave API per il provider selezionato",
+    "settings.secret.whatsthis": (
+        "Incolla qui la chiave API ricevuta dal provider e fai clic su "
+        "«Salva». Durante la digitazione viene mostrata come puntini "
+        "ma non viene applicata automaticamente - solo il pulsante "
+        "Salva la scrive nella posizione di archiviazione selezionata."
+    ),
+    "settings.target_field.tooltip": "Dove viene salvata la nuova chiave",
+    "settings.target_field.whatsthis": (
+        "«Keyring del sistema operativo» è la scelta consigliata e "
+        "permanente. «Variabile d'ambiente» vale solo per la sessione "
+        "corrente ed è pensata soprattutto per casi particolari/"
+        "risoluzione problemi - vedi la nota sotto. «Entrambi» scrive "
+        "anche una variabile di questo tipo."
+    ),
+    "settings.max_chars.tooltip": "Limite di caratteri per esecuzione di traduzione",
+    "settings.max_chars.whatsthis": (
+        "Un'esecuzione con più caratteri di quanto impostato qui viene "
+        "interrotta con un avviso invece di generare costi "
+        "inaspettatamente alti. Aumentalo qui se necessario."
+    ),
+    "settings.save_key.tooltip": "Salva la nuova chiave",
+    "settings.save_key.whatsthis": (
+        "Scrive la chiave inserita sopra per il provider selezionato "
+        "nella posizione di archiviazione scelta. Il campo viene "
+        "svuotato in seguito e lo stato sopra si aggiorna."
+    ),
+    "settings.open_log.tooltip": "Apri il file di log dell'app",
+    "settings.open_log.whatsthis": (
+        "Apre il file di log corrente nel programma predefinito del "
+        "sistema - utile per copiare messaggi di errore in una "
+        "segnalazione di bug senza fare uno screenshot."
+    ),
+
+    "hw_check.status.tooltip": "Risultato dell'ultimo controllo GPU",
+    "hw_check.status.whatsthis": (
+        "Mostra se è stata trovata una GPU NVIDIA supportata con VRAM "
+        "sufficiente, quando è stata effettuata l'ultima verifica e se "
+        "la versione CUDA del driver installato supporta l'inpainting "
+        "GPU locale. Senza una GPU/driver adeguati, l'inpainting locale "
+        "funziona comunque - solo più lentamente, sulla CPU."
+    ),
+    "hw_check.recheck_button.tooltip": "Esegui di nuovo ora il controllo GPU",
+    "hw_check.recheck_button.whatsthis": (
+        "Esegue di nuovo lo stesso controllo già effettuato "
+        "dall'installer - utile dopo un aggiornamento del driver o un "
+        "cambio di scheda grafica, senza dover reinstallare l'app."
+    ),
+
+    "bootstrap.help.back_button": (
+        "Torna al passaggio precedente\n\n"
+        "Quanto già inserito in questo passaggio e nel precedente viene "
+        "mantenuto."
+    ),
+    "bootstrap.help.next_button": "Continua al passaggio successivo",
+    "bootstrap.help.cancel_button": (
+        "Chiude questa procedura guidata\n\n"
+        "Verrà chiesta conferma se un'installazione è in corso. La "
+        "configurazione può essere riavviata in qualsiasi momento."
+    ),
+    "bootstrap.help.language_combo": (
+        "Lingua di questa procedura guidata\n\n"
+        "Si applica immediatamente a tutte le schermate di questa "
+        "procedura. L'app stessa avrà in seguito una propria selezione "
+        "della lingua, indipendente."
+    ),
+    "bootstrap.help.mode_online_radio": (
+        "La traduzione passa attraverso provider cloud (DeepL, Google, "
+        "OpenAI, Grok)\n\n"
+        "Installazione più rapida e semplice, funziona su qualsiasi "
+        "computer. Richiede una propria chiave API del provider scelto "
+        "e una connessione internet durante la traduzione."
+    ),
+    "bootstrap.help.mode_local_radio": (
+        "L'elaborazione delle immagini avviene localmente sulla scheda "
+        "grafica, senza cloud\n\n"
+        "Richiede una scheda grafica NVIDIA supportata con memoria "
+        "video sufficiente (verificata al passaggio successivo) - in "
+        "cambio, le immagini non lasciano mai questo computer."
+    ),
+    "bootstrap.help.gpu_continue_local_button": (
+        "Continua comunque l'installazione locale\n\n"
+        "Utile se il controllo è fallito per errore o se è ancora in "
+        "sospeso un aggiornamento del driver - l'elaborazione locale può "
+        "essere riverificata in seguito da Aiuto -> Test hardware."
+    ),
+    "bootstrap.help.gpu_switch_online_button": (
+        "Installa invece la variante online\n\n"
+        "Passa questa installazione ai provider cloud, senza chiedere "
+        "nulla sulla GPU. Può essere aggiunta in seguito in qualsiasi "
+        "momento dalle impostazioni dell'app."
+    ),
+    "bootstrap.help.credentials_checkbox": (
+        "Inserire una chiave API per {provider} al passaggio "
+        "successivo\n\n"
+        "I provider non selezionati possono sempre essere aggiunti in "
+        "seguito nelle impostazioni dell'app."
+    ),
+    "bootstrap.help.credentials_skip_all_button": (
+        "Continua senza inserire alcuna chiave\n\n"
+        "Le chiavi possono sempre essere aggiunte in seguito nelle "
+        "impostazioni dell'app - ma nessuna traduzione funzionerà senza "
+        "almeno una."
+    ),
+    "bootstrap.help.credentials_continue_button": "Continua all'inserimento della chiave, o al provider successivo",
+    "bootstrap.help.credential_open_signup_button": (
+        "Apre la pagina di registrazione di questo provider nel "
+        "browser\n\n"
+        "È lì che viene generata la chiave API, da incollare qui in "
+        "seguito."
+    ),
+    "bootstrap.help.credential_key_entry": (
+        "Incolla qui la chiave API di questo provider\n\n"
+        "Viene mostrata come puntini durante la digitazione. Solo il "
+        "pulsante Salva sottostante la applica davvero."
+    ),
+    "bootstrap.help.credential_save_button": "Salva ora la chiave inserita sopra",
+    "bootstrap.help.finish_close_button": "Chiudi la procedura guidata senza avviare ora l'app",
+    "bootstrap.help.finish_launch_button": "Chiudi la procedura guidata e avvia subito l'app",
     "credentials.title": "Credenziali",
     "credentials.saved": "La chiave API è stata salvata.",
     "credential.environment": "Variabile d'ambiente (sessione)",
@@ -3668,6 +4334,139 @@ NL = {
     "settings.credentials_group": "API-toegang",
     "settings.general_group": "Algemeen",
     "settings.env_override_warning": "Voor deze provider wordt momenteel een waarde uit een omgevingsvariabele gebruikt, niet de hier opgeslagen keyring-vermelding. Verwijder deze omgevingsvariabele op besturingssysteemniveau om de opgeslagen sleutel te gebruiken.",
+
+    "settings.provider.tooltip": "Provider waarvan hieronder een sleutel wordt beheerd",
+    "settings.provider.whatsthis": (
+        "Bepaalt voor welke vertaalprovider (DeepL, Google, OpenAI, "
+        "Grok) de status, nieuwe sleutel en opslaglocatie hieronder "
+        "gelden. Elke provider heeft een eigen, apart opgeslagen "
+        "sleutel."
+    ),
+    "settings.status.tooltip": "Waar de momenteel gebruikte sleutel vandaan komt",
+    "settings.status.whatsthis": (
+        "Toont of er voor de gekozen provider een sleutel is gevonden "
+        "in de OS-keyring, in een omgevingsvariabele, of helemaal "
+        "geen. Een omgevingsvariabele heeft altijd voorrang op de "
+        "keyring - zie de waarschuwing verderop als dat hier het geval "
+        "is."
+    ),
+    "settings.secret.tooltip": "Nieuwe API-sleutel voor de gekozen provider",
+    "settings.secret.whatsthis": (
+        "Plak hier de van de provider ontvangen API-sleutel en klik op "
+        "\"Opslaan\". Tijdens het typen wordt deze als stippen "
+        "weergegeven, maar niet automatisch toegepast - alleen de "
+        "knop Opslaan schrijft hem naar de gekozen opslaglocatie."
+    ),
+    "settings.target_field.tooltip": "Waar de nieuwe sleutel wordt opgeslagen",
+    "settings.target_field.whatsthis": (
+        "\"OS-keyring\" is de aanbevolen, blijvende keuze. "
+        "\"Omgevingsvariabele\" geldt alleen voor de huidige sessie en "
+        "is vooral bedoeld voor bijzondere gevallen/probleemoplossing "
+        "- zie de opmerking hieronder. \"Beide\" schrijft daarnaast ook "
+        "zo'n sessievariabele."
+    ),
+    "settings.max_chars.tooltip": "Bovengrens van tekens per vertaalrun",
+    "settings.max_chars.whatsthis": (
+        "Een run met meer tekens dan hier ingesteld wordt met een "
+        "melding gestopt in plaats van onverwacht hoge kosten te "
+        "veroorzaken. Verhoog dit hier indien nodig."
+    ),
+    "settings.save_key.tooltip": "Nieuwe sleutel opslaan",
+    "settings.save_key.whatsthis": (
+        "Schrijft de hierboven ingevoerde sleutel voor de gekozen "
+        "provider naar de gekozen opslaglocatie. Het invoerveld wordt "
+        "daarna geleegd en de status hierboven wordt bijgewerkt."
+    ),
+    "settings.open_log.tooltip": "Logbestand van de app openen",
+    "settings.open_log.whatsthis": (
+        "Opent het huidige logbestand in het standaardprogramma van "
+        "het systeem - handig om foutmeldingen in een bugreport te "
+        "plakken zonder een schermafbeelding te maken."
+    ),
+
+    "hw_check.status.tooltip": "Resultaat van de laatste GPU-controle",
+    "hw_check.status.whatsthis": (
+        "Toont of een ondersteunde NVIDIA-GPU met voldoende VRAM is "
+        "gevonden, wanneer er voor het laatst is gecontroleerd, en of "
+        "de CUDA-versie van de geïnstalleerde driver lokale "
+        "GPU-inpainting ondersteunt. Zonder passende GPU/driver werkt "
+        "lokale inpainting nog steeds - alleen trager, op de CPU."
+    ),
+    "hw_check.recheck_button.tooltip": "GPU-controle nu opnieuw uitvoeren",
+    "hw_check.recheck_button.whatsthis": (
+        "Voert dezelfde controle opnieuw uit die ook het "
+        "installatieprogramma heeft gedaan - handig na een "
+        "driverupdate of het wisselen van videokaart, zonder de app "
+        "opnieuw te hoeven installeren."
+    ),
+
+    "bootstrap.help.back_button": (
+        "Terug naar de vorige stap\n\n"
+        "Wat al is ingevuld bij deze en de vorige stap blijft bewaard."
+    ),
+    "bootstrap.help.next_button": "Doorgaan naar de volgende stap",
+    "bootstrap.help.cancel_button": (
+        "Sluit deze wizard\n\n"
+        "Er wordt om bevestiging gevraagd als er een installatie loopt. "
+        "De installatie kan altijd opnieuw worden gestart."
+    ),
+    "bootstrap.help.language_combo": (
+        "Taal van deze wizard\n\n"
+        "Geldt direct voor alle schermen van deze wizard. De app zelf "
+        "krijgt later een eigen, onafhankelijke taalkeuze."
+    ),
+    "bootstrap.help.mode_online_radio": (
+        "Vertalen verloopt via cloudproviders (DeepL, Google, OpenAI, "
+        "Grok)\n\n"
+        "Snelste en eenvoudigste installatie, werkt op elke computer. "
+        "Vereist een eigen API-sleutel van de gekozen provider en een "
+        "internetverbinding tijdens het vertalen."
+    ),
+    "bootstrap.help.mode_local_radio": (
+        "Beeldbewerking gebeurt lokaal op de videokaart, zonder "
+        "cloud\n\n"
+        "Vereist een ondersteunde NVIDIA-videokaart met voldoende "
+        "videogeheugen (wordt in de volgende stap gecontroleerd) - "
+        "daarvoor blijven afbeeldingen volledig op deze computer."
+    ),
+    "bootstrap.help.gpu_continue_local_button": (
+        "Toch lokaal doorgaan met installeren\n\n"
+        "Handig als de controle ten onrechte mislukte of een "
+        "driverupdate nog uitstaat - lokale verwerking kan later altijd "
+        "opnieuw worden gecontroleerd via Help -> Hardwaretest."
+    ),
+    "bootstrap.help.gpu_switch_online_button": (
+        "In plaats daarvan de online variant installeren\n\n"
+        "Schakelt deze installatie over naar cloudproviders, zonder "
+        "vraag over de GPU. Kan later altijd worden toegevoegd via de "
+        "instellingen van de app."
+    ),
+    "bootstrap.help.credentials_checkbox": (
+        "Bij de volgende stap een API-sleutel voor {provider} "
+        "invoeren\n\n"
+        "Niet-aangevinkte providers kunnen altijd later worden "
+        "toegevoegd in de instellingen van de app."
+    ),
+    "bootstrap.help.credentials_skip_all_button": (
+        "Doorgaan zonder sleutels in te voeren\n\n"
+        "Sleutels kunnen altijd later worden toegevoegd in de "
+        "instellingen van de app - zonder minstens één sleutel werkt "
+        "vertalen echter nog niet."
+    ),
+    "bootstrap.help.credentials_continue_button": "Doorgaan naar het invoeren van de sleutel, of naar de volgende provider",
+    "bootstrap.help.credential_open_signup_button": (
+        "Opent de aanmeldpagina van deze provider in de browser\n\n"
+        "Daar wordt de API-sleutel aangemaakt, die daarna hier wordt "
+        "geplakt."
+    ),
+    "bootstrap.help.credential_key_entry": (
+        "Plak hier de API-sleutel van deze provider\n\n"
+        "Wordt tijdens het typen als stippen weergegeven. Alleen de "
+        "knop Opslaan hieronder past hem daadwerkelijk toe."
+    ),
+    "bootstrap.help.credential_save_button": "Sla de hierboven ingevoerde sleutel nu op",
+    "bootstrap.help.finish_close_button": "Wizard sluiten zonder de app nu te starten",
+    "bootstrap.help.finish_launch_button": "Wizard sluiten en de app direct starten",
     "credentials.title": "Inloggegevens",
     "credentials.saved": "API-sleutel is opgeslagen.",
     "credential.environment": "Omgevingsvariabele (sessie)",
@@ -4240,6 +5039,139 @@ FI = {
     "settings.credentials_group": "API-käyttö",
     "settings.general_group": "Yleistä",
     "settings.env_override_warning": "Tämä palveluntarjoaja käyttää tällä hetkellä ympäristömuuttujan arvoa, ei tähän tallennettua avainnippumerkintää. Käytä tallennettua avainta poistamalla tämä ympäristömuuttuja käyttöjärjestelmätasolla.",
+
+    "settings.provider.tooltip": "Palveluntarjoaja, jonka avainta hallitaan alla",
+    "settings.provider.whatsthis": (
+        "Valitsee, mihin käännöspalveluun (DeepL, Google, OpenAI, "
+        "Grok) alla oleva tila, uusi avain ja tallennuspaikka "
+        "kohdistuvat. Jokaisella palveluntarjoajalla on oma, erikseen "
+        "tallennettu avain."
+    ),
+    "settings.status.tooltip": "Mistä nykyisin käytetty avain on peräisin",
+    "settings.status.whatsthis": (
+        "Näyttää, löytyikö valitulle palveluntarjoajalle avain "
+        "käyttöjärjestelmän avainnipusta, ympäristömuuttujasta vai ei "
+        "kummastakaan. Ympäristömuuttuja on aina ensisijainen "
+        "avainnippuun nähden - katso varoitus alempaa, jos näin on "
+        "tässä tapauksessa."
+    ),
+    "settings.secret.tooltip": "Uusi API-avain valitulle palveluntarjoajalle",
+    "settings.secret.whatsthis": (
+        "Liitä tähän palveluntarjoajalta saatu API-avain ja napsauta "
+        "\"Tallenna\". Kirjoitettaessa se näkyy pisteinä, mutta ei "
+        "tallennu automaattisesti - vasta Tallenna-painike kirjoittaa "
+        "sen valittuun tallennuspaikkaan."
+    ),
+    "settings.target_field.tooltip": "Mihin uusi avain tallennetaan",
+    "settings.target_field.whatsthis": (
+        "\"Käyttöjärjestelmän avainnippu\" on suositeltu, pysyvä "
+        "valinta. \"Ympäristömuuttuja\" pätee vain nykyiseen istuntoon "
+        "ja on tarkoitettu lähinnä erikoistapauksiin/vianetsintään - "
+        "katso huomautus alta. \"Molemmat\" kirjoittaa lisäksi myös "
+        "tällaisen istuntomuuttujan."
+    ),
+    "settings.max_chars.tooltip": "Merkkien yläraja käännösajoa kohden",
+    "settings.max_chars.whatsthis": (
+        "Ajo, joka sisältää enemmän merkkejä kuin tähän on asetettu, "
+        "pysäytetään ilmoituksella sen sijaan, että se aiheuttaisi "
+        "odottamattoman suuria kustannuksia. Nosta arvoa tarvittaessa."
+    ),
+    "settings.save_key.tooltip": "Tallenna uusi avain",
+    "settings.save_key.whatsthis": (
+        "Kirjoittaa yllä syötetyn avaimen valitulle "
+        "palveluntarjoajalle valittuun tallennuspaikkaan. Syöttökenttä "
+        "tyhjenee sen jälkeen, ja yllä oleva tila päivittyy."
+    ),
+    "settings.open_log.tooltip": "Avaa sovelluksen lokitiedosto",
+    "settings.open_log.whatsthis": (
+        "Avaa nykyisen lokitiedoston järjestelmän oletusohjelmassa - "
+        "hyödyllinen virheilmoitusten kopioimiseen vikailmoitukseen "
+        "ilman kuvakaappausta."
+    ),
+
+    "hw_check.status.tooltip": "Viimeisimmän GPU-tarkistuksen tulos",
+    "hw_check.status.whatsthis": (
+        "Näyttää, löytyikö tuettu NVIDIA-näytönohjain, jossa on "
+        "riittävästi VRAM-muistia, milloin tarkistus tehtiin viimeksi, "
+        "ja tukeeko asennetun ajurin CUDA-versio paikallista "
+        "GPU-inpaintingia. Ilman sopivaa näytönohjainta/ajuria "
+        "paikallinen inpainting toimii silti - vain hitaammin, "
+        "suorittimella (CPU)."
+    ),
+    "hw_check.recheck_button.tooltip": "Suorita GPU-tarkistus nyt uudelleen",
+    "hw_check.recheck_button.whatsthis": (
+        "Suorittaa saman tarkistuksen, jonka asennusohjelmakin teki - "
+        "hyödyllinen ajuripäivityksen tai näytönohjaimen vaihdon "
+        "jälkeen, ilman sovelluksen uudelleenasennusta."
+    ),
+
+    "bootstrap.help.back_button": (
+        "Takaisin edelliseen vaiheeseen\n\n"
+        "Tässä ja edellisessä vaiheessa jo syötetyt tiedot säilyvät."
+    ),
+    "bootstrap.help.next_button": "Jatka seuraavaan vaiheeseen",
+    "bootstrap.help.cancel_button": (
+        "Sulkee tämän ohjatun toiminnon\n\n"
+        "Vahvistusta pyydetään, jos asennus on käynnissä. Asennuksen voi "
+        "aloittaa uudelleen milloin tahansa."
+    ),
+    "bootstrap.help.language_combo": (
+        "Tämän ohjatun toiminnon kieli\n\n"
+        "Vaikuttaa heti kaikkiin tämän ohjatun toiminnon näyttöihin. "
+        "Itse sovelluksella on myöhemmin oma, erillinen kielivalintansa."
+    ),
+    "bootstrap.help.mode_online_radio": (
+        "Kääntäminen tapahtuu pilvipalveluntarjoajien kautta (DeepL, "
+        "Google, OpenAI, Grok)\n\n"
+        "Nopein ja yksinkertaisin asennus, toimii millä tahansa "
+        "koneella. Vaatii oman API-avaimen valitulta palveluntarjoajalta "
+        "ja internetyhteyden kääntämisen aikana."
+    ),
+    "bootstrap.help.mode_local_radio": (
+        "Kuvankäsittely tapahtuu paikallisesti näytönohjaimella, ilman "
+        "pilveä\n\n"
+        "Vaatii tuetun NVIDIA-näytönohjaimen, jossa on riittävästi "
+        "videomuistia (tarkistetaan seuraavassa vaiheessa) - sen sijaan "
+        "kuvat eivät koskaan poistu tältä koneelta."
+    ),
+    "bootstrap.help.gpu_continue_local_button": (
+        "Jatka silti paikallista asennusta\n\n"
+        "Hyödyllinen, jos tarkistus epäonnistui virheellisesti tai "
+        "ajuripäivitys on vielä tekemättä - paikallinen käsittely "
+        "voidaan tarkistaa uudelleen myöhemmin kohdasta Ohje -> "
+        "Laitteistotesti."
+    ),
+    "bootstrap.help.gpu_switch_online_button": (
+        "Asenna sen sijaan verkkoversio\n\n"
+        "Vaihtaa tämän asennuksen pilvipalveluntarjoajiin kysymättä "
+        "näytönohjaimesta. Voidaan lisätä myöhemmin milloin tahansa "
+        "sovelluksen asetuksista."
+    ),
+    "bootstrap.help.credentials_checkbox": (
+        "Syötä API-avain palveluntarjoajalle {provider} seuraavassa "
+        "vaiheessa\n\n"
+        "Valitsemattomat palveluntarjoajat voi aina lisätä myöhemmin "
+        "sovelluksen asetuksista."
+    ),
+    "bootstrap.help.credentials_skip_all_button": (
+        "Jatka syöttämättä yhtään avainta\n\n"
+        "Avaimet voi aina lisätä myöhemmin sovelluksen asetuksista - "
+        "ilman vähintään yhtä avainta kääntäminen ei kuitenkaan toimi."
+    ),
+    "bootstrap.help.credentials_continue_button": "Jatka avaimen syöttöön tai seuraavaan palveluntarjoajaan",
+    "bootstrap.help.credential_open_signup_button": (
+        "Avaa tämän palveluntarjoajan rekisteröitymissivun "
+        "selaimessa\n\n"
+        "Siellä luodaan API-avain, joka liitetään sitten tähän."
+    ),
+    "bootstrap.help.credential_key_entry": (
+        "Liitä tämän palveluntarjoajan API-avain tähän\n\n"
+        "Näkyy pisteinä kirjoitettaessa. Vasta alla oleva "
+        "Tallenna-painike ottaa sen käyttöön."
+    ),
+    "bootstrap.help.credential_save_button": "Tallenna yllä syötetty avain nyt",
+    "bootstrap.help.finish_close_button": "Sulje ohjattu toiminto käynnistämättä sovellusta nyt",
+    "bootstrap.help.finish_launch_button": "Sulje ohjattu toiminto ja käynnistä sovellus heti",
     "credentials.title": "Kirjautumistiedot",
     "credentials.saved": "API-avain tallennettiin.",
     "credential.environment": "Ympäristömuuttuja (istunto)",
@@ -4806,6 +5738,138 @@ HR = {
     "settings.credentials_group": "Pristup API-ju",
     "settings.general_group": "Općenito",
     "settings.env_override_warning": "Ovaj pružatelj trenutačno koristi vrijednost iz varijable okruženja, a ne ovdje spremljeni unos u keyringu. Da biste koristili spremljeni ključ, uklonite tu varijablu okruženja na razini operacijskog sustava.",
+
+    "settings.provider.tooltip": "Pružatelj čiji se ključ upravlja ispod",
+    "settings.provider.whatsthis": (
+        "Određuje na kojeg se pružatelja usluge prevođenja (DeepL, "
+        "Google, OpenAI, Grok) odnose status, novi ključ i mjesto "
+        "pohrane ispod. Svaki pružatelj ima vlastiti, zasebno spremljeni "
+        "ključ."
+    ),
+    "settings.status.tooltip": "Odakle dolazi trenutačno korišteni ključ",
+    "settings.status.whatsthis": (
+        "Prikazuje je li za odabranog pružatelja pronađen ključ u OS "
+        "keyringu, u varijabli okruženja ili nijedan. Varijabla "
+        "okruženja uvijek ima prednost pred keyringom - pogledajte "
+        "upozorenje niže ako je to ovdje slučaj."
+    ),
+    "settings.secret.tooltip": "Novi API ključ za odabranog pružatelja",
+    "settings.secret.whatsthis": (
+        "Ovdje zalijepite API ključ dobiven od pružatelja i kliknite "
+        "\"Spremi\". Tijekom upisivanja prikazuje se kao točke, ali se "
+        "ne primjenjuje automatski - tek gumb Spremi zapisuje ga na "
+        "odabrano mjesto pohrane."
+    ),
+    "settings.target_field.tooltip": "Gdje se novi ključ sprema",
+    "settings.target_field.whatsthis": (
+        "\"OS keyring\" je preporučeni, trajni izbor. \"Varijabla "
+        "okruženja\" vrijedi samo za trenutačnu sesiju i uglavnom je "
+        "namijenjena posebnim slučajevima/otklanjanju problema - "
+        "pogledajte napomenu ispod. \"Oboje\" dodatno zapisuje i takvu "
+        "varijablu sesije."
+    ),
+    "settings.max_chars.tooltip": "Gornja granica znakova po izvršavanju prijevoda",
+    "settings.max_chars.whatsthis": (
+        "Izvršavanje s više znakova nego što je ovdje postavljeno "
+        "zaustavlja se s porukom umjesto da uzrokuje neočekivano "
+        "visoke troškove. Po potrebi ovdje povećajte vrijednost."
+    ),
+    "settings.save_key.tooltip": "Spremi novi ključ",
+    "settings.save_key.whatsthis": (
+        "Zapisuje gore unesen ključ za odabranog pružatelja na "
+        "odabrano mjesto pohrane. Polje za unos se nakon toga prazni, "
+        "a status iznad se ažurira."
+    ),
+    "settings.open_log.tooltip": "Otvori datoteku zapisnika aplikacije",
+    "settings.open_log.whatsthis": (
+        "Otvara trenutačnu datoteku zapisnika u zadanom programu "
+        "sustava - korisno za kopiranje poruka o pogrešci u prijavu "
+        "greške bez izrade snimke zaslona."
+    ),
+
+    "hw_check.status.tooltip": "Rezultat posljednje GPU provjere",
+    "hw_check.status.whatsthis": (
+        "Prikazuje je li pronađena podržana NVIDIA GPU s dovoljno VRAM "
+        "memorije, kada je posljednji put provjereno i podržava li CUDA "
+        "verzija instaliranog upravljačkog programa lokalni GPU "
+        "inpainting. Bez odgovarajuće GPU/upravljačkog programa, "
+        "lokalni inpainting i dalje radi - samo sporije, na CPU-u."
+    ),
+    "hw_check.recheck_button.tooltip": "Ponovno pokreni GPU provjeru sada",
+    "hw_check.recheck_button.whatsthis": (
+        "Ponovno pokreće istu provjeru koju je izvršio i instalacijski "
+        "program - korisno nakon ažuriranja upravljačkog programa ili "
+        "zamjene grafičke kartice, bez potrebe za ponovnom instalacijom "
+        "aplikacije."
+    ),
+
+    "bootstrap.help.back_button": (
+        "Natrag na prethodni korak\n\n"
+        "Ono što je već uneseno u ovom i prethodnom koraku ostaje "
+        "sačuvano."
+    ),
+    "bootstrap.help.next_button": "Nastavi na sljedeći korak",
+    "bootstrap.help.cancel_button": (
+        "Zatvara ovog čarobnjaka\n\n"
+        "Bit ćete zamoljeni za potvrdu ako je instalacija trenutačno u "
+        "tijeku. Postavljanje se može ponovno pokrenuti u bilo kojem "
+        "trenutku."
+    ),
+    "bootstrap.help.language_combo": (
+        "Jezik ovog čarobnjaka\n\n"
+        "Odmah se primjenjuje na sve zaslone ovog čarobnjaka. Sama "
+        "aplikacija kasnije ima vlastiti, neovisni odabir jezika."
+    ),
+    "bootstrap.help.mode_online_radio": (
+        "Prevođenje se odvija putem pružatelja u oblaku (DeepL, Google, "
+        "OpenAI, Grok)\n\n"
+        "Najbrža i najjednostavnija instalacija, radi na bilo kojem "
+        "računalu. Zahtijeva vlastiti API ključ odabranog pružatelja i "
+        "internetsku vezu tijekom prevođenja."
+    ),
+    "bootstrap.help.mode_local_radio": (
+        "Obrada slika odvija se lokalno na grafičkoj kartici, bez "
+        "oblaka\n\n"
+        "Zahtijeva podržanu NVIDIA grafičku karticu s dovoljno video "
+        "memorije (provjerava se u sljedećem koraku) - zauzvrat slike "
+        "nikada ne napuštaju ovo računalo."
+    ),
+    "bootstrap.help.gpu_continue_local_button": (
+        "Ipak nastavi s lokalnom instalacijom\n\n"
+        "Korisno ako je provjera pogrešno neuspjela ili ažuriranje "
+        "upravljačkog programa još nije obavljeno - lokalna obrada može "
+        "se ponovno provjeriti kasnije putem Pomoć -> Test hardvera."
+    ),
+    "bootstrap.help.gpu_switch_online_button": (
+        "Umjesto toga instaliraj online varijantu\n\n"
+        "Prebacuje ovu instalaciju na pružatelje u oblaku, bez pitanja "
+        "o GPU-u. Može se dodati kasnije u bilo kojem trenutku putem "
+        "postavki aplikacije."
+    ),
+    "bootstrap.help.credentials_checkbox": (
+        "U sljedećem koraku unesite API ključ za {provider}\n\n"
+        "Neoznačeni pružatelji uvijek se mogu dodati kasnije u "
+        "postavkama aplikacije."
+    ),
+    "bootstrap.help.credentials_skip_all_button": (
+        "Nastavi bez unosa ijednog ključa\n\n"
+        "Ključevi se uvijek mogu dodati kasnije u postavkama aplikacije "
+        "- no bez barem jednog ključa prevođenje neće raditi."
+    ),
+    "bootstrap.help.credentials_continue_button": "Nastavi na unos ključa ili na sljedećeg pružatelja",
+    "bootstrap.help.credential_open_signup_button": (
+        "Otvara stranicu za registraciju ovog pružatelja u "
+        "pregledniku\n\n"
+        "Ondje se generira API ključ koji se zatim ovdje zalijepi."
+    ),
+    "bootstrap.help.credential_key_entry": (
+        "Ovdje zalijepite API ključ ovog pružatelja\n\n"
+        "Tijekom upisivanja prikazuje se kao točke. Tek gumb Spremi "
+        "ispod ga stvarno primjenjuje."
+    ),
+    "bootstrap.help.credential_save_button": "Odmah spremi gore unesen ključ",
+    "bootstrap.help.finish_close_button": "Zatvori čarobnjaka bez pokretanja aplikacije sada",
+    "bootstrap.help.finish_launch_button": "Zatvori čarobnjaka i odmah pokreni aplikaciju",
     "credentials.title": "Vjerodajnice",
     "credentials.saved": "API ključ je spremljen.",
     "credential.environment": "Varijabla okruženja (sesija)",
@@ -5369,6 +6433,137 @@ RU = {
     "settings.credentials_group": "Доступ к API",
     "settings.general_group": "Общие",
     "settings.env_override_warning": "Этот провайдер сейчас использует значение из переменной окружения, а не сохранённую здесь запись в связке ключей. Чтобы использовать сохранённый ключ, удалите эту переменную окружения на уровне операционной системы.",
+
+    "settings.provider.tooltip": "Поставщик, чей ключ управляется ниже",
+    "settings.provider.whatsthis": (
+        "Определяет, к какому поставщику перевода (DeepL, Google, "
+        "OpenAI, Grok) относятся статус, новый ключ и место хранения "
+        "ниже. У каждого поставщика свой, отдельно сохранённый ключ."
+    ),
+    "settings.status.tooltip": "Откуда взят текущий используемый ключ",
+    "settings.status.whatsthis": (
+        "Показывает, найден ли для выбранного поставщика ключ в "
+        "хранилище ключей ОС, в переменной окружения, или не найден "
+        "вовсе. Переменная окружения всегда имеет приоритет над "
+        "хранилищем ключей - см. предупреждение ниже, если это "
+        "относится к данному случаю."
+    ),
+    "settings.secret.tooltip": "Новый API-ключ для выбранного поставщика",
+    "settings.secret.whatsthis": (
+        "Вставьте сюда API-ключ, полученный от поставщика, и нажмите "
+        "«Сохранить». Во время ввода он отображается точками, но не "
+        "применяется автоматически - только кнопка «Сохранить» "
+        "записывает его в выбранное место хранения."
+    ),
+    "settings.target_field.tooltip": "Где сохраняется новый ключ",
+    "settings.target_field.whatsthis": (
+        "«Хранилище ключей ОС» - рекомендуемый, постоянный вариант. "
+        "«Переменная окружения» действует только в течение текущего "
+        "сеанса и предназначена в основном для особых случаев/отладки "
+        "- см. примечание ниже. «Оба варианта» также дополнительно "
+        "записывает такую переменную сеанса."
+    ),
+    "settings.max_chars.tooltip": "Верхний предел символов на один запуск перевода",
+    "settings.max_chars.whatsthis": (
+        "Запуск, содержащий больше символов, чем задано здесь, "
+        "останавливается с сообщением вместо того, чтобы привести к "
+        "неожиданно высоким затратам. При необходимости увеличьте "
+        "значение здесь."
+    ),
+    "settings.save_key.tooltip": "Сохранить новый ключ",
+    "settings.save_key.whatsthis": (
+        "Записывает введённый выше ключ для выбранного поставщика в "
+        "выбранное место хранения. Поле ввода после этого очищается, "
+        "а статус выше обновляется."
+    ),
+    "settings.open_log.tooltip": "Открыть файл журнала приложения",
+    "settings.open_log.whatsthis": (
+        "Открывает текущий файл журнала в программе по умолчанию для "
+        "системы - полезно для копирования сообщений об ошибках в "
+        "отчёт об ошибке без создания снимка экрана."
+    ),
+
+    "hw_check.status.tooltip": "Результат последней проверки GPU",
+    "hw_check.status.whatsthis": (
+        "Показывает, была ли найдена поддерживаемая видеокарта NVIDIA с "
+        "достаточным объёмом видеопамяти, когда была последняя проверка "
+        "и поддерживает ли версия CUDA установленного драйвера "
+        "локальный GPU-инпейнтинг. Без подходящей видеокарты/драйвера "
+        "локальный инпейнтинг всё равно работает - просто медленнее, на "
+        "процессоре (CPU)."
+    ),
+    "hw_check.recheck_button.tooltip": "Повторить проверку GPU сейчас",
+    "hw_check.recheck_button.whatsthis": (
+        "Запускает ту же проверку, что выполнял установщик - полезно "
+        "после обновления драйвера или замены видеокарты, без "
+        "необходимости переустанавливать приложение."
+    ),
+
+    "bootstrap.help.back_button": (
+        "Назад к предыдущему шагу\n\n"
+        "Всё, что уже введено на этом и предыдущем шаге, сохраняется."
+    ),
+    "bootstrap.help.next_button": "Перейти к следующему шагу",
+    "bootstrap.help.cancel_button": (
+        "Закрывает этого мастера установки\n\n"
+        "Если установка сейчас выполняется, будет запрошено "
+        "подтверждение. Настройку можно запустить заново в любой "
+        "момент."
+    ),
+    "bootstrap.help.language_combo": (
+        "Язык этого мастера установки\n\n"
+        "Применяется сразу ко всем экранам этого мастера. У самого "
+        "приложения позже будет собственный, независимый выбор языка."
+    ),
+    "bootstrap.help.mode_online_radio": (
+        "Перевод выполняется через облачных поставщиков (DeepL, Google, "
+        "OpenAI, Grok)\n\n"
+        "Самая быстрая и простая установка, работает на любом "
+        "компьютере. Требует собственный API-ключ выбранного "
+        "поставщика и подключение к интернету во время перевода."
+    ),
+    "bootstrap.help.mode_local_radio": (
+        "Обработка изображений выполняется локально на видеокарте, без "
+        "облака\n\n"
+        "Требует поддерживаемую видеокарту NVIDIA с достаточным "
+        "объёмом видеопамяти (проверяется на следующем шаге) - зато "
+        "изображения никогда не покидают этот компьютер."
+    ),
+    "bootstrap.help.gpu_continue_local_button": (
+        "Всё равно продолжить локальную установку\n\n"
+        "Полезно, если проверка ошибочно завершилась неудачей или "
+        "обновление драйвера ещё не выполнено - локальную обработку "
+        "можно перепроверить позже через Справка -> Тест оборудования."
+    ),
+    "bootstrap.help.gpu_switch_online_button": (
+        "Установить вместо этого онлайн-вариант\n\n"
+        "Переключает эту установку на облачных поставщиков, без "
+        "вопроса о видеокарте. Можно добавить позже в любой момент "
+        "через настройки приложения."
+    ),
+    "bootstrap.help.credentials_checkbox": (
+        "На следующем шаге ввести API-ключ для {provider}\n\n"
+        "Неотмеченных поставщиков всегда можно добавить позже в "
+        "настройках приложения."
+    ),
+    "bootstrap.help.credentials_skip_all_button": (
+        "Продолжить, не вводя ни одного ключа\n\n"
+        "Ключи всегда можно добавить позже в настройках приложения - "
+        "но без хотя бы одного ключа перевод работать не будет."
+    ),
+    "bootstrap.help.credentials_continue_button": "Перейти к вводу ключа или к следующему поставщику",
+    "bootstrap.help.credential_open_signup_button": (
+        "Открывает страницу регистрации этого поставщика в браузере\n\n"
+        "Там создаётся API-ключ, который затем вставляется сюда."
+    ),
+    "bootstrap.help.credential_key_entry": (
+        "Вставьте сюда API-ключ этого поставщика\n\n"
+        "Во время ввода отображается точками. Только кнопка "
+        "«Сохранить» ниже действительно применяет его."
+    ),
+    "bootstrap.help.credential_save_button": "Сохранить введённый выше ключ сейчас",
+    "bootstrap.help.finish_close_button": "Закрыть мастер установки, не запуская приложение сейчас",
+    "bootstrap.help.finish_launch_button": "Закрыть мастер установки и сразу запустить приложение",
     "credentials.title": "Учётные данные",
     "credentials.saved": "Ключ API сохранён.",
     "credential.environment": "Переменная окружения (сессия)",
