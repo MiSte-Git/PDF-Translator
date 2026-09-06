@@ -22,19 +22,30 @@ import platform
 import queue
 import threading
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from typing import Callable
 
 from bootstrap.controller import BootstrapController
 from bootstrap.installer import InstallMode, InstallProgress, InstallStep
 from ui.i18n_data import LOCALES
 
-_WINDOW_SIZE = "500x380"
-# 07.09.2026: shrunk again from 560x440 ("noch kleiner und moderner") -
-# matches _WINDOW_SIZE's usable width (500 minus the container's own
-# padding=16 on each side, with a little breathing room). Was a bare
-# "560" repeated at every call site before 06.09.2026.
+_WINDOW_SIZE = "500x440"
+# 07.09.2026: shrunk from 560x440 to 500x380 ("noch kleiner und
+# moderner"), then grown back to 500x440 the same day to make room
+# for the persistent "Abbrechen" bar added in __init__ (see
+# BootstrapApp.__init__ and _set_frame) - every screen needs it, not
+# just one, so it could not be folded into an existing per-screen
+# button row without touching every _show_*/_render_* builder
+# separately. Net effect vs. the original 560x480 is still a real
+# reduction (about 30% less area), just not as small as the brief
+# 500x380 in between.
 _TEXT_WRAP = 440
+
+# bootstrap.finish_* only - see _show_finish(): far less content than
+# every other screen (one line of text, two buttons, no Abbrechen bar
+# - see _set_frame(..., show_cancel=False)), so the shared
+# _WINDOW_SIZE above would leave a lot of visibly empty space.
+_FINISH_WINDOW_SIZE = "500x230"
 
 # bootstrap.install_step_* i18n keys, keyed by InstallStep - see
 # ui/i18n_data.py's "Geführter Bootstrapper" block.
@@ -70,14 +81,52 @@ class BootstrapApp(tk.Tk):
         style.configure("TCheckbutton", padding=(0, 5))
         style.configure("TRadiobutton", padding=(0, 5))
 
+        self._installing = False
+        # 07.09.2026 ("fehlt uns nicht auch ein Abbrechen Button
+        # ueberall"): a persistent bar OUTSIDE the per-screen frame
+        # that _set_frame() swaps out, rather than adding a Cancel
+        # button to every individual _show_*/_render_* button row -
+        # there are five different ones, including one
+        # (_show_install's progress screen) that had no button row at
+        # all before this. Packed (side="bottom") BEFORE
+        # self._container below, so it reserves its own space first
+        # and _container gets the remaining area - the standard Tk
+        # pack ordering for a fixed footer; re-packing it later
+        # (_set_frame) does not change this ordering, only whether it
+        # is shown at all. Hidden only for the finish screen - once
+        # install has succeeded there is nothing left to cancel.
+        self._cancel_bar = ttk.Frame(self, padding=(16, 8))
+        self._cancel_bar.pack(side="bottom", fill="x")
+        ttk.Button(
+            self._cancel_bar, text=self.controller.text("bootstrap.cancel_button"), command=self._on_cancel
+        ).pack(side="left")
+
         self._container = ttk.Frame(self, padding=16)
         self._container.pack(fill="both", expand=True)
         self._current_frame: ttk.Frame | None = None
 
         self._selected_providers: dict[str, tk.BooleanVar] = {}
-        self._provider_queue: list[str] = []
+        # 07.09.2026: replaced a pop-from-a-queue design
+        # (self._provider_queue) with a fixed list + index - a queue
+        # has no way to go back to an already-shown provider, which is
+        # exactly the missing "Zurueck" button reported on this screen.
+        self._credential_providers: list[str] = []
+        self._credential_index: int = 0
 
         self._show_welcome()
+
+    def _on_cancel(self) -> None:
+        """Closes the wizard after confirmation - the whole install
+        (or just the wizard itself, before or after installing) is
+        abandoned. Does not attempt to clean up any partial
+        install_root() state left behind (see the stronger
+        confirmation text shown while an install is running) -
+        re-running the setup afterwards overwrites/completes it the
+        same way a second normal run always could.
+        """
+        key = "bootstrap.cancel_confirm_installing" if self._installing else "bootstrap.cancel_confirm"
+        if messagebox.askyesno(self.controller.text("bootstrap.cancel_title"), self.controller.text(key)):
+            self.destroy()
 
     def report_callback_exception(self, exc, val, tb) -> None:
         """Overrides tkinter's own hook for exceptions raised inside a
@@ -102,7 +151,14 @@ class BootstrapApp(tk.Tk):
 
     # --- frame helpers -----------------------------------------------------
 
-    def _set_frame(self, build: Callable[[ttk.Frame], None]) -> None:
+    def _set_frame(
+        self, build: Callable[[ttk.Frame], None], *, window_size: str = _WINDOW_SIZE, show_cancel: bool = True
+    ) -> None:
+        self.geometry(window_size)
+        if show_cancel:
+            self._cancel_bar.pack(side="bottom", fill="x")
+        else:
+            self._cancel_bar.pack_forget()
         if self._current_frame is not None:
             self._current_frame.destroy()
         frame = ttk.Frame(self._container)
@@ -128,13 +184,24 @@ class BootstrapApp(tk.Tk):
                 anchor="w", pady=(8, 16)
             )
 
+            # 07.09.2026 ("Sprachenleiste ist immer noch nicht mittig"):
+            # anchor="center" alone (06.09.2026's fix) turned out not to
+            # be reliably enough - packing lang_row itself with
+            # anchor="center" only centers it WITHIN whatever parcel
+            # width it happens to get, and nothing here forced that
+            # parcel to actually span the full window width. Forcing it
+            # explicitly with an outer fill="x" row and an inner frame
+            # (plain pack(), whose own default anchor is already
+            # "center") holding the actual label+combobox is the
+            # standard, unambiguous way to center a small fixed-size
+            # group of widgets: the outer frame's width is no longer in
+            # question (fill="x" guarantees it spans the parent), only
+            # the inner one's position within it is being centered.
             lang_row = ttk.Frame(frame)
-            # 06.09.2026 ("Sprachenleiste sollte mittig sein"): pack()'s
-            # own default is anchor="center" - this was previously
-            # overridden to "w" (left-aligned), which is what made it look
-            # off to the left instead of centered under the welcome text.
-            lang_row.pack(anchor="center")
-            ttk.Label(lang_row, text=self.controller.text("bootstrap.language_label") + ":").pack(side="left")
+            lang_row.pack(fill="x")
+            lang_inner = ttk.Frame(lang_row)
+            lang_inner.pack()
+            ttk.Label(lang_inner, text=self.controller.text("bootstrap.language_label") + ":").pack(side="left")
 
             # 06.09.2026 ("alle Sprachen sollten beim Installer verfuegbar
             # sein"): this used to hardcode values=["de", "en"], left over
@@ -157,7 +224,7 @@ class BootstrapApp(tk.Tk):
                 self._show_welcome()  # rebuild so every label re-renders in the new language
 
             combo = ttk.Combobox(
-                lang_row,
+                lang_inner,
                 textvariable=lang_var,
                 values=[loc.native_name for loc in LOCALES],
                 state="readonly",
@@ -290,6 +357,8 @@ class BootstrapApp(tk.Tk):
     # --- step 4: install ------------------------------------------------
 
     def _show_install(self) -> None:
+        self._installing = True
+
         def build(frame: ttk.Frame) -> None:
             ttk.Label(frame, text=self.controller.text("bootstrap.install_title"), font=("", 16, "bold")).pack(anchor="w")
             status_var = tk.StringVar(value="")
@@ -323,6 +392,7 @@ class BootstrapApp(tk.Tk):
                             status_var.set(payload)
                         elif kind == "done":
                             progress.stop()
+                            self._installing = False
                             if self.controller.mode is InstallMode.ONLINE:
                                 self._show_credentials()
                             else:
@@ -330,6 +400,7 @@ class BootstrapApp(tk.Tk):
                             return
                         elif kind == "error":
                             progress.stop()
+                            self._installing = False
                             self._show_install_failed(payload)
                             return
                 except queue.Empty:
@@ -375,7 +446,12 @@ class BootstrapApp(tk.Tk):
                 continue_button.state(["!disabled"] if any_selected else ["disabled"])
 
             for provider in self.controller.list_providers():
-                var = tk.BooleanVar(value=False)
+                # 07.09.2026: pre-check providers already chosen on a
+                # previous visit to this screen - without this, using
+                # the new "Zurueck" button from a single-credential
+                # screen back to this one would silently un-check
+                # everything the user had already picked.
+                var = tk.BooleanVar(value=provider in self._credential_providers)
                 self._selected_providers[provider] = var
                 label_key = f"bootstrap.credentials_provider_{provider}"
                 ttk.Checkbutton(
@@ -386,8 +462,9 @@ class BootstrapApp(tk.Tk):
                 ).pack(anchor="w")
 
             def on_continue() -> None:
-                self._provider_queue = [p for p, v in self._selected_providers.items() if v.get()]
-                self._show_next_credential_or_finish()
+                self._credential_providers = [p for p, v in self._selected_providers.items() if v.get()]
+                self._credential_index = 0
+                self._show_credential_step()
 
             row = ttk.Frame(frame)
             row.pack(side="bottom", fill="x", pady=(16, 0))
@@ -402,12 +479,21 @@ class BootstrapApp(tk.Tk):
 
         self._set_frame(build)
 
-    def _show_next_credential_or_finish(self) -> None:
-        if not self._provider_queue:
+    def _show_credential_step(self) -> None:
+        """Shows the credential-entry screen for
+        self._credential_providers[self._credential_index], or the finish
+        screen once the index has moved past the end. Used both going
+        forward (on_continue above, and _show_single_credential's own
+        "Weiter") and going back (_show_single_credential's "Zurück") -
+        walking a fixed list by index, rather than the previous
+        pop-from-a-queue approach, is what makes going back to an
+        already-shown provider possible at all (07.09.2026, "fehlt ein
+        Zurückbutton wenn ich einen Provider ausgewählt habe").
+        """
+        if self._credential_index >= len(self._credential_providers):
             self._show_finish()
             return
-        provider = self._provider_queue.pop(0)
-        self._show_single_credential(provider)
+        self._show_single_credential(self._credential_providers[self._credential_index])
 
     def _show_single_credential(self, provider: str) -> None:
         def build(frame: ttk.Frame) -> None:
@@ -443,12 +529,45 @@ class BootstrapApp(tk.Tk):
                 anchor="w", pady=(0, 16)
             )
 
-            self._nav_row(
-                frame,
-                back=None,
-                next_=self._show_next_credential_or_finish,
-                next_label=self.controller.text("bootstrap.credentials_continue_button"),
+            # 07.09.2026 ("Standard Vorstellung: Weiter deaktiviert wenn
+            # nichts eingegeben ist"): this provider was explicitly
+            # checked on the previous screen, so - unlike that screen's
+            # own "Später in den Einstellungen" escape hatch - continuing
+            # here with a still-empty field is disabled rather than
+            # silently treated the same as skipping it. Going back and
+            # unchecking the provider is the way to actually skip it now.
+            def update_next_state(*_args: object) -> None:
+                next_button.state(["!disabled"] if key_var.get().strip() else ["disabled"])
+
+            key_var.trace_add("write", update_next_state)
+
+            def go_back() -> None:
+                self._credential_index -= 1
+                if self._credential_index < 0:
+                    self._show_credentials()
+                else:
+                    self._show_credential_step()
+
+            def go_next() -> None:
+                # 07.09.2026: previously a typed-but-not-explicitly-
+                # "Gespeichert" key was silently discarded by "Weiter" -
+                # save it here too (on_save() is a no-op on an empty
+                # field, and this button stays disabled until non-empty
+                # anyway) so the explicit Speichern click only ever
+                # matters for its own status_var confirmation text, never
+                # for whether the value actually persists.
+                on_save()
+                self._credential_index += 1
+                self._show_credential_step()
+
+            row = ttk.Frame(frame)
+            row.pack(side="bottom", fill="x", pady=(16, 0))
+            ttk.Button(row, text=self.controller.text("bootstrap.back_button"), command=go_back).pack(side="left")
+            next_button = ttk.Button(
+                row, text=self.controller.text("bootstrap.credentials_continue_button"), command=go_next
             )
+            next_button.pack(side="right")
+            update_next_state()
 
         self._set_frame(build)
 
@@ -470,7 +589,7 @@ class BootstrapApp(tk.Tk):
             ttk.Button(row, text=self.controller.text("bootstrap.finish_close_button"), command=self.destroy).pack(side="left")
             ttk.Button(row, text=self.controller.text("bootstrap.finish_launch_button"), command=on_launch).pack(side="right")
 
-        self._set_frame(build)
+        self._set_frame(build, window_size=_FINISH_WINDOW_SIZE, show_cancel=False)
 
 
 def _is_running_elevated() -> bool:
@@ -490,6 +609,32 @@ def _is_running_elevated() -> bool:
         # here should not block a normal, non-elevated install - it just
         # means this one safeguard silently does not run.
         return False
+
+
+def _detect_wizard_language() -> str:
+    """Best-effort language for the elevated-admin warning below - this
+    runs before BootstrapController (or Tk) exists, so it cannot use
+    self.controller.text() the way every other screen in this file does.
+
+    07.09.2026 (real user report): the warning always appeared in German
+    regardless of Windows' own UI language, which is fine for a German
+    system but not otherwise. Matches against the FULL ui/i18n_data.py
+    CATALOGUES (all 9 locales) rather than reusing
+    bootstrap/system_lang.py::detect_system_language() - that function
+    deliberately only recognizes "de"/"en" for the wizard's own initial
+    language selection (a separate, documented scope decision - see its
+    module docstring), which is not what "diese Meldung sollte in allen
+    Sprachen verfuegbar sein" is asking for here. Falls back to "en" (not
+    "de"), consistent with system_lang.py's own fallback choice.
+    """
+    from bootstrap import system_lang
+    from ui.i18n_data import CATALOGUES
+
+    raw = system_lang.raw_system_locale()
+    if not raw:
+        return "en"
+    primary = raw.strip().lower().replace("_", "-").split("-", 1)[0]
+    return primary if primary in CATALOGUES else "en"
 
 
 def _warn_and_exit_if_elevated() -> bool:
@@ -520,25 +665,24 @@ def _warn_and_exit_if_elevated() -> bool:
     (a normal-privilege process cannot even read why it failed), so the
     only fix is to never let it happen: check at startup, before doing
     any work, and refuse with a clear explanation if elevated.
+
+    07.09.2026: the message text now comes from ui/i18n_data.py's
+    CATALOGUES (see _detect_wizard_language() above) instead of being a
+    single hardcoded German string, and explicitly mentions that a
+    standard Windows message box's text can be selected/copied with
+    Ctrl+C - the same native behaviour _report_startup_crash() below
+    already relies on, just not previously called out to the user.
     """
     import sys
 
     if not _is_running_elevated():
         return False
 
-    message = (
-        "PDF-Translator wurde als Administrator gestartet.\n\n"
-        "Dieses Programm braucht keine Administratorrechte und sollte "
-        "nicht damit ausgefuehrt werden: Dateien, die der Installer dann "
-        "anlegt (venv, heruntergeladene App, Verknuepfung), wuerden "
-        "danach nur noch fuer Administratoren nutzbar sein - beim "
-        "normalen Start ohne Administratorrechte wuerde die App gar "
-        "nicht mehr starten.\n\n"
-        'Bitte dieses Fenster schliessen und den Installer per normalem '
-        'Doppelklick (ohne "Als Administrator ausfuehren") erneut '
-        "starten."
-    )
-    title = "PDF-Translator Setup"
+    from ui.i18n_data import CATALOGUES, DE
+
+    catalogue = CATALOGUES.get(_detect_wizard_language(), DE)
+    title = catalogue.get("bootstrap.elevated_warning_title", DE["bootstrap.elevated_warning_title"])
+    message = catalogue.get("bootstrap.elevated_warning_text", DE["bootstrap.elevated_warning_text"])
     if sys.platform == "win32":
         import ctypes
 
@@ -550,6 +694,21 @@ def _warn_and_exit_if_elevated() -> bool:
 
 
 def main() -> None:
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == "--uninstall":
+        # This same executable doubles as its own uninstaller - the
+        # standard NSIS/Inno Setup trick of one binary with an
+        # "--uninstall" flag instead of a second PyInstaller build/CI
+        # matrix just for this. See bootstrap/uninstall.py's module
+        # docstring and bootstrap/installer.py::
+        # register_windows_uninstall_entry(), which copies this exe
+        # into install_root() and points Add/Remove Programs'
+        # UninstallString at "<that copy> --uninstall".
+        from bootstrap.uninstall import run_uninstall_ui
+
+        run_uninstall_ui()
+        return
     if _warn_and_exit_if_elevated():
         return
     try:

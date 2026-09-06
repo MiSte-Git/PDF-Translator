@@ -121,13 +121,20 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.settings = settings
         self.language = language
-        self.locale = QComboBox()
-        for info in LOCALES:
-            suffix = "" if info.available else f" ({self.language.text('settings.prepared')})"
-            self.locale.addItem(info.native_name + suffix, info.code)
-            if not info.available:
-                self.locale.model().item(self.locale.count() - 1).setEnabled(False)
-        self.locale.setCurrentIndex(max(self.locale.findData(language.language), 0))
+        # 07.09.2026 (Michael: "Warum gibt es in diesem Dialog eine
+        # Oberflächenspracheinstellung? Dieses Drop Down ist hier doch
+        # obsolet, oder nicht?"): yes - since the flag row was added to
+        # the main window (see self.flag_row / _flag_clicked further
+        # below), it fully superseded this combobox, and did so more
+        # directly: _flag_clicked's own comment already called out that
+        # it is "sofort wirksam UND sofort persistiert", unlike this
+        # combobox, which only took effect immediately in-memory (both
+        # share one LanguageManager instance) but only PERSISTED to
+        # QSettings when this whole dialog was Saved - so cancelling the
+        # dialog after touching this dropdown left the interface language
+        # changed anyway, silently reverting only on the next app start.
+        # Removed rather than fixed: the flag row already does this job
+        # better, keeping both around just invited that inconsistency.
         self.provider = QComboBox()
         self.provider.addItems(["deepl", "google", "openai", "grok"])
         # initial_provider lets a caller jump straight to the provider that
@@ -145,6 +152,20 @@ class SettingsDialog(QDialog):
         self.target = QComboBox()
         for target in ("environment", "keyring", "both"):
             self.target.addItem("", target)
+        # 07.09.2026 (Michael: "sollte als Standard Key-Ring ausgewählt
+        # sein"): restores the last saved choice if there is one, and
+        # defaults to "keyring" - not "environment" (simply the first
+        # item added above) - the very first time this dialog is opened.
+        # This is also the first time this field is persisted at all:
+        # before this it silently reset to "environment" on every reopen
+        # (see _accept() below). "environment" only ever sets os.environ
+        # for the current process (see ui/settings.py::save_credential) -
+        # not a sensible silent default, which is also why its own caveat
+        # (settings.session_note, see _update_note_visibility below) only
+        # applies to that one option.
+        saved_target = str(settings.value("credential_target", "keyring"))
+        self.target.setCurrentIndex(max(self.target.findData(saved_target), 0))
+        self.target.currentIndexChanged.connect(self._update_note_visibility)
         self.max_chars = QSpinBox()
         self.max_chars.setRange(1_000, 10_000_000)
         self.max_chars.setSingleStep(10_000)
@@ -152,7 +173,6 @@ class SettingsDialog(QDialog):
         self.save_key = QPushButton()
         self.save_key.clicked.connect(self._save_key)
         self.provider.currentTextChanged.connect(self._refresh_status)
-        self.locale.currentIndexChanged.connect(self._language_changed)
         # 02.09.2026 (Michael: "Haben wir kein Log für genau solche
         # Fälle?") - macht die neue Log-Datei (pipeline/app_logging.py)
         # ohne Dateibrowser-Umweg erreichbar, z. B. um sie hier
@@ -160,40 +180,72 @@ class SettingsDialog(QDialog):
         self.open_log_button = QPushButton()
         self.open_log_button.clicked.connect(self._open_log_file)
 
-        self.form = QFormLayout()
-        self.form_labels = [QLabel() for _ in range(6)]
-        for label, field in zip(self.form_labels, (self.locale, self.provider, self.status, self.secret, self.target, self.max_chars)):
-            self.form.addRow(label, field)
-        self.form.addRow("", self.save_key)
-        self.form.addRow("", self.open_log_button)
+        # 07.09.2026 (Michael: "In diesem Dialog sollten die Controls in
+        # Themen aufgeteilt werden, also in eigenen Kacheln oder
+        # Rahmen."): two QGroupBoxes, matching the card-style grouping
+        # MainWindow itself already uses (self.cost_box/self.job_box/
+        # self.config_box) rather than inventing a different convention
+        # just for this dialog.
+        self.credentials_form = QFormLayout()
+        self.credentials_labels = [QLabel() for _ in range(4)]
+        for label, field in zip(self.credentials_labels, (self.provider, self.status, self.secret, self.target)):
+            self.credentials_form.addRow(label, field)
+        self.note = QLabel()
+        self.note.setWordWrap(True)
+
+        self.credentials_box = QGroupBox()
+        credentials_layout = QVBoxLayout(self.credentials_box)
+        credentials_layout.addLayout(self.credentials_form)
+        credentials_layout.addWidget(self.note)
+        credentials_layout.addWidget(self.save_key)
+
+        self.general_form = QFormLayout()
+        self.general_labels = [QLabel() for _ in range(1)]
+        for label, field in zip(self.general_labels, (self.max_chars,)):
+            self.general_form.addRow(label, field)
+
+        self.general_box = QGroupBox()
+        general_layout = QVBoxLayout(self.general_box)
+        general_layout.addLayout(self.general_form)
+        general_layout.addWidget(self.open_log_button)
+
         self.buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         self.buttons.accepted.connect(self._accept)
         self.buttons.rejected.connect(self.reject)
-        self.note = QLabel()
         layout = QVBoxLayout(self)
-        layout.addLayout(self.form)
-        layout.addWidget(self.note)
+        layout.addWidget(self.credentials_box)
+        layout.addWidget(self.general_box)
         layout.addWidget(self.buttons)
         self.language.changed.connect(self.retranslate)
         self.retranslate()
         self._refresh_status()
-
-    def _language_changed(self) -> None:
-        code = self.locale.currentData()
-        if code:
-            self.language.set_language(code)
+        self._update_note_visibility()
 
     def retranslate(self) -> None:
         t = self.language.text
         self.setWindowTitle(t("settings.title"))
-        keys = ("settings.language", "settings.provider", "settings.credentials", "settings.new_key", "settings.storage", "settings.run_limit")
-        for label, key in zip(self.form_labels, keys): label.setText(t(key))
+        self.credentials_box.setTitle(t("settings.credentials_group"))
+        self.general_box.setTitle(t("settings.general_group"))
+        keys = ("settings.provider", "settings.credentials", "settings.new_key", "settings.storage")
+        for label, key in zip(self.credentials_labels, keys): label.setText(t(key))
+        self.general_labels[0].setText(t("settings.run_limit"))
         self.secret.setPlaceholderText(t("settings.key_placeholder"))
         for index, key in enumerate(("settings.environment", "settings.keyring", "settings.both")):
             self.target.setItemText(index, t(key))
         self.save_key.setText(t("settings.save_key"))
         self.open_log_button.setText(t("settings.open_log"))
         self.note.setText(t("settings.session_note"))
+
+    def _update_note_visibility(self) -> None:
+        # 07.09.2026 (Michael: "Der Hinweis unten in diesem Dialog ist nur
+        # nötig wenn in Speicherort Umgebungsvariable eingestellt ist,
+        # ansonsten ist er auch obsolet."): settings.session_note is
+        # entirely about the "environment" option's own caveat (see
+        # ui/settings.py::save_credential - it only ever sets os.environ
+        # for the current process) - showing it regardless of the
+        # actually selected target made it read like a general disclaimer
+        # about this whole dialog instead.
+        self.note.setVisible(self.target.currentData() == "environment")
 
     def _refresh_status(self) -> None:
         self.status.setText(self.language.text(credential_status(self.provider.currentText())))
@@ -220,7 +272,7 @@ class SettingsDialog(QDialog):
     def _accept(self) -> None:
         self.settings.setValue("provider", self.provider.currentText())
         self.settings.setValue("max_chars", self.max_chars.value())
-        self.settings.setValue("language", self.language.language)
+        self.settings.setValue("credential_target", self.target.currentData())
         self.accept()
 
 
@@ -432,10 +484,12 @@ class MainWindow(QMainWindow):
 
         # Sprachumschalter-Leiste (04.09.2026, Michael: "eine Flaggen-
         # Leiste einbauen") - Schnellzugriff direkt im Hauptfenster, ohne
-        # den Umweg ueber Einstellungen -> Sprache (SettingsDialog.locale
-        # bleibt trotzdem bestehen, siehe self.settings_button weiter
-        # unten - beide teilen sich dieselbe LanguageManager-Instanz und
-        # bleiben so automatisch synchron). Ein checkbarer QToolButton pro
+        # den Umweg ueber Einstellungen -> Sprache. 07.09.2026: die
+        # entsprechende Dropdown-Auswahl in SettingsDialog wurde inzwischen
+        # entfernt (Michael: "Dieses Drop Down ist hier doch obsolet,
+        # oder nicht?") - diese Leiste hier deckt denselben Zweck ab, und
+        # tut es direkter (sofort wirksam UND sofort persistiert, siehe
+        # _flag_clicked() weiter unten). Ein checkbarer QToolButton pro
         # verfuegbarer Sprache (LocaleInfo.available, siehe ui/i18n_data.py
         # - aktuell alle 9), exklusiv in einer QButtonGroup, Icon aus
         # assets/flags/<code>.png. Tooltip ist bewusst NICHT ueber i18n
@@ -1859,10 +1913,12 @@ class MainWindow(QMainWindow):
             self._open_settings(provider)
 
     def _flag_clicked(self, code: str) -> None:
-        # Sofort wirksam UND sofort persistiert (anders als
-        # SettingsDialog.locale, das erst mit "Speichern" in QSettings
-        # landet) - fuer eine Schnellzugriffs-Leiste ist "klicken = fertig"
-        # die erwartete Interaktion, kein Zwischenschritt noetig.
+        # Sofort wirksam UND sofort persistiert - fuer eine
+        # Schnellzugriffs-Leiste ist "klicken = fertig" die erwartete
+        # Interaktion, kein Zwischenschritt noetig. (07.09.2026: war
+        # frueher auch ueber SettingsDialog.locale moeglich, das erst mit
+        # "Speichern" in QSettings landete - inzwischen entfernt, siehe
+        # SettingsDialog.__init__'s Kommentar dazu.)
         self.language.set_language(code)
         self.settings.setValue("language", code)
 

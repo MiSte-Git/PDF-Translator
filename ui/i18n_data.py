@@ -355,6 +355,8 @@ DE = {
     "settings.save_key": "API-Schlüssel speichern/ersetzen",
     "settings.open_log": "Log-Datei öffnen …",
     "settings.session_note": "Hinweis: Die Umgebungsvariable ist in dieser Version nicht dauerhaft.",
+    "settings.credentials_group": "API-Zugang",
+    "settings.general_group": "Allgemein",
     "credentials.title": "Zugangsdaten",
     "credentials.saved": "API-Schlüssel wurde gespeichert.",
     "credential.environment": "Umgebungsvariable (Sitzung)", "credential.keyring": "OS-Keyring", "credential.missing": "Nicht eingerichtet",
@@ -665,6 +667,39 @@ DE = {
     "bootstrap.back_button": "Zurück",
     "bootstrap.next_button": "Weiter",
     "bootstrap.cancel_button": "Abbrechen",
+    "bootstrap.cancel_title": "Installation abbrechen?",
+    "bootstrap.cancel_confirm": (
+        "Der Einrichtungsassistent wird geschlossen, ohne dass "
+        "PDF-Translator fertig eingerichtet ist. Fortfahren?"
+    ),
+    "bootstrap.cancel_confirm_installing": (
+        "Die Installation läuft gerade. Ein Abbruch jetzt kann "
+        "unvollständige Dateien zurücklassen, die vor einem erneuten "
+        "Versuch von Hand gelöscht werden müssen. Trotzdem abbrechen?"
+    ),
+    # elevated_warning_* (06.09.2026, siehe bootstrap/app.py::
+    # _warn_and_exit_if_elevated): einziger Text in diesem Katalog mit
+    # echten "\n"-Zeilenumbrüchen statt physisch umgebrochener Prosa -
+    # dieser Text geht an ctypes' MessageBoxW (kein ttk-Label mit
+    # wraplength, das selbst umbricht), läuft außerdem VOR jeder
+    # tkinter-Initialisierung.
+    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Administratorrechte",
+    "bootstrap.elevated_warning_text": (
+        "PDF-Translator wurde als Administrator gestartet.\n\n"
+        "Das ist nicht nötig und richtet die Installation so ein, dass "
+        "sie beim normalen (nicht-administrativen) Start später nicht "
+        "mehr funktioniert.\n\n"
+        "Bitte dieses Fenster schließen und das Setup per normalem "
+        "Doppelklick erneut starten (ohne \"Als Administrator "
+        "ausführen\").\n\n"
+        "Diese Meldung lässt sich mit Strg+C kopieren."
+    ),
+    "bootstrap.uninstall_title": "PDF-Translator deinstallieren",
+    "bootstrap.uninstall_confirm": (
+        "PDF-Translator inklusive aller lokal gespeicherten Einstellungen "
+        "und API-Schlüssel entfernen?"
+    ),
+    "bootstrap.uninstall_done": "PDF-Translator wurde entfernt.",
     "bootstrap.welcome_title": "Willkommen",
     "bootstrap.welcome_text": (
         "Dieser Assistent richtet PDF-Translator auf diesem Rechner ein - "
@@ -1055,6 +1090,8 @@ EN = {
     "settings.save_key": "Save/replace API key",
     "settings.open_log": "Open log file …",
     "settings.session_note": "Note: the environment variable is not persistent in this version.",
+    "settings.credentials_group": "API Access",
+    "settings.general_group": "General",
     "credentials.title": "Credentials",
     "credentials.saved": "API key was saved.",
     "credential.environment": "Environment variable (session)", "credential.keyring": "OS keyring", "credential.missing": "Not configured",
@@ -1290,6 +1327,32 @@ EN = {
     "bootstrap.back_button": "Back",
     "bootstrap.next_button": "Next",
     "bootstrap.cancel_button": "Cancel",
+    "bootstrap.cancel_title": "Cancel installation?",
+    "bootstrap.cancel_confirm": (
+        "The setup wizard will close without PDF-Translator being fully "
+        "set up. Continue?"
+    ),
+    "bootstrap.cancel_confirm_installing": (
+        "The installation is currently running. Cancelling now may "
+        "leave incomplete files behind that would need to be deleted "
+        "by hand before trying again. Cancel anyway?"
+    ),
+    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Administrator Privileges",
+    "bootstrap.elevated_warning_text": (
+        "PDF-Translator was started as Administrator.\n\n"
+        "This is not necessary and will set things up in a way that "
+        "stops the app working later when started normally (without "
+        "admin rights).\n\n"
+        "Please close this window and start the setup again with a "
+        "normal double-click (without \"Run as administrator\").\n\n"
+        "This message can be copied with Ctrl+C."
+    ),
+    "bootstrap.uninstall_title": "Uninstall PDF-Translator",
+    "bootstrap.uninstall_confirm": (
+        "Remove PDF-Translator, including all locally stored settings "
+        "and API keys?"
+    ),
+    "bootstrap.uninstall_done": "PDF-Translator has been removed.",
     "bootstrap.welcome_title": "Welcome",
     "bootstrap.welcome_text": (
         "This wizard sets up PDF-Translator on this computer - no command "
@@ -1593,6 +1656,8 @@ FR = {
     "settings.save_key": "Enregistrer/remplacer la clé API",
     "settings.open_log": "Ouvrir le fichier journal …",
     "settings.session_note": "Remarque : la variable d'environnement n'est pas persistante dans cette version.",
+    "settings.credentials_group": "Accès API",
+    "settings.general_group": "Général",
     "credentials.title": "Identifiants",
     "credentials.saved": "La clé API a été enregistrée.",
     "credential.environment": "Variable d'environnement (session)",
@@ -1738,6 +1803,32 @@ FR = {
     "bootstrap.back_button": "Précédent",
     "bootstrap.next_button": "Suivant",
     "bootstrap.cancel_button": "Annuler",
+    "bootstrap.cancel_title": "Annuler l'installation ?",
+    "bootstrap.cancel_confirm": (
+        "L'assistant d'installation va se fermer sans que PDF-Translator "
+        "soit entièrement configuré. Continuer ?"
+    ),
+    "bootstrap.cancel_confirm_installing": (
+        "L'installation est en cours. L'annuler maintenant peut laisser "
+        "des fichiers incomplets qu'il faudra supprimer manuellement "
+        "avant de réessayer. Annuler quand même ?"
+    ),
+    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Droits administrateur",
+    "bootstrap.elevated_warning_text": (
+        "PDF-Translator a été démarré en tant qu'administrateur.\n\n"
+        "Ce n'est pas nécessaire et cela empêchera l'application de "
+        "fonctionner plus tard lors d'un démarrage normal (sans droits "
+        "administrateur).\n\n"
+        "Veuillez fermer cette fenêtre et relancer l'installation par un "
+        "double-clic normal (sans « Exécuter en tant qu'administrateur »).\n\n"
+        "Ce message peut être copié avec Ctrl+C."
+    ),
+    "bootstrap.uninstall_title": "Désinstaller PDF-Translator",
+    "bootstrap.uninstall_confirm": (
+        "Supprimer PDF-Translator, y compris tous les paramètres et clés "
+        "API stockés localement ?"
+    ),
+    "bootstrap.uninstall_done": "PDF-Translator a été supprimé.",
     "bootstrap.welcome_title": "Bienvenue",
     "bootstrap.welcome_text": "Cet assistant configure PDF-Translator sur cet ordinateur - sans aucune ligne de commande. Il télécharge les composants nécessaires et crée, à la fin, une entrée dans le menu des applications.",
     "bootstrap.language_label": "Langue",
@@ -1992,6 +2083,8 @@ ES = {
     "settings.save_key": "Guardar/reemplazar clave de API",
     "settings.open_log": "Abrir archivo de registro…",
     "settings.session_note": "Nota: en esta versión, la variable de entorno no es permanente.",
+    "settings.credentials_group": "Acceso a la API",
+    "settings.general_group": "General",
     "credentials.title": "Credenciales",
     "credentials.saved": "La clave de API se ha guardado.",
     "credential.environment": "Variable de entorno (sesión)",
@@ -2137,6 +2230,32 @@ ES = {
     "bootstrap.back_button": "Atrás",
     "bootstrap.next_button": "Siguiente",
     "bootstrap.cancel_button": "Cancelar",
+    "bootstrap.cancel_title": "¿Cancelar la instalación?",
+    "bootstrap.cancel_confirm": (
+        "El asistente de instalación se cerrará sin que PDF-Translator "
+        "quede completamente configurado. ¿Continuar?"
+    ),
+    "bootstrap.cancel_confirm_installing": (
+        "La instalación está en curso. Cancelarla ahora puede dejar "
+        "archivos incompletos que habría que borrar manualmente antes "
+        "de volver a intentarlo. ¿Cancelar de todos modos?"
+    ),
+    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Privilegios de administrador",
+    "bootstrap.elevated_warning_text": (
+        "PDF-Translator se inició como administrador.\n\n"
+        "Esto no es necesario y hará que la aplicación deje de "
+        "funcionar más adelante al iniciarla normalmente (sin derechos "
+        "de administrador).\n\n"
+        "Cierra esta ventana y vuelve a iniciar la instalación con un "
+        "doble clic normal (sin \"Ejecutar como administrador\").\n\n"
+        "Este mensaje se puede copiar con Ctrl+C."
+    ),
+    "bootstrap.uninstall_title": "Desinstalar PDF-Translator",
+    "bootstrap.uninstall_confirm": (
+        "¿Eliminar PDF-Translator, incluidos todos los ajustes y claves "
+        "API guardados localmente?"
+    ),
+    "bootstrap.uninstall_done": "PDF-Translator se ha eliminado.",
     "bootstrap.welcome_title": "Bienvenido",
     "bootstrap.welcome_text": "Este asistente configura PDF-Translator en este equipo, sin necesidad de usar la línea de comandos. Descarga los componentes necesarios y, al final, crea una entrada en el menú de aplicaciones.",
     "bootstrap.language_label": "Idioma",
@@ -2391,6 +2510,8 @@ IT = {
     "settings.save_key": "Salva/sostituisci chiave API",
     "settings.open_log": "Apri file di log...",
     "settings.session_note": "Nota: in questa versione la variabile d'ambiente non è permanente.",
+    "settings.credentials_group": "Accesso API",
+    "settings.general_group": "Generale",
     "credentials.title": "Credenziali",
     "credentials.saved": "La chiave API è stata salvata.",
     "credential.environment": "Variabile d'ambiente (sessione)",
@@ -2536,6 +2657,33 @@ IT = {
     "bootstrap.back_button": "Indietro",
     "bootstrap.next_button": "Avanti",
     "bootstrap.cancel_button": "Annulla",
+    "bootstrap.cancel_title": "Annullare l'installazione?",
+    "bootstrap.cancel_confirm": (
+        "La procedura guidata si chiuderà senza che PDF-Translator sia "
+        "completamente configurato. Continuare?"
+    ),
+    "bootstrap.cancel_confirm_installing": (
+        "L'installazione è in corso. Annullarla ora potrebbe lasciare "
+        "file incompleti da eliminare manualmente prima di riprovare. "
+        "Annullare comunque?"
+    ),
+    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Diritti di amministratore",
+    "bootstrap.elevated_warning_text": (
+        "PDF-Translator è stato avviato come amministratore.\n\n"
+        "Non è necessario e farà sì che l'app smetta di funzionare in "
+        "seguito quando avviata normalmente (senza diritti di "
+        "amministratore).\n\n"
+        "Chiudi questa finestra e riavvia il programma di installazione "
+        "con un doppio clic normale (senza \"Esegui come "
+        "amministratore\").\n\n"
+        "Questo messaggio può essere copiato con Ctrl+C."
+    ),
+    "bootstrap.uninstall_title": "Disinstalla PDF-Translator",
+    "bootstrap.uninstall_confirm": (
+        "Rimuovere PDF-Translator, comprese tutte le impostazioni e le "
+        "chiavi API salvate localmente?"
+    ),
+    "bootstrap.uninstall_done": "PDF-Translator è stato rimosso.",
     "bootstrap.welcome_title": "Benvenuto",
     "bootstrap.welcome_text": "Questa procedura guidata configura PDF-Translator su questo computer - senza bisogno della riga di comando. Scarica i componenti necessari e alla fine crea una voce nel menu delle applicazioni.",
     "bootstrap.language_label": "Lingua",
@@ -2790,6 +2938,8 @@ NL = {
     "settings.save_key": "API-sleutel opslaan/vervangen",
     "settings.open_log": "Logbestand openen …",
     "settings.session_note": "Opmerking: de omgevingsvariabele is in deze versie niet blijvend.",
+    "settings.credentials_group": "API-toegang",
+    "settings.general_group": "Algemeen",
     "credentials.title": "Inloggegevens",
     "credentials.saved": "API-sleutel is opgeslagen.",
     "credential.environment": "Omgevingsvariabele (sessie)",
@@ -2935,6 +3085,32 @@ NL = {
     "bootstrap.back_button": "Terug",
     "bootstrap.next_button": "Volgende",
     "bootstrap.cancel_button": "Annuleren",
+    "bootstrap.cancel_title": "Installatie annuleren?",
+    "bootstrap.cancel_confirm": (
+        "De installatiewizard wordt gesloten zonder dat PDF-Translator "
+        "volledig is ingesteld. Doorgaan?"
+    ),
+    "bootstrap.cancel_confirm_installing": (
+        "De installatie is nu bezig. Nu annuleren kan onvolledige "
+        "bestanden achterlaten die voor een nieuwe poging handmatig "
+        "verwijderd moeten worden. Toch annuleren?"
+    ),
+    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Beheerdersrechten",
+    "bootstrap.elevated_warning_text": (
+        "PDF-Translator is gestart als beheerder.\n\n"
+        "Dat is niet nodig en zorgt ervoor dat de app later niet meer "
+        "werkt bij een normale start (zonder beheerdersrechten).\n\n"
+        "Sluit dit venster en start de installatie opnieuw met een "
+        "gewone dubbelklik (niet via \"Als administrator "
+        "uitvoeren\").\n\n"
+        "Dit bericht kan worden gekopieerd met Ctrl+C."
+    ),
+    "bootstrap.uninstall_title": "PDF-Translator verwijderen",
+    "bootstrap.uninstall_confirm": (
+        "PDF-Translator verwijderen, inclusief alle lokaal opgeslagen "
+        "instellingen en API-sleutels?"
+    ),
+    "bootstrap.uninstall_done": "PDF-Translator is verwijderd.",
     "bootstrap.welcome_title": "Welkom",
     "bootstrap.welcome_text": "Deze wizard installeert PDF-Translator op deze computer - volledig zonder opdrachtregel. Hij downloadt de benodigde onderdelen en maakt aan het einde een item aan in het toepassingenmenu.",
     "bootstrap.language_label": "Taal",
@@ -3189,6 +3365,8 @@ FI = {
     "settings.save_key": "Tallenna/korvaa API-avain",
     "settings.open_log": "Avaa lokitiedosto …",
     "settings.session_note": "Huomio: ympäristömuuttuja ei säily pysyvästi tässä versiossa.",
+    "settings.credentials_group": "API-käyttö",
+    "settings.general_group": "Yleistä",
     "credentials.title": "Kirjautumistiedot",
     "credentials.saved": "API-avain tallennettiin.",
     "credential.environment": "Ympäristömuuttuja (istunto)",
@@ -3334,6 +3512,33 @@ FI = {
     "bootstrap.back_button": "Takaisin",
     "bootstrap.next_button": "Seuraava",
     "bootstrap.cancel_button": "Peruuta",
+    "bootstrap.cancel_title": "Peruutetaanko asennus?",
+    "bootstrap.cancel_confirm": (
+        "Asennusohjattu toiminto suljetaan, vaikka PDF-Translatoria ei "
+        "ole vielä otettu täysin käyttöön. Jatketaanko?"
+    ),
+    "bootstrap.cancel_confirm_installing": (
+        "Asennus on parhaillaan käynnissä. Peruuttaminen nyt saattaa "
+        "jättää jälkeensä keskeneräisiä tiedostoja, jotka pitää poistaa "
+        "käsin ennen uutta yritystä. Peruutetaanko silti?"
+    ),
+    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Järjestelmänvalvojan oikeudet",
+    "bootstrap.elevated_warning_text": (
+        "PDF-Translator käynnistettiin järjestelmänvalvojana.\n\n"
+        "Tämä ei ole tarpeen, ja se johtaa siihen, ettei sovellus enää "
+        "toimi myöhemmin normaalisti käynnistettynä (ilman "
+        "järjestelmänvalvojan oikeuksia).\n\n"
+        "Sulje tämä ikkuna ja käynnistä asennus uudelleen tavallisella "
+        "kaksoisnapsautuksella (ei \"Suorita "
+        "järjestelmänvalvojana\").\n\n"
+        "Tämän viestin voi kopioida painamalla Ctrl+C."
+    ),
+    "bootstrap.uninstall_title": "Poista PDF-Translator",
+    "bootstrap.uninstall_confirm": (
+        "Poistetaanko PDF-Translator, mukaan lukien kaikki "
+        "paikallisesti tallennetut asetukset ja API-avaimet?"
+    ),
+    "bootstrap.uninstall_done": "PDF-Translator on poistettu.",
     "bootstrap.welcome_title": "Tervetuloa",
     "bootstrap.welcome_text": "Tämä ohjattu toiminto määrittää PDF-Translatorin tälle tietokoneelle - ilman komentoriviä. Se lataa tarvittavat komponentit ja lisää lopuksi merkinnän sovellusvalikkoon.",
     "bootstrap.language_label": "Kieli",
@@ -3588,6 +3793,8 @@ HR = {
     "settings.save_key": "Spremi/zamijeni API ključ",
     "settings.open_log": "Otvori log datoteku …",
     "settings.session_note": "Napomena: varijabla okruženja u ovoj verziji nije trajna.",
+    "settings.credentials_group": "Pristup API-ju",
+    "settings.general_group": "Općenito",
     "credentials.title": "Vjerodajnice",
     "credentials.saved": "API ključ je spremljen.",
     "credential.environment": "Varijabla okruženja (sesija)",
@@ -3733,6 +3940,31 @@ HR = {
     "bootstrap.back_button": "Natrag",
     "bootstrap.next_button": "Dalje",
     "bootstrap.cancel_button": "Odustani",
+    "bootstrap.cancel_title": "Prekinuti instalaciju?",
+    "bootstrap.cancel_confirm": (
+        "Čarobnjak za postavljanje zatvorit će se, a PDF-Translator "
+        "neće biti u potpunosti postavljen. Nastaviti?"
+    ),
+    "bootstrap.cancel_confirm_installing": (
+        "Instalacija je trenutno u tijeku. Prekid sada može ostaviti "
+        "nepotpune datoteke koje će prije novog pokušaja trebati ručno "
+        "izbrisati. Ipak prekinuti?"
+    ),
+    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Administratorska prava",
+    "bootstrap.elevated_warning_text": (
+        "PDF-Translator je pokrenut kao administrator.\n\n"
+        "To nije potrebno i uzrokovat će da aplikacija kasnije ne radi "
+        "kada se pokrene normalno (bez administratorskih prava).\n\n"
+        "Zatvorite ovaj prozor i ponovno pokrenite instalaciju običnim "
+        "dvoklikom (bez \"Pokreni kao administrator\").\n\n"
+        "Ova se poruka može kopirati pomoću Ctrl+C."
+    ),
+    "bootstrap.uninstall_title": "Deinstaliraj PDF-Translator",
+    "bootstrap.uninstall_confirm": (
+        "Ukloniti PDF-Translator, uključujući sve lokalno pohranjene "
+        "postavke i API ključeve?"
+    ),
+    "bootstrap.uninstall_done": "PDF-Translator je uklonjen.",
     "bootstrap.welcome_title": "Dobrodošli",
     "bootstrap.welcome_text": "Ovaj čarobnjak postavlja PDF-Translator na ovo računalo - bez potrebe za naredbenim retkom. Preuzima potrebne komponente i na kraju stvara stavku u izborniku aplikacija.",
     "bootstrap.language_label": "Jezik",
@@ -3987,6 +4219,8 @@ RU = {
     "settings.save_key": "Сохранить/заменить ключ API",
     "settings.open_log": "Открыть файл журнала…",
     "settings.session_note": "Примечание: в этой версии переменная окружения не сохраняется постоянно.",
+    "settings.credentials_group": "Доступ к API",
+    "settings.general_group": "Общие",
     "credentials.title": "Учётные данные",
     "credentials.saved": "Ключ API сохранён.",
     "credential.environment": "Переменная окружения (сессия)",
@@ -4132,6 +4366,33 @@ RU = {
     "bootstrap.back_button": "Назад",
     "bootstrap.next_button": "Далее",
     "bootstrap.cancel_button": "Отмена",
+    "bootstrap.cancel_title": "Прервать установку?",
+    "bootstrap.cancel_confirm": (
+        "Мастер установки закроется, а PDF-Translator не будет "
+        "полностью настроен. Продолжить?"
+    ),
+    "bootstrap.cancel_confirm_installing": (
+        "Установка сейчас выполняется. Прерывание может оставить "
+        "незавершённые файлы, которые перед повторной попыткой "
+        "придётся удалить вручную. Всё равно прервать?"
+    ),
+    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Права администратора",
+    "bootstrap.elevated_warning_text": (
+        "PDF-Translator был запущен от имени администратора.\n\n"
+        "Это не требуется и приведёт к тому, что приложение позже "
+        "перестанет запускаться в обычном режиме (без прав "
+        "администратора).\n\n"
+        "Пожалуйста, закройте это окно и запустите установку заново "
+        "обычным двойным щелчком (без \"Запуск от имени "
+        "администратора\").\n\n"
+        "Это сообщение можно скопировать с помощью Ctrl+C."
+    ),
+    "bootstrap.uninstall_title": "Удалить PDF-Translator",
+    "bootstrap.uninstall_confirm": (
+        "Удалить PDF-Translator, включая все локально сохранённые "
+        "настройки и ключи API?"
+    ),
+    "bootstrap.uninstall_done": "PDF-Translator удалён.",
     "bootstrap.welcome_title": "Добро пожаловать",
     "bootstrap.welcome_text": "Этот мастер настроит PDF-Translator на этом компьютере — полностью без командной строки. Он загрузит необходимые компоненты и в конце добавит запись в меню приложений.",
     "bootstrap.language_label": "Язык",

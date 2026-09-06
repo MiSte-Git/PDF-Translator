@@ -12,7 +12,9 @@ def test_all_catalogues_have_identical_keys() -> None:
 def test_requested_locales_are_registered_and_all_available() -> None:
     # All nine locales originally requested (Backlog.md) are now translated
     # and switched on - none is left in the "prepared but disabled" state
-    # ui/app.py's SettingsDialog shows via LocaleInfo.available.
+    # the main window's flag row (ui/app.py) shows via LocaleInfo.available
+    # (07.09.2026: SettingsDialog itself no longer has a language control at
+    # all - the flag row fully superseded it, see that dialog's docstring).
     assert {locale.code for locale in LOCALES} == _ALL_CODES
     assert {locale.code for locale in LOCALES if locale.available} == _ALL_CODES
 

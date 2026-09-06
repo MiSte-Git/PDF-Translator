@@ -4,6 +4,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -290,3 +291,95 @@ def test_run_install_online_never_installs_torch(monkeypatch, tmp_path):
     monkeypatch.setattr(installer.desktop_integration, "create_desktop_entry", lambda *a, **k: tmp_path / "s")
     installer.run_install(tmp_path / "venv", tmp_path / "app", InstallMode.ONLINE, dev_source_override=str(dev_source))
     assert called == []
+
+
+# --- 07.09.2026: Add/Remove Programs registration ----------------------------
+
+
+def test_register_windows_uninstall_entry_noop_when_not_windows(monkeypatch):
+    monkeypatch.setattr(installer.sys, "platform", "win32")
+    monkeypatch.setattr(installer.paths, "is_frozen", lambda: False)
+    # Not frozen -> must return before ever touching winreg/shutil, so no
+    # mocking of either is needed for this to pass safely on Linux/macOS.
+    installer.register_windows_uninstall_entry()
+
+
+def test_register_windows_uninstall_entry_noop_when_not_frozen(monkeypatch):
+    monkeypatch.setattr(installer.sys, "platform", "linux")
+    monkeypatch.setattr(installer.paths, "is_frozen", lambda: True)
+    installer.register_windows_uninstall_entry()
+
+
+def test_register_windows_uninstall_entry_copies_exe_and_writes_registry(monkeypatch, tmp_path):
+    """winreg does not exist off Windows, so a fake module is injected into
+    sys.modules for the duration of this test - the same technique needed
+    for any cross-platform test of Windows-registry code."""
+    import sys
+    import types
+
+    fake_winreg = types.SimpleNamespace(
+        HKEY_CURRENT_USER="HKCU",
+        REG_SZ="REG_SZ",
+        REG_DWORD="REG_DWORD",
+        CreateKey=MagicMock(return_value="fake-key-handle"),
+        SetValueEx=MagicMock(),
+        CloseKey=MagicMock(),
+    )
+    monkeypatch.setitem(sys.modules, "winreg", fake_winreg)
+    monkeypatch.setattr(installer.sys, "platform", "win32")
+    monkeypatch.setattr(installer.paths, "is_frozen", lambda: True)
+
+    install_root = tmp_path / "install_root"
+    install_root.mkdir()
+    app_source_dir = tmp_path / "app"
+    app_source_dir.mkdir()
+    monkeypatch.setattr(installer.paths, "install_root", lambda: install_root)
+    monkeypatch.setattr(installer.paths, "app_source_dir", lambda: app_source_dir)
+
+    source_exe = tmp_path / "pdf-translator-setup.exe"
+    source_exe.write_bytes(b"fake-bootstrapper-exe")
+    monkeypatch.setattr(installer.sys, "executable", str(source_exe))
+
+    installer.register_windows_uninstall_entry()
+
+    target_exe = install_root / installer.uninstall.UNINSTALLER_EXE_NAME
+    assert target_exe.is_file()
+    assert target_exe.read_bytes() == b"fake-bootstrapper-exe"
+
+    fake_winreg.CreateKey.assert_called_once_with("HKCU", installer.uninstall.REGISTRY_KEY_PATH)
+    written = {call.args[1]: call.args[4] for call in fake_winreg.SetValueEx.call_args_list}
+    assert written["DisplayName"] == "PDF-Translator"
+    assert written["UninstallString"] == f'"{target_exe}" --uninstall'
+    assert written["InstallLocation"] == str(install_root)
+    fake_winreg.CloseKey.assert_called_once_with("fake-key-handle")
+
+
+def test_register_windows_uninstall_entry_swallows_errors(monkeypatch, tmp_path):
+    """A locked file / denied registry write must not turn a successful
+    app install into a reported failure - see the function's own
+    docstring."""
+    monkeypatch.setattr(installer.sys, "platform", "win32")
+    monkeypatch.setattr(installer.paths, "is_frozen", lambda: True)
+    monkeypatch.setattr(installer.sys, "executable", str(tmp_path / "does-not-exist.exe"))
+    monkeypatch.setattr(installer.paths, "install_root", lambda: tmp_path / "install_root")
+    # shutil.copy2 will raise FileNotFoundError on the missing source exe -
+    # register_windows_uninstall_entry() must swallow it, not propagate.
+    installer.register_windows_uninstall_entry()
+
+
+def test_run_install_calls_register_windows_uninstall_entry(monkeypatch, tmp_path):
+    venv_dir = tmp_path / "venv"
+    app_source_dir = tmp_path / "app"
+    dev_source = tmp_path / "dev-source"
+    dev_source.mkdir()
+    (dev_source / "requirements.txt").write_text("PyMuPDF\n")
+
+    monkeypatch.setattr(installer, "create_venv", lambda vdir: vdir.mkdir(parents=True, exist_ok=True))
+    monkeypatch.setattr(installer, "pip_install", lambda *a, **k: None)
+    monkeypatch.setattr(installer.desktop_integration, "create_desktop_entry", lambda *a, **k: tmp_path / "shortcut")
+    register_mock = MagicMock()
+    monkeypatch.setattr(installer, "register_windows_uninstall_entry", register_mock)
+
+    installer.run_install(venv_dir, app_source_dir, InstallMode.ONLINE, dev_source_override=str(dev_source))
+
+    register_mock.assert_called_once_with()

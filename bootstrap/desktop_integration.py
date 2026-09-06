@@ -151,6 +151,14 @@ def _windows_shortcut_script(
     icon_path: Path | None,
     display_name: str = APP_DISPLAY_NAME,
 ) -> str:
+    # 06.09.2026: IconLocation needs an explicit ",0" resource index -
+    # a bare path alone left the Start Menu tile showing a generic
+    # blank-page icon instead of icon_path's actual image. Confirmed
+    # fixed by a real Windows reinstall (07.09.2026) - the blank icon
+    # did not reappear once the earlier admin-elevation issue (see
+    # bootstrap/app.py::_warn_and_exit_if_elevated) was also fixed, so
+    # the two were likely the same underlying broken-permissions
+    # install rather than two separate bugs.
     icon_location = f"{icon_path},0" if icon_path else str(venv_python)
     # WScript.Shell is a built-in Windows COM object; no extra package
     # (e.g. pywin32) needed just to create one .lnk file.

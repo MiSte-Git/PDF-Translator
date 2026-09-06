@@ -19,6 +19,7 @@ contains it - it does not exist in this sandbox's requirements-ocr.txt yet.
 """
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -26,7 +27,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Optional
 
-from bootstrap import bundled_python, desktop_integration, gpu_check, paths, release_source
+from bootstrap import bundled_python, desktop_integration, gpu_check, paths, release_source, uninstall
 from bootstrap.subprocess_utils import no_window_kwargs
 
 _PIP_INSTALL_TIMEOUT_SECONDS = 60 * 30  # large ML wheels (torch, etc.) are slow to fetch
@@ -202,6 +203,57 @@ def install_torch(venv_python: Path, cuda_version: str | None) -> None:
         raise InstallError(f"Installing torch failed: {exc}") from exc
 
 
+def register_windows_uninstall_entry() -> None:
+    """Registers PDF-Translator in Windows' Add/Remove Programs
+    (Settings -> Apps, or the classic Control Panel applet) by copying
+    this very executable into install_root() as bootstrap/uninstall.py
+    ::UNINSTALLER_EXE_NAME and pointing UninstallString at
+    "<that copy> --uninstall" - see that module's docstring for why
+    there is no separate uninstaller binary. Windows-only and
+    frozen-build-only: running the bootstrapper from source has no exe
+    to copy, and would only write a dead registry entry into a
+    developer's own machine.
+
+    07.09.2026 (Michael: "Haben wir auch an eine Deinstallation
+    gedacht? Oder geht das automatisch über Add/Remove Programs?") -
+    it did not happen automatically before this: a per-user install
+    with no MSI/NSIS package gives Windows nothing that would make it
+    show up in Add/Remove Programs on its own.
+
+    Best-effort and never raises: any failure here (a locked file, a
+    denied registry write) is silently skipped rather than failing
+    the whole install - by the time this runs (the very last step)
+    the app itself is already fully installed and working, so a
+    missing Add/Remove Programs entry is a much smaller problem than
+    reporting a successful install as failed.
+    """
+    if sys.platform != "win32" or not paths.is_frozen():
+        return
+    try:
+        import winreg
+
+        source_exe = Path(sys.executable).resolve()
+        target_exe = paths.install_root() / uninstall.UNINSTALLER_EXE_NAME
+        shutil.copy2(source_exe, target_exe)
+
+        icon_path = desktop_integration.default_icon_path(paths.app_source_dir())
+        display_icon = str(icon_path) if icon_path else str(target_exe)
+
+        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, uninstall.REGISTRY_KEY_PATH)
+        try:
+            winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, desktop_integration.APP_DISPLAY_NAME)
+            winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, f'"{target_exe}" --uninstall')
+            winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, display_icon)
+            winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, desktop_integration.APP_DISPLAY_NAME)
+            winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, str(paths.install_root()))
+            winreg.SetValueEx(key, "NoModify", 0, winreg.REG_DWORD, 1)
+            winreg.SetValueEx(key, "NoRepair", 0, winreg.REG_DWORD, 1)
+        finally:
+            winreg.CloseKey(key)
+    except Exception:
+        pass
+
+
 def run_install(
     venv_dir: Path,
     app_source_dir: Path,
@@ -241,5 +293,6 @@ def run_install(
         desktop_integration.create_desktop_entry(app_source_dir, venv_python)
     except desktop_integration.DesktopIntegrationError as exc:
         raise InstallError(str(exc)) from exc
+    register_windows_uninstall_entry()
 
     return venv_python
