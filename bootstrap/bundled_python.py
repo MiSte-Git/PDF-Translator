@@ -117,9 +117,9 @@ def ensure_stable_python_runtime(install_root: Path) -> Path | None:
     venv's python(w).exe - a fresh "Jetzt starten" click, a Start Menu
     shortcut, the app trying to relaunch itself - hit that venv's
     python(w).exe launcher stub, which failed with "Python venv launcher
-    is sorry to say ... did not find executable at ...\_MEIxxxxx\
-    python_runtime\pythonw.exe": the path was real for the few seconds
-    the installer ran, and gone forever after.
+    is sorry to say ... did not find executable at ...backslash-MEIxxxxx
+    backslash python_runtime backslash pythonw.exe": the path was real
+    for the few seconds the installer ran, and gone forever after.
 
     Always re-copies (removing any previous copy first) rather than
     reusing one that happens to already exist, so an update/reinstall
