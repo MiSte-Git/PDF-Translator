@@ -281,6 +281,20 @@ class SettingsDialog(QDialog):
             self.target.setItemText(index, t(key))
         self.save_key.setText(t("settings.save_key"))
         self.open_log_button.setText(t("settings.open_log"))
+        # 07.09.2026 (Michael: "Bitte die Buttons auch uebersetzen"):
+        # QDialogButtonBox's Save/Cancel are Qt's own STANDARD buttons -
+        # their default text comes from Qt's own bundled translations,
+        # which need a QTranslator installed to ever show anything but
+        # English (this app installs none, see main() - deliberately, to
+        # avoid depending on which Qt translation files happen to be
+        # present on a given install). Every other button in this app
+        # already gets its text from our own ui/i18n_data.py catalogue
+        # (see every other line in this method) - these two were the only
+        # ones left relying on Qt's own English default. Reuses
+        # "job.cancel" ("Abbrechen"/"Cancel"/...) rather than a new key -
+        # a plain Cancel button means exactly the same thing there.
+        self.buttons.button(QDialogButtonBox.Save).setText(t("settings.save_button"))
+        self.buttons.button(QDialogButtonBox.Cancel).setText(t("job.cancel"))
         self.note.setText(t("settings.session_note"))
         self.env_override_warning.setText(t("settings.env_override_warning"))
         for widget, tooltip_key, whatsthis_key in self._settings_help_widgets:
@@ -428,6 +442,12 @@ class HardwareCheckDialog(QDialog):
         self.setWindowTitle(self.language.text("hw_check.title"))
         self.note.setText(self.language.text("hw_check.note"))
         self.recheck_button.setText(self.language.text("hw_check.recheck_button"))
+        # 07.09.2026 (Michael: "Bitte die Buttons auch uebersetzen") - see
+        # SettingsDialog.retranslate()'s matching comment above for why
+        # this needs setting explicitly. Reuses "correction.close" (also
+        # already shared with ImageCorrectionDialog's own Close button)
+        # rather than a new key - same "Schliessen"/"Close"/... text.
+        self.buttons.button(QDialogButtonBox.Close).setText(self.language.text("correction.close"))
         for widget, tooltip_key, whatsthis_key in self._hw_check_help_widgets:
             widget.setToolTip(self.language.text(tooltip_key))
             widget.setWhatsThis(self.language.text(whatsthis_key))
