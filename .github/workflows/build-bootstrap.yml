@@ -393,6 +393,7 @@ jobs:
           pyinstaller --onefile --windowed --name pdf-translator-setup
           ${{ matrix.icon_arg }}
           --add-data "python_runtime${{ matrix.add_data_sep }}python_runtime"
+          --add-data "assets/icon.png${{ matrix.add_data_sep }}assets"
           ${{ env.TCLTK_DLL_ARGS }}
           bootstrap/__main__.py
 

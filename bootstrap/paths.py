@@ -140,3 +140,33 @@ def is_frozen() -> bool:
     which should only ever activate for developers running from source.
     """
     return getattr(sys, "frozen", False)
+
+
+def bootstrap_icon_path() -> Path | None:
+    """Path to the bootstrapper's own window icon (assets/icon.png),
+    resolved for both a frozen PyInstaller build and a dev run from source.
+
+    07.09.2026 (Michael: "lass uns unser Icon einbauen"): Stage 1's tkinter
+    window had no icon set at all (default Tk feather icon) - unrelated to
+    the already-working app/taskbar icon (ui/app.py's APP_ICON_PATH,
+    desktop_integration.py's per-platform .desktop/.lnk/.app entries),
+    which only exist once Stage 2's app source is on disk - something
+    Stage 1's own window can't wait for, since it is visible from the very
+    first screen. A frozen build therefore needs its own copy of
+    assets/icon.png bundled directly into the onefile executable (see the
+    "--add-data assets/icon.png...assets" step in
+    .github/workflows/build-bootstrap.yml, same mechanism as
+    bootstrap/bundled_python.py's python_runtime bundle), extracted by
+    PyInstaller under sys._MEIPASS at runtime. Returns None if the file
+    genuinely cannot be found (e.g. a future build forgets the --add-data
+    flag) rather than raising - a missing window icon is cosmetic, not
+    worth crashing the installer over.
+    """
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidate = Path(meipass) / "assets" / "icon.png"
+    else:
+        # Dev run from source: repo_root/assets/icon.png - same layout
+        # ui/app.py's APP_ICON_PATH already relies on.
+        candidate = Path(__file__).resolve().parent.parent / "assets" / "icon.png"
+    return candidate if candidate.is_file() else None

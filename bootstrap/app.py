@@ -27,6 +27,7 @@ from typing import Callable
 
 from bootstrap.controller import BootstrapController
 from bootstrap.installer import InstallMode, InstallProgress, InstallStep
+from bootstrap.paths import bootstrap_icon_path
 from ui.i18n_data import LOCALES
 
 _WINDOW_SIZE = "500x440"
@@ -161,6 +162,19 @@ class BootstrapApp(tk.Tk):
         self.resizable(False, False)
         self.title(self.controller.text("bootstrap.window_title"))
 
+        # 07.09.2026 ("dann lass uns unser Icon einbauen"): replaces the
+        # default Tk feather icon in the window's title bar/taskbar entry.
+        # Best-effort - a missing/unreadable icon file must never abort
+        # the installer over something purely cosmetic (see
+        # bootstrap/paths.py::bootstrap_icon_path()'s own docstring for
+        # why the file might legitimately be absent).
+        icon_path = bootstrap_icon_path()
+        if icon_path is not None:
+            try:
+                self.iconphoto(True, tk.PhotoImage(file=str(icon_path)))
+            except tk.TclError:
+                pass
+
         # 07.09.2026: default ttk button/checkbox padding is quite tight
         # (a few pixels), which reads as cramped rather than "modern" -
         # especially now that the window itself is smaller. This only
@@ -174,6 +188,10 @@ class BootstrapApp(tk.Tk):
         style.configure("TRadiobutton", padding=(0, 5))
 
         self._installing = False
+        # 07.09.2026: set from InstallProgress.downloaded_bytes (see
+        # bootstrap/installer.py) once run_install() reaches its final
+        # step - read by _show_finish() below.
+        self._downloaded_bytes = 0
         # 07.09.2026 ("fehlt uns nicht auch ein Abbrechen Button
         # ueberall"): a persistent bar OUTSIDE the per-screen frame
         # that _set_frame() swaps out, rather than adding a Cancel
@@ -482,6 +500,8 @@ class BootstrapApp(tk.Tk):
                 key = _INSTALL_STEP_KEYS[step_progress.step]
                 text = self.controller.text(key, name=step_progress.detail) if step_progress.detail else self.controller.text(key)
                 result_queue.put(("progress", text))
+                if step_progress.downloaded_bytes:
+                    result_queue.put(("downloaded_bytes", step_progress.downloaded_bytes))
 
             def worker() -> None:
                 try:
@@ -499,6 +519,8 @@ class BootstrapApp(tk.Tk):
                         kind, payload = result_queue.get_nowait()
                         if kind == "progress":
                             status_var.set(payload)
+                        elif kind == "downloaded_bytes":
+                            self._downloaded_bytes = payload
                         elif kind == "done":
                             progress.stop()
                             self._installing = False
@@ -698,8 +720,21 @@ class BootstrapApp(tk.Tk):
         def build(frame: ttk.Frame) -> None:
             ttk.Label(frame, text=self.controller.text("bootstrap.finish_title"), font=("", 16, "bold")).pack(anchor="w")
             ttk.Label(frame, text=self.controller.text("bootstrap.finish_text"), wraplength=_TEXT_WRAP, justify="left").pack(
-                anchor="w", pady=(8, 16)
+                anchor="w", pady=(8, 4 if self._downloaded_bytes else 16)
             )
+            # 07.09.2026 ("Wir brauchen nur eine ungefaehre Zahl, die kann
+            # ja im Fertig Dialog am Ende angezeigt werden"): only shown
+            # for a LOCAL install that actually downloaded something -
+            # ONLINE mode's pip installs are tiny and not what the "ca.
+            # 2-3 GB" estimate in bootstrap.mode_local_desc is about.
+            if self._downloaded_bytes:
+                size_gb = self._downloaded_bytes / 1000**3
+                ttk.Label(
+                    frame,
+                    text=self.controller.text("bootstrap.finish_download_size", size_gb=size_gb),
+                    wraplength=_TEXT_WRAP,
+                    justify="left",
+                ).pack(anchor="w", pady=(0, 16))
 
             def on_launch() -> None:
                 self.controller.launch_app()

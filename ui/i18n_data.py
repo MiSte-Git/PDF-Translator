@@ -856,13 +856,16 @@ DE = {
     ),
     "bootstrap.mode_local_label": "Lokal (auf dieser Grafikkarte)",
     "bootstrap.mode_local_desc": (
-        "Übersetzung/Bildbearbeitung läuft direkt auf diesem Rechner - für "
-        "die Übersetzung selbst fallen keine laufenden Kosten an. "
+        "Bezieht sich nur auf die Bildbearbeitung: Text in eingebetteten "
+        "Bildern wird per OCR erkannt und nach der Übersetzung direkt auf "
+        "dieser Grafikkarte neu ins Bild gezeichnet - dafür fallen keine "
+        "laufenden Kosten an. Die eigentliche Textübersetzung läuft in "
+        "beiden Modi über einen externen Anbieter (DeepL, Google, OpenAI "
+        "oder Grok) und kostet dort wie gewohnt pro Übersetzung. "
         "Online-Anbieter lassen sich zusätzlich jederzeit in den "
-        "Einstellungen einrichten, falls gewünscht - diese Option "
-        "installiert also beides. Braucht eine ausreichend starke "
-        "NVIDIA-Grafikkarte (wird im nächsten Schritt geprüft) und lädt "
-        "während der Installation einmalig ca. 2-3 GB herunter."
+        "Einstellungen einrichten - diese Option installiert also beides. "
+        "Braucht eine ausreichend starke NVIDIA-Grafikkarte (wird im "
+        "nächsten Schritt geprüft) und lädt einmalig ca. 2-3 GB herunter."
     ),
     "bootstrap.gpu_checking": "Grafikkarte wird geprüft …",
     "bootstrap.gpu_ok": (
@@ -933,6 +936,7 @@ DE = {
     "bootstrap.finish_text": (
         "PDF-Translator ist eingerichtet und im Anwendungsmenü zu finden."
     ),
+    "bootstrap.finish_download_size": "Tatsächlich heruntergeladen: ca. {size_gb:.1f} GB.",
     "bootstrap.finish_launch_button": "Jetzt starten",
     "bootstrap.finish_close_button": "Schließen",
 
@@ -1789,12 +1793,15 @@ EN = {
     ),
     "bootstrap.mode_local_label": "Local (on this graphics card)",
     "bootstrap.mode_local_desc": (
-        "Translation/image editing runs directly on this computer - no "
-        "ongoing costs for the translation itself. Online providers can "
-        "still be set up any time in Settings if you want them too - this "
-        "option installs both. Needs a sufficiently strong NVIDIA graphics "
-        "card (checked in the next step) and downloads about 2-3 GB during "
-        "setup."
+        "Applies only to image editing: text embedded in images is "
+        "detected via OCR and redrawn directly on this graphics card "
+        "after translation - no ongoing cost for that part. The actual "
+        "text translation still runs through an external provider "
+        "(DeepL, Google, OpenAI, or Grok) in both modes, at that "
+        "provider's usual per-translation cost. Online providers can "
+        "still be set up any time in Settings if you want them too. "
+        "Needs a sufficiently strong NVIDIA graphics card (checked in the "
+        "next step) and downloads about 2-3 GB during setup."
     ),
     "bootstrap.gpu_checking": "Checking graphics card …",
     "bootstrap.gpu_ok": "Found: {name} with {vram_gb:.0f} GB of video memory - that's enough.",
@@ -1858,6 +1865,7 @@ EN = {
     "bootstrap.credentials_continue_button": "Next",
     "bootstrap.finish_title": "Done",
     "bootstrap.finish_text": "PDF-Translator is set up and ready to find in your application menu.",
+    "bootstrap.finish_download_size": "Actually downloaded: about {size_gb:.1f} GB.",
     "bootstrap.finish_launch_button": "Launch now",
     "bootstrap.finish_close_button": "Close",
     "mode.tooltip": "Type of document to translate",
@@ -2526,7 +2534,7 @@ FR = {
     "bootstrap.mode_online_label": "En ligne (fournisseur cloud)",
     "bootstrap.mode_online_desc": "La traduction passe par un fournisseur externe (DeepL, Google, OpenAI ou Grok). Cela entraîne des coûts récurrents par traduction, et nécessite votre propre clé API du fournisseur concerné - plus de détails juste après. Aucun téléchargement volumineux n'est nécessaire. Recommandé si vous ne disposez pas d'une carte graphique puissante.",
     "bootstrap.mode_local_label": "Local (sur cette carte graphique)",
-    "bootstrap.mode_local_desc": "La traduction/le traitement d'image s'exécute directement sur cet ordinateur - aucun coût récurrent pour la traduction elle-même. Des fournisseurs en ligne peuvent en plus être configurés à tout moment dans les paramètres si vous le souhaitez - cette option installe donc les deux. Nécessite une carte graphique NVIDIA suffisamment puissante (vérifiée à l'étape suivante) et télécharge environ 2 à 3 Go une seule fois pendant l'installation.",
+    "bootstrap.mode_local_desc": "Concerne uniquement le traitement d'image : le texte intégré aux images est détecté par OCR puis redessiné directement sur cette carte graphique après traduction - aucun coût récurrent pour cette partie. La traduction du texte proprement dite passe, dans les deux modes, par un fournisseur externe (DeepL, Google, OpenAI ou Grok), avec le coût habituel par traduction chez ce fournisseur. Des fournisseurs en ligne peuvent en plus être configurés à tout moment dans les paramètres si vous le souhaitez. Nécessite une carte graphique NVIDIA suffisamment puissante (vérifiée à l'étape suivante) et télécharge environ 2 à 3 Go une seule fois pendant l'installation.",
     "bootstrap.gpu_checking": "Vérification de la carte graphique …",
     "bootstrap.gpu_ok": "Trouvée : {name} avec {vram_gb:.0f} Go de mémoire graphique - c'est suffisant.",
     "bootstrap.gpu_insufficient": "Trouvée : {name} avec {vram_gb:.0f} Go de mémoire graphique - au moins {min_gb:.0f} Go sont recommandés. Le mode local sera probablement très lent.",
@@ -2561,6 +2569,7 @@ FR = {
     "bootstrap.credentials_continue_button": "Suivant",
     "bootstrap.finish_title": "Terminé",
     "bootstrap.finish_text": "PDF-Translator est configuré et disponible dans le menu des applications.",
+    "bootstrap.finish_download_size": "Réellement téléchargé : environ {size_gb:.1f} Go.",
     "bootstrap.finish_launch_button": "Lancer maintenant",
     "bootstrap.finish_close_button": "Fermer",
     "mode.tooltip": "Type de document à traduire",
@@ -3233,7 +3242,7 @@ ES = {
     "bootstrap.mode_online_label": "En línea (proveedor en la nube)",
     "bootstrap.mode_online_desc": "La traducción se realiza a través de un proveedor externo (DeepL, Google, OpenAI o Grok). Esto conlleva un coste continuo por traducción, y se necesita una clave de API propia de ese proveedor - más sobre esto a continuación. No requiere una descarga grande. Recomendado si no dispone de una tarjeta gráfica potente.",
     "bootstrap.mode_local_label": "Local (en esta tarjeta gráfica)",
-    "bootstrap.mode_local_desc": "La traducción/edición de imágenes se ejecuta directamente en este equipo - la traducción en sí no genera costes continuos. Además, los proveedores en línea se pueden configurar en cualquier momento en Ajustes si lo desea, así que esta opción instala ambos. Requiere una tarjeta gráfica NVIDIA suficientemente potente (se comprobará en el siguiente paso) y descarga aproximadamente 2-3 GB una sola vez durante la instalación.",
+    "bootstrap.mode_local_desc": "Se refiere solo a la edición de imágenes: el texto incrustado en imágenes se detecta mediante OCR y se vuelve a dibujar directamente en esta tarjeta gráfica tras la traducción - sin costes continuos por esa parte. La traducción del texto en sí sigue pasando, en ambos modos, por un proveedor externo (DeepL, Google, OpenAI o Grok), con el coste habitual por traducción de ese proveedor. Además, los proveedores en línea se pueden configurar en cualquier momento en Ajustes si lo desea. Requiere una tarjeta gráfica NVIDIA suficientemente potente (se comprobará en el siguiente paso) y descarga aproximadamente 2-3 GB una sola vez durante la instalación.",
     "bootstrap.gpu_checking": "Comprobando la tarjeta gráfica…",
     "bootstrap.gpu_ok": "Encontrada: {name} con {vram_gb:.0f} GB de memoria de vídeo - es suficiente.",
     "bootstrap.gpu_insufficient": "Encontrada: {name} con {vram_gb:.0f} GB de memoria de vídeo - se recomiendan al menos {min_gb:.0f} GB. El modo local probablemente será muy lento.",
@@ -3268,6 +3277,7 @@ ES = {
     "bootstrap.credentials_continue_button": "Siguiente",
     "bootstrap.finish_title": "Listo",
     "bootstrap.finish_text": "PDF-Translator está configurado y disponible en el menú de aplicaciones.",
+    "bootstrap.finish_download_size": "Descargado realmente: aprox. {size_gb:.1f} GB.",
     "bootstrap.finish_launch_button": "Iniciar ahora",
     "bootstrap.finish_close_button": "Cerrar",
     "mode.tooltip": "Tipo de documento a traducir",
@@ -3941,7 +3951,7 @@ IT = {
     "bootstrap.mode_online_label": "Online (provider cloud)",
     "bootstrap.mode_online_desc": "La traduzione avviene tramite un provider esterno (DeepL, Google, OpenAI o Grok). Questo comporta costi correnti per ogni traduzione ed è necessaria una chiave API propria del rispettivo provider - maggiori dettagli tra poco. Non richiede download di grandi dimensioni. Consigliato se non si dispone di una scheda grafica potente.",
     "bootstrap.mode_local_label": "Locale (su questa scheda grafica)",
-    "bootstrap.mode_local_desc": "La traduzione/elaborazione delle immagini avviene direttamente su questo computer - per la traduzione in sé non ci sono costi correnti. I provider online possono comunque essere configurati in qualsiasi momento nelle Impostazioni, se lo si desidera - questa opzione installa quindi entrambi. Richiede una scheda grafica NVIDIA sufficientemente potente (verificata nel passaggio successivo) e scarica una tantum circa 2-3 GB durante l'installazione.",
+    "bootstrap.mode_local_desc": "Riguarda solo l'elaborazione delle immagini: il testo incorporato nelle immagini viene riconosciuto tramite OCR e ridisegnato direttamente su questa scheda grafica dopo la traduzione - per questa parte non ci sono costi correnti. La traduzione del testo vero e proprio passa comunque, in entrambe le modalità, attraverso un provider esterno (DeepL, Google, OpenAI o Grok), con il consueto costo per traduzione di quel provider. I provider online possono comunque essere configurati in qualsiasi momento nelle Impostazioni, se lo si desidera. Richiede una scheda grafica NVIDIA sufficientemente potente (verificata nel passaggio successivo) e scarica una tantum circa 2-3 GB durante l'installazione.",
     "bootstrap.gpu_checking": "Verifica della scheda grafica in corso...",
     "bootstrap.gpu_ok": "Trovata: {name} con {vram_gb:.0f} GB di memoria video - sufficiente.",
     "bootstrap.gpu_insufficient": "Trovata: {name} con {vram_gb:.0f} GB di memoria video - sono consigliati almeno {min_gb:.0f} GB. La modalità locale sarà probabilmente molto lenta.",
@@ -3976,6 +3986,7 @@ IT = {
     "bootstrap.credentials_continue_button": "Avanti",
     "bootstrap.finish_title": "Completato",
     "bootstrap.finish_text": "PDF-Translator è configurato ed è disponibile nel menu delle applicazioni.",
+    "bootstrap.finish_download_size": "Effettivamente scaricato: circa {size_gb:.1f} GB.",
     "bootstrap.finish_launch_button": "Avvia ora",
     "bootstrap.finish_close_button": "Chiudi",
     "mode.tooltip": "Tipo di documento da tradurre",
@@ -4646,7 +4657,7 @@ NL = {
     "bootstrap.mode_online_label": "Online (cloudprovider)",
     "bootstrap.mode_online_desc": "Vertaling verloopt via een externe provider (DeepL, Google, OpenAI of Grok). Hiervoor lopen doorlopende kosten per vertaling, en is een eigen API-sleutel van de betreffende provider nodig - daarover zo meteen meer. Geen grote download nodig. Aanbevolen als er geen krachtige grafische kaart aanwezig is.",
     "bootstrap.mode_local_label": "Lokaal (op deze grafische kaart)",
-    "bootstrap.mode_local_desc": "Vertaling/beeldbewerking verloopt rechtstreeks op deze computer - voor de vertaling zelf lopen geen doorlopende kosten. Online providers kunt u daarnaast altijd nog instellen in Instellingen, indien gewenst - deze optie installeert dus beide. Vereist een voldoende krachtige NVIDIA-grafische kaart (wordt in de volgende stap gecontroleerd) en downloadt tijdens de installatie eenmalig ca. 2-3 GB.",
+    "bootstrap.mode_local_desc": "Geldt alleen voor de beeldbewerking: tekst in afbeeldingen wordt via OCR herkend en na vertaling rechtstreeks op deze grafische kaart opnieuw in de afbeelding getekend - daarvoor lopen geen doorlopende kosten. De eigenlijke tekstvertaling verloopt in beide modi via een externe provider (DeepL, Google, OpenAI of Grok), tegen de gebruikelijke kosten per vertaling bij die provider. Online providers kunt u daarnaast altijd nog instellen in Instellingen, indien gewenst. Vereist een voldoende krachtige NVIDIA-grafische kaart (wordt in de volgende stap gecontroleerd) en downloadt tijdens de installatie eenmalig ca. 2-3 GB.",
     "bootstrap.gpu_checking": "Grafische kaart wordt gecontroleerd …",
     "bootstrap.gpu_ok": "Gevonden: {name} met {vram_gb:.0f} GB videogeheugen - dat is voldoende.",
     "bootstrap.gpu_insufficient": "Gevonden: {name} met {vram_gb:.0f} GB videogeheugen - aanbevolen is minimaal {min_gb:.0f} GB. Lokaal zal waarschijnlijk erg traag zijn.",
@@ -4681,6 +4692,7 @@ NL = {
     "bootstrap.credentials_continue_button": "Volgende",
     "bootstrap.finish_title": "Klaar",
     "bootstrap.finish_text": "PDF-Translator is ingesteld en te vinden in het toepassingenmenu.",
+    "bootstrap.finish_download_size": "Daadwerkelijk gedownload: ca. {size_gb:.1f} GB.",
     "bootstrap.finish_launch_button": "Nu starten",
     "bootstrap.finish_close_button": "Sluiten",
     "mode.tooltip": "Type document dat vertaald moet worden",
@@ -5352,7 +5364,7 @@ FI = {
     "bootstrap.mode_online_label": "Verkossa (pilvipalveluntarjoaja)",
     "bootstrap.mode_online_desc": "Käännös tehdään ulkoisen palveluntarjoajan kautta (DeepL, Google, OpenAI tai Grok). Tästä aiheutuu jatkuvia kustannuksia per käännös, ja tarvitset oman API-avaimen kyseiseltä palveluntarjoajalta - lisää tästä kohta. Ei vaadi suurta latausta. Suositellaan, jos käytössä ei ole tehokasta näytönohjainta.",
     "bootstrap.mode_local_label": "Paikallinen (tällä näytönohjaimella)",
-    "bootstrap.mode_local_desc": "Käännös/kuvankäsittely tapahtuu suoraan tällä tietokoneella - itse käännöksestä ei aiheudu jatkuvia kustannuksia. Verkkopalveluntarjoajat voi silti ottaa käyttöön milloin tahansa Asetuksista, jos niin haluat - tämä vaihtoehto asentaa siis molemmat. Vaatii riittävän tehokkaan NVIDIA-näytönohjaimen (tarkistetaan seuraavassa vaiheessa) ja lataa asennuksen aikana kertaluonteisesti noin 2-3 Gt.",
+    "bootstrap.mode_local_desc": "Koskee vain kuvankäsittelyä: kuviin upotettu teksti tunnistetaan OCR:llä ja piirretään käännöksen jälkeen suoraan tällä näytönohjaimella takaisin kuvaan - tästä ei aiheudu jatkuvia kustannuksia. Varsinainen tekstin kääntäminen tapahtuu molemmissa tiloissa ulkoisen palveluntarjoajan kautta (DeepL, Google, OpenAI tai Grok), kyseisen palveluntarjoajan tavanomaiseen kääntänkohtaiseen hintaan. Verkkopalveluntarjoajat voi silti ottaa käyttöön milloin tahansa Asetuksista, jos niin haluat. Vaatii riittävän tehokkaan NVIDIA-näytönohjaimen (tarkistetaan seuraavassa vaiheessa) ja lataa asennuksen aikana kertaluonteisesti noin 2-3 Gt.",
     "bootstrap.gpu_checking": "Tarkistetaan näytönohjainta …",
     "bootstrap.gpu_ok": "Löydetty: {name}, näytönohjaimen muistia {vram_gb:.0f} Gt - tämä riittää.",
     "bootstrap.gpu_insufficient": "Löydetty: {name}, näytönohjaimen muistia {vram_gb:.0f} Gt - suositus on vähintään {min_gb:.0f} Gt. Paikallinen tila on todennäköisesti hyvin hidas.",
@@ -5387,6 +5399,7 @@ FI = {
     "bootstrap.credentials_continue_button": "Seuraava",
     "bootstrap.finish_title": "Valmis",
     "bootstrap.finish_text": "PDF-Translator on määritetty ja löytyy sovellusvalikosta.",
+    "bootstrap.finish_download_size": "Todellisuudessa ladattu: noin {size_gb:.1f} Gt.",
     "bootstrap.finish_launch_button": "Käynnistä nyt",
     "bootstrap.finish_close_button": "Sulje",
     "mode.tooltip": "Käännettävän asiakirjan tyyppi",
@@ -6048,7 +6061,7 @@ HR = {
     "bootstrap.mode_online_label": "Online (cloud pružatelj)",
     "bootstrap.mode_online_desc": "Prijevod se odvija putem vanjskog pružatelja (DeepL, Google, OpenAI ili Grok). Za to nastaju tekući troškovi po prijevodu, a potreban je vlastiti API ključ dotičnog pružatelja - o tome više uskoro. Nije potrebno veliko preuzimanje. Preporučeno ako nemate snažnu grafičku karticu.",
     "bootstrap.mode_local_label": "Lokalno (na ovoj grafičkoj kartici)",
-    "bootstrap.mode_local_desc": "Prijevod/obrada slika odvija se izravno na ovom računalu - za sam prijevod ne nastaju tekući troškovi. Online pružatelje možete dodatno postaviti u bilo kojem trenutku u postavkama ako želite - ova opcija dakle instalira oboje. Potrebna je dovoljno snažna NVIDIA grafička kartica (provjerava se u sljedećem koraku), a tijekom instalacije jednokratno se preuzima oko 2-3 GB.",
+    "bootstrap.mode_local_desc": "Odnosi se samo na obradu slika: tekst ugrađen u slike prepoznaje se OCR-om i nakon prijevoda ponovno se crta izravno na ovoj grafičkoj kartici - za taj dio ne nastaju tekući troškovi. Sam prijevod teksta u oba načina rada i dalje ide preko vanjskog pružatelja usluge (DeepL, Google, OpenAI ili Grok), uz uobičajeni trošak po prijevodu kod tog pružatelja. Online pružatelje možete dodatno postaviti u bilo kojem trenutku u postavkama ako želite. Potrebna je dovoljno snažna NVIDIA grafička kartica (provjerava se u sljedećem koraku), a tijekom instalacije jednokratno se preuzima oko 2-3 GB.",
     "bootstrap.gpu_checking": "Provjera grafičke kartice …",
     "bootstrap.gpu_ok": "Pronađeno: {name} s {vram_gb:.0f} GB video memorije - to je dovoljno.",
     "bootstrap.gpu_insufficient": "Pronađeno: {name} s {vram_gb:.0f} GB video memorije - preporučeno je najmanje {min_gb:.0f} GB. Lokalni način rada vjerojatno će biti vrlo spor.",
@@ -6083,6 +6096,7 @@ HR = {
     "bootstrap.credentials_continue_button": "Dalje",
     "bootstrap.finish_title": "Gotovo",
     "bootstrap.finish_text": "PDF-Translator je postavljen i dostupan je u izborniku aplikacija.",
+    "bootstrap.finish_download_size": "Stvarno preuzeto: oko {size_gb:.1f} GB.",
     "bootstrap.finish_launch_button": "Pokreni sada",
     "bootstrap.finish_close_button": "Zatvori",
     "mode.tooltip": "Vrsta dokumenta za prevođenje",
@@ -6744,7 +6758,7 @@ RU = {
     "bootstrap.mode_online_label": "Онлайн (облачный поставщик)",
     "bootstrap.mode_online_desc": "Перевод выполняется через внешнего поставщика (DeepL, Google, OpenAI или Grok). За это взимается плата за каждый перевод, и потребуется собственный ключ API соответствующего поставщика — подробнее об этом далее. Большая загрузка не требуется. Рекомендуется, если нет мощной видеокарты.",
     "bootstrap.mode_local_label": "Локально (на этой видеокарте)",
-    "bootstrap.mode_local_desc": "Перевод/обработка изображений выполняется прямо на этом компьютере — для самого перевода никакие текущие расходы не возникают. При желании онлайн-поставщиков можно дополнительно в любое время настроить в настройках — то есть этот вариант устанавливает оба способа. Требуется достаточно мощная видеокарта NVIDIA (проверяется на следующем шаге), и во время установки один раз загружается около 2-3 ГБ.",
+    "bootstrap.mode_local_desc": "Касается только обработки изображений: встроенный в изображения текст распознаётся с помощью OCR и после перевода перерисовывается прямо на этой видеокарте — за эту часть текущие расходы не возникают. Сам перевод текста в обоих режимах по-прежнему выполняется через внешнего поставщика (DeepL, Google, OpenAI или Grok) по его обычным расценкам за перевод. При желании онлайн-поставщиков можно дополнительно в любое время настроить в настройках. Требуется достаточно мощная видеокарта NVIDIA (проверяется на следующем шаге), и во время установки один раз загружается около 2-3 ГБ.",
     "bootstrap.gpu_checking": "Проверка видеокарты…",
     "bootstrap.gpu_ok": "Найдено: {name} с {vram_gb:.0f} ГБ видеопамяти — этого достаточно.",
     "bootstrap.gpu_insufficient": "Найдено: {name} с {vram_gb:.0f} ГБ видеопамяти — рекомендуется не менее {min_gb:.0f} ГБ. Локальный режим, вероятно, будет работать очень медленно.",
@@ -6779,6 +6793,7 @@ RU = {
     "bootstrap.credentials_continue_button": "Далее",
     "bootstrap.finish_title": "Готово",
     "bootstrap.finish_text": "PDF-Translator настроен и доступен в меню приложений.",
+    "bootstrap.finish_download_size": "Фактически загружено: около {size_gb:.1f} ГБ.",
     "bootstrap.finish_launch_button": "Запустить сейчас",
     "bootstrap.finish_close_button": "Закрыть",
     "mode.tooltip": "Тип документа для перевода",

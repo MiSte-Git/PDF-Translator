@@ -19,6 +19,7 @@ contains it - it does not exist in this sandbox's requirements-ocr.txt yet.
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -63,14 +64,52 @@ class InstallError(RuntimeError):
 class InstallProgress:
     step: InstallStep
     detail: str = ""
+    # 07.09.2026 (Michael: "muessten wir den Wert bei der Installation
+    # irgendwo speichern, damit das Ergebnis dann hier in den Installer
+    # einfliessen kann"): total bytes actually fetched by pip so far
+    # (see _parse_downloaded_bytes() below) - 0 on every report except
+    # the final SHORTCUT one, which carries the LOCAL-mode run's total
+    # so bootstrap/app.py::_show_finish() can show a real figure next
+    # to the "ca. 2-3 GB" estimate in bootstrap.mode_local_desc.
+    downloaded_bytes: int = 0
 
 
 ProgressCallback = Callable[[InstallProgress], None]
 
 
-def _report(progress_cb: Optional[ProgressCallback], step: InstallStep, detail: str = "") -> None:
+def _report(
+    progress_cb: Optional[ProgressCallback],
+    step: InstallStep,
+    detail: str = "",
+    downloaded_bytes: int = 0,
+) -> None:
     if progress_cb is not None:
-        progress_cb(InstallProgress(step=step, detail=detail))
+        progress_cb(InstallProgress(step=step, detail=detail, downloaded_bytes=downloaded_bytes))
+
+
+# Matches pip's own "Downloading <url> (<size> <unit>)" progress line,
+# e.g. "Downloading torch-2.3.0-cp311-cp311-linux_x86_64.whl (779.1 MB)".
+# Unchanged across pip versions for years - see pip's own
+# _internal/utils/misc.py::format_size() for the same kB/MB/GB, decimal
+# (1000-based) units this parses back.
+_DOWNLOADING_RE = re.compile(r"Downloading\s+\S+\s+\(([\d.]+)\s*([kKmMgG][bB])\)")
+_SIZE_UNIT_MULTIPLIERS = {"kb": 1000, "mb": 1000**2, "gb": 1000**3}
+
+
+def _parse_downloaded_bytes(pip_output: str) -> int:
+    """Sums every "Downloading ... (size)" line pip printed to stdout
+    during one `pip install` run. Best-effort: an unparseable/empty
+    output (e.g. everything already satisfied, or a pip version that
+    changed its wording) just yields 0 rather than raising - this number
+    is a nice-to-have display, never something the install should fail
+    over."""
+    total = 0
+    for value, unit in _DOWNLOADING_RE.findall(pip_output):
+        try:
+            total += int(float(value) * _SIZE_UNIT_MULTIPLIERS[unit.lower()])
+        except ValueError:
+            continue
+    return total
 
 
 def requirements_files_for_mode(mode: InstallMode, app_source_dir: Path) -> list[Path]:
@@ -147,13 +186,16 @@ def create_venv(venv_dir: Path, base_python: Path | None = None) -> None:
         raise InstallError(f"Could not create the virtual environment: {exc}") from exc
 
 
-def pip_install(venv_python: Path, requirements_file: Path, no_deps: bool = False) -> None:
+def pip_install(venv_python: Path, requirements_file: Path, no_deps: bool = False) -> int:
+    """Returns the number of bytes pip actually downloaded for this
+    requirements file (see _parse_downloaded_bytes()) - 0 if everything
+    was already cached/satisfied."""
     command = [str(venv_python), "-m", "pip", "install"]
     if no_deps:
         command.append("--no-deps")
     command += ["-r", str(requirements_file)]
     try:
-        subprocess.run(
+        result = subprocess.run(
             command,
             capture_output=True,
             text=True,
@@ -167,6 +209,7 @@ def pip_install(venv_python: Path, requirements_file: Path, no_deps: bool = Fals
         ) from exc
     except (OSError, subprocess.SubprocessError) as exc:
         raise InstallError(f"Installing {requirements_file.name} failed: {exc}") from exc
+    return _parse_downloaded_bytes(getattr(result, "stdout", "") or "")
 
 
 _TORCH_PACKAGES = ["torch", "torchvision"]
@@ -183,13 +226,15 @@ def torch_install_command(venv_python: Path, cuda_version: str | None) -> list[s
     return command
 
 
-def install_torch(venv_python: Path, cuda_version: str | None) -> None:
+def install_torch(venv_python: Path, cuda_version: str | None) -> int:
     """LOCAL mode only. Runs BEFORE requirements-gpu.txt so that its bare
     `torch`/`torchvision` lines are already satisfied and pip does not
     replace the driver-matched wheels with PyPI's newest-CUDA default
-    (03.09.2026 - see gpu_check.TORCH_INDEX_BY_CUDA_MAJOR)."""
+    (03.09.2026 - see gpu_check.TORCH_INDEX_BY_CUDA_MAJOR). Returns the
+    number of bytes pip actually downloaded - see pip_install()'s
+    docstring, same reasoning."""
     try:
-        subprocess.run(
+        result = subprocess.run(
             torch_install_command(venv_python, cuda_version),
             capture_output=True,
             text=True,
@@ -201,6 +246,7 @@ def install_torch(venv_python: Path, cuda_version: str | None) -> None:
         raise InstallError(f"Installing torch failed: {exc.stderr.strip() if exc.stderr else exc}") from exc
     except (OSError, subprocess.SubprocessError) as exc:
         raise InstallError(f"Installing torch failed: {exc}") from exc
+    return _parse_downloaded_bytes(getattr(result, "stdout", "") or "")
 
 
 def register_windows_uninstall_entry() -> None:
@@ -277,16 +323,27 @@ def run_install(
     create_venv(venv_dir)
     venv_python = paths.venv_python(venv_dir)
 
+    # 07.09.2026 (Michael, re the "ca. 2-3 GB" estimate in
+    # bootstrap.mode_local_desc: "muessten wir den Wert ... speichern,
+    # damit das Ergebnis dann hier in den Installer einfliessen kann"):
+    # summed across every pip_install()/install_torch() call below and
+    # reported on the final progress step - see InstallProgress's own
+    # docstring for why it rides on the SHORTCUT report rather than a
+    # dedicated one.
+    downloaded_bytes = 0
+
     if mode is InstallMode.LOCAL:
         index_url = gpu_check.torch_index_url(cuda_version)
         _report(progress_cb, InstallStep.DEPS, detail=f"torch ({index_url.rsplit('/', 1)[-1] if index_url else 'PyPI'})")
-        install_torch(venv_python, cuda_version)
+        downloaded_bytes += install_torch(venv_python, cuda_version) or 0
 
     for requirements_file in requirements_files_for_mode(mode, app_source_dir):
         _report(progress_cb, InstallStep.DEPS, detail=requirements_file.name)
-        pip_install(venv_python, requirements_file, no_deps=requirements_file.name in NO_DEPS_REQUIREMENTS)
+        downloaded_bytes += (
+            pip_install(venv_python, requirements_file, no_deps=requirements_file.name in NO_DEPS_REQUIREMENTS) or 0
+        )
 
-    _report(progress_cb, InstallStep.SHORTCUT)
+    _report(progress_cb, InstallStep.SHORTCUT, downloaded_bytes=downloaded_bytes)
     try:
         # Icon is resolved inside create_desktop_entry() from the downloaded
         # app source's assets/ (03.09.2026) - nothing to pass explicitly.
