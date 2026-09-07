@@ -31,7 +31,24 @@ unten).
    - Windows: `pdf-translator-setup-windows.exe`
    - macOS: `pdf-translator-setup-macos`
    - Linux: `pdf-translator-setup-linux`
-2. Datei ausführen. Es öffnet sich ein Fenster, keine Kommandozeile nötig.
+2. Datei ausführen.
+   - **Windows/macOS:** Doppelklick genügt, es öffnet sich ein Fenster.
+   - **Linux:** Die Datei hat bewusst keine Dateiendung (es ist kein
+     `.deb`/`.rpm` und kein klassisches Installationspaket, siehe
+     [Architektur](#architektur-der-geführten-installation) unten). Ein
+     Doppelklick im Dateimanager findet deshalb auf vielen frisch
+     installierten Systemen kein zugeordnetes Programm ("Es konnte keine
+     Anwendung gefunden werden, um diese Datei zu öffnen" o. ä.).
+     Stattdessen einmalig ein Terminal öffnen und im Download-Ordner
+     ausführen:
+
+     ```bash
+     chmod +x pdf-translator-setup-linux
+     ./pdf-translator-setup-linux
+     ```
+
+     Danach öffnet sich dasselbe Fenster wie unter Windows/macOS – keine
+     weitere Kommandozeilen-Interaktion nötig.
 3. Der Assistent führt dich durch:
    - **Sprache** – automatisch nach Systemsprache vorausgewählt (Fallback
      Englisch, wenn die Systemsprache weder Deutsch noch Englisch ist),

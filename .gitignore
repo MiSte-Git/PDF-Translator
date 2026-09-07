@@ -37,3 +37,6 @@ paddle_probe_out/
 
 # Local translation-cost usage log (per-machine, not shared state)
 pipeline/translation/.usage_log.json
+
+# Claude-Sitzungsdateien (lokal, nicht fuers Repo)
+/Claude outputs/
