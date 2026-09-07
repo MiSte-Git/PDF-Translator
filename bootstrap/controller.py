@@ -121,6 +121,9 @@ class BootstrapController:
     def save_provider_credential(self, provider: str, value: str) -> None:
         credentials_step.save_provider_credential(self.app_source_dir, provider, value)
 
+    def signup_url(self, provider: str) -> str | None:
+        return credentials_step.signup_url(provider)
+
     def open_signup_page(self, provider: str) -> bool:
         return credentials_step.open_signup_page(provider)
 

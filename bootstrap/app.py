@@ -33,18 +33,20 @@ from ui.i18n_data import LOCALES
 _WINDOW_SIZE = "500x440"
 # 07.09.2026: shrunk from 560x440 to 500x380 ("noch kleiner und
 # moderner"), then grown back to 500x440 the same day to make room
-# for the persistent "Abbrechen" bar added in __init__ (see
-# BootstrapApp.__init__ and _set_frame) - every screen needs it, not
-# just one, so it could not be folded into an existing per-screen
-# button row without touching every _show_*/_render_* builder
-# separately. Net effect vs. the original 560x480 is still a real
-# reduction (about 30% less area), just not as small as the brief
-# 500x380 in between.
+# for a persistent "Abbrechen" bar. That bar (and the extra height it
+# needed) is gone again as of the same day's later fix (Michael:
+# "warum hat dieser Button eine eigene Leiste, das muesste in die
+# gleiche Leiste") - Abbrechen now lives in each screen's own bottom
+# row (see BootstrapApp._cancel_button()) instead of a separate bar,
+# and the window is scrollable + resizable in height (see __init__)
+# as a general fallback for whatever does not fit regardless. Net
+# effect vs. the original 560x480 is still a real reduction (about
+# 30% less area).
 _TEXT_WRAP = 440
 
 # bootstrap.finish_* only - see _show_finish(): far less content than
-# every other screen (one line of text, two buttons, no Abbrechen bar
-# - see _set_frame(..., show_cancel=False)), so the shared
+# every other screen (one line of text, two buttons, no Abbrechen -
+# _show_finish() never calls self._cancel_button()), so the shared
 # _WINDOW_SIZE above would leave a lot of visibly empty space.
 _FINISH_WINDOW_SIZE = "500x230"
 
@@ -155,11 +157,20 @@ class BootstrapApp(tk.Tk):
         super().__init__()
         self.controller = controller if controller is not None else BootstrapController()
         self.geometry(_WINDOW_SIZE)
-        # 06.09.2026 ("können wir jetzt kleiner und hübscher machen"): a
-        # fixed-size wizard window is the normal convention for an
-        # installer - not resizable also means no layout ever has to cope
-        # with extra empty space or a squeezed wraplength.
-        self.resizable(False, False)
+        # 07.09.2026 ("fehlt die Scroll und Dialogvergroesserung"):
+        # previously not resizable at all (06.09.2026, "koennen wir
+        # jetzt kleiner und huebscher machen") - now resizable in
+        # height only, so a user whose content does not fit the
+        # default size (a longer language, a small screen) can grow
+        # the window as the first, most direct fix; the width stays
+        # fixed since every screen's wraplength (_TEXT_WRAP) is tuned
+        # to it. minsize matches _FINISH_WINDOW_SIZE (the smallest of
+        # the per-screen sizes below) rather than _WINDOW_SIZE itself -
+        # geometry() cannot shrink the window below minsize, so a
+        # larger minsize here would silently override _show_finish()'s
+        # smaller 500x230 request every time that screen is shown.
+        self.resizable(False, True)
+        self.minsize(500, 230)
         self.title(self.controller.text("bootstrap.window_title"))
 
         # 07.09.2026 ("dann lass uns unser Icon einbauen"): replaces the
@@ -192,29 +203,59 @@ class BootstrapApp(tk.Tk):
         # bootstrap/installer.py) once run_install() reaches its final
         # step - read by _show_finish() below.
         self._downloaded_bytes = 0
-        # 07.09.2026 ("fehlt uns nicht auch ein Abbrechen Button
-        # ueberall"): a persistent bar OUTSIDE the per-screen frame
-        # that _set_frame() swaps out, rather than adding a Cancel
-        # button to every individual _show_*/_render_* button row -
-        # there are five different ones, including one
-        # (_show_install's progress screen) that had no button row at
-        # all before this. Packed (side="bottom") BEFORE
-        # self._container below, so it reserves its own space first
-        # and _container gets the remaining area - the standard Tk
-        # pack ordering for a fixed footer; re-packing it later
-        # (_set_frame) does not change this ordering, only whether it
-        # is shown at all. Hidden only for the finish screen - once
-        # install has succeeded there is nothing left to cancel.
-        self._cancel_bar = ttk.Frame(self, padding=(16, 8))
-        self._cancel_bar.pack(side="bottom", fill="x")
-        cancel_button = ttk.Button(
-            self._cancel_bar, text=self.controller.text("bootstrap.cancel_button"), command=self._on_cancel
-        )
-        cancel_button.pack(side="left")
-        _tip(cancel_button, self.controller.text("bootstrap.help.cancel_button"))
 
-        self._container = ttk.Frame(self, padding=16)
-        self._container.pack(fill="both", expand=True)
+        # 07.09.2026 ("fehlt die Scroll und Dialogvergroesserung" /
+        # "warum hat der Abbrechen-Button eine eigene Leiste, das
+        # muesste in die gleiche Leiste wie Zurueck/Weiter"): replaces
+        # the previous design (a persistent "Abbrechen" bar living
+        # OUTSIDE the per-screen frame, always reserving its own
+        # vertical space) with two independent fixes:
+        #   1. self._cancel_button() below - each screen's own bottom
+        #      row now includes "Abbrechen" itself, right next to
+        #      Zurueck/Weiter, instead of a second separate bar.
+        #   2. A Canvas+Scrollbar around self._container (the
+        #      standard tkinter scrollable-frame pattern) plus a
+        #      resizable-height window (see self.resizable above), so
+        #      content that does not fit the default size - a longer
+        #      translation in one of the 9 languages, a future longer
+        #      description - is always still reachable, on every
+        #      screen, rather than being silently clipped off the
+        #      bottom of a fixed-size window (exactly what happened to
+        #      "Weiter" on the Online/Lokal screen once
+        #      bootstrap.mode_local_desc grew longer).
+        self._canvas = tk.Canvas(self, highlightthickness=0, bd=0)
+        self._scrollbar = ttk.Scrollbar(self, orient="vertical", command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=self._scrollbar.set)
+        self._canvas.pack(side="left", fill="both", expand=True)
+        self._scrollbar.pack(side="right", fill="y")
+
+        self._container = ttk.Frame(self._canvas, padding=16)
+        self._container_window = self._canvas.create_window((0, 0), window=self._container, anchor="nw")
+
+        def _on_container_configure(_event: object) -> None:
+            self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+
+        def _on_canvas_configure(event: tk.Event) -> None:
+            self._canvas.itemconfig(self._container_window, width=event.width)
+
+        self._container.bind("<Configure>", _on_container_configure)
+        self._canvas.bind("<Configure>", _on_canvas_configure)
+
+        def _on_mousewheel(event: tk.Event) -> None:
+            if event.num == 4:
+                self._canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                self._canvas.yview_scroll(1, "units")
+            else:
+                self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        # Bound only while the pointer is actually over the wizard
+        # window (<Enter>/<Leave> on the canvas) - a permanent
+        # bind_all would also hijack scrolling in whatever window
+        # happens to be behind/next to it.
+        self._canvas.bind("<Enter>", lambda _e: self._bind_mousewheel(_on_mousewheel))
+        self._canvas.bind("<Leave>", lambda _e: self._unbind_mousewheel())
+
         self._current_frame: ttk.Frame | None = None
 
         self._selected_providers: dict[str, tk.BooleanVar] = {}
@@ -226,6 +267,31 @@ class BootstrapApp(tk.Tk):
         self._credential_index: int = 0
 
         self._show_welcome()
+
+    def _bind_mousewheel(self, handler: Callable[[tk.Event], None]) -> None:
+        self._canvas.bind_all("<MouseWheel>", handler)
+        self._canvas.bind_all("<Button-4>", handler)
+        self._canvas.bind_all("<Button-5>", handler)
+
+    def _unbind_mousewheel(self) -> None:
+        self._canvas.unbind_all("<MouseWheel>")
+        self._canvas.unbind_all("<Button-4>")
+        self._canvas.unbind_all("<Button-5>")
+
+    def _cancel_button(self, row: ttk.Frame) -> None:
+        """Adds an Abbrechen button to `row`, the same bottom bar as
+        that screen's own Zurueck/Weiter (or equivalent) buttons.
+
+        07.09.2026 (Michael: "warum hat dieser Button eine eigene
+        Leiste? das muesste in die gleiche Leiste"): replaces the
+        previous self._cancel_bar (see __init__ above) - every
+        _show_*/_render_* button row below calls this once, instead
+        of relying on one shared bar living outside every screen's
+        own frame.
+        """
+        cancel_button = ttk.Button(row, text=self.controller.text("bootstrap.cancel_button"), command=self._on_cancel)
+        cancel_button.pack(side="left", padx=(0, 8))
+        _tip(cancel_button, self.controller.text("bootstrap.help.cancel_button"))
 
     def _on_cancel(self) -> None:
         """Closes the wizard after confirmation - the whole install
@@ -263,24 +329,24 @@ class BootstrapApp(tk.Tk):
 
     # --- frame helpers -----------------------------------------------------
 
-    def _set_frame(
-        self, build: Callable[[ttk.Frame], None], *, window_size: str = _WINDOW_SIZE, show_cancel: bool = True
-    ) -> None:
+    def _set_frame(self, build: Callable[[ttk.Frame], None], *, window_size: str = _WINDOW_SIZE) -> None:
         self.geometry(window_size)
-        if show_cancel:
-            self._cancel_bar.pack(side="bottom", fill="x")
-        else:
-            self._cancel_bar.pack_forget()
         if self._current_frame is not None:
             self._current_frame.destroy()
         frame = ttk.Frame(self._container)
         frame.pack(fill="both", expand=True)
         self._current_frame = frame
         build(frame)
+        # Scrolled back to the top on every screen change - carrying
+        # over the previous screen's scroll position would otherwise
+        # leave a freshly-shown screen's title/intro scrolled out of
+        # view if the user had scrolled down before navigating.
+        self._canvas.yview_moveto(0.0)
 
     def _nav_row(self, frame: ttk.Frame, back: Callable[[], None] | None, next_: Callable[[], None] | None, next_label: str | None = None) -> None:
         row = ttk.Frame(frame)
         row.pack(side="bottom", fill="x", pady=(16, 0))
+        self._cancel_button(row)
         if back is not None:
             back_button = ttk.Button(row, text=self.controller.text("bootstrap.back_button"), command=back)
             back_button.pack(side="left")
@@ -461,6 +527,7 @@ class BootstrapApp(tk.Tk):
     def _render_gpu_buttons(self, row: ttk.Frame, ok: bool, mac: bool) -> None:
         for child in row.winfo_children():
             child.destroy()
+        self._cancel_button(row)
         gpu_back_button = ttk.Button(row, text=self.controller.text("bootstrap.back_button"), command=self._show_mode)
         gpu_back_button.pack(side="left")
         _tip(gpu_back_button, self.controller.text("bootstrap.help.back_button"))
@@ -493,6 +560,13 @@ class BootstrapApp(tk.Tk):
             progress = ttk.Progressbar(frame, mode="indeterminate")
             progress.pack(fill="x", pady=(0, 16))
             progress.start(12)
+
+            # 07.09.2026: this screen used to rely entirely on the old
+            # persistent self._cancel_bar for its Abbrechen button (it
+            # never had a button row of its own) - now that that bar
+            # is gone (see __init__), it needs an explicit one, with
+            # only Cancel and nothing else.
+            self._nav_row(frame, back=None, next_=None)
 
             result_queue: queue.Queue = queue.Queue()
 
@@ -602,10 +676,24 @@ class BootstrapApp(tk.Tk):
 
             row = ttk.Frame(frame)
             row.pack(side="bottom", fill="x", pady=(16, 0))
+            self._cancel_button(row)
+            # 07.09.2026 (Michael: "der Zurueck Button existiert auf
+            # dem 'API-Schluessel einrichten' nicht"): this screen is
+            # only ever reached right after a completed install (see
+            # poll()'s "done" branch above), so there is no earlier
+            # wizard screen to literally return to - going back here
+            # re-opens the mode/GPU choice instead. That is safe even
+            # after a successful install: re-running the installer
+            # afterwards simply overwrites/completes the existing
+            # install again (see _on_cancel's own docstring on this
+            # same guarantee), it never undoes anything.
+            back_button = ttk.Button(row, text=self.controller.text("bootstrap.back_button"), command=self._show_mode)
+            back_button.pack(side="left")
+            _tip(back_button, self.controller.text("bootstrap.help.back_button"))
             skip_all_button = ttk.Button(
                 row, text=self.controller.text("bootstrap.credentials_skip_all_button"), command=self._show_finish
             )
-            skip_all_button.pack(side="left")
+            skip_all_button.pack(side="left", padx=(8, 0))
             _tip(skip_all_button, self.controller.text("bootstrap.help.credentials_skip_all_button"))
             continue_button = ttk.Button(
                 row, text=self.controller.text("bootstrap.credentials_continue_button"), command=on_continue
@@ -632,6 +720,28 @@ class BootstrapApp(tk.Tk):
             return
         self._show_single_credential(self._credential_providers[self._credential_index])
 
+    def _open_signup(self, provider: str) -> None:
+        """Shows the exact URL in plain text and asks for confirmation
+        before opening it in the system browser.
+
+        07.09.2026 (Michael: "einen Sicherheitshinweis einbauen und
+        auch den Link im Klartext anzeigen, damit keine Manipulation
+        mit dem Link gemacht werden kann"): the URL itself is already
+        a fixed constant in credentials_step.PROVIDER_SIGNUP_URLS,
+        never user input, so this does not protect against a tampered
+        URL reaching this code - it protects the USER, by letting them
+        actually verify what is about to open before it does, instead
+        of trusting the button's label alone.
+        """
+        url = self.controller.signup_url(provider)
+        if url is None:
+            return
+        if messagebox.askyesno(
+            self.controller.text("bootstrap.open_browser_title"),
+            self.controller.text("bootstrap.open_browser_text", url=url),
+        ):
+            self.controller.open_signup_page(provider)
+
     def _show_single_credential(self, provider: str) -> None:
         def build(frame: ttk.Frame) -> None:
             provider_label = self.controller.text(f"bootstrap.credentials_provider_{provider}")
@@ -643,7 +753,7 @@ class BootstrapApp(tk.Tk):
             open_signup_button = ttk.Button(
                 frame,
                 text=self.controller.text("bootstrap.credentials_open_signup_button"),
-                command=lambda: self.controller.open_signup_page(provider),
+                command=lambda: self._open_signup(provider),
             )
             open_signup_button.pack(anchor="w", pady=(0, 16))
             _tip(open_signup_button, self.controller.text("bootstrap.help.credential_open_signup_button"))
@@ -702,6 +812,7 @@ class BootstrapApp(tk.Tk):
 
             row = ttk.Frame(frame)
             row.pack(side="bottom", fill="x", pady=(16, 0))
+            self._cancel_button(row)
             back_button = ttk.Button(row, text=self.controller.text("bootstrap.back_button"), command=go_back)
             back_button.pack(side="left")
             _tip(back_button, self.controller.text("bootstrap.help.back_button"))
@@ -749,7 +860,7 @@ class BootstrapApp(tk.Tk):
             launch_button.pack(side="right")
             _tip(launch_button, self.controller.text("bootstrap.help.finish_launch_button"))
 
-        self._set_frame(build, window_size=_FINISH_WINDOW_SIZE, show_cancel=False)
+        self._set_frame(build, window_size=_FINISH_WINDOW_SIZE)
 
 
 def _is_running_elevated() -> bool:

@@ -442,13 +442,15 @@ DE = {
     ),
     "bootstrap.help.mode_online_radio": (
         "Übersetzung läuft über Cloud-Anbieter (DeepL, Google, OpenAI, "
-        "Grok)\n\n"
+        "Grok); Bildbearbeitung nutzt hier ein einfacheres Verfahren statt "
+        "KI-gestütztem Inpainting\n\n"
         "Schnellste und einfachste Installation, funktioniert auf jedem "
         "Rechner. Benötigt einen eigenen API-Schlüssel des gewählten "
         "Anbieters und eine Internetverbindung während der Übersetzung."
     ),
     "bootstrap.help.mode_local_radio": (
-        "Bildbearbeitung läuft lokal auf der Grafikkarte, ohne Cloud\n\n"
+        "Bessere, KI-gestützte Bildbearbeitung auf dieser Grafikkarte "
+        "statt des einfacheren Standardverfahrens\n\n"
         "Benötigt eine unterstützte NVIDIA-Grafikkarte mit ausreichend "
         "Videospeicher (wird im nächsten Schritt geprüft) - dafür bleiben "
         "Bilder vollständig auf diesem Rechner."
@@ -851,17 +853,21 @@ DE = {
         "Übersetzung läuft über einen externen Anbieter (DeepL, Google, "
         "OpenAI oder Grok). Dafür fallen laufende Kosten pro Übersetzung "
         "an, und es wird ein eigener API-Schlüssel des jeweiligen "
-        "Anbieters benötigt - dazu gleich mehr. Kein großer Download "
-        "nötig. Empfohlen, wenn keine starke Grafikkarte vorhanden ist."
+        "Anbieters benötigt - dazu gleich mehr. Bildbearbeitung in "
+        "eingebetteten Bildern funktioniert auch hier, nur mit einem "
+        "einfacheren Verfahren statt KI-gestütztem Inpainting. Kein "
+        "großer Download nötig. Empfohlen, wenn keine starke Grafikkarte "
+        "vorhanden ist."
     ),
     "bootstrap.mode_local_label": "Lokal (auf dieser Grafikkarte)",
     "bootstrap.mode_local_desc": (
-        "Bezieht sich nur auf die Bildbearbeitung: Text in eingebetteten "
-        "Bildern wird per OCR erkannt und nach der Übersetzung direkt auf "
-        "dieser Grafikkarte neu ins Bild gezeichnet - dafür fallen keine "
-        "laufenden Kosten an. Die eigentliche Textübersetzung läuft in "
-        "beiden Modi über einen externen Anbieter (DeepL, Google, OpenAI "
-        "oder Grok) und kostet dort wie gewohnt pro Übersetzung. "
+        "Verbessert nur die Bildbearbeitung: Text in eingebetteten Bildern "
+        "wird per OCR erkannt und nach der Übersetzung mit einem KI-Modell "
+        "(LaMa) auf dieser Grafikkarte neu ins Bild gezeichnet - das sieht "
+        "sauberer aus als das einfachere Verfahren, das auch ohne diese "
+        "Option zur Verfügung steht. Die eigentliche Textübersetzung läuft "
+        "in beiden Modi über einen externen Anbieter (DeepL, Google, "
+        "OpenAI oder Grok) und kostet dort wie gewohnt pro Übersetzung. "
         "Online-Anbieter lassen sich zusätzlich jederzeit in den "
         "Einstellungen einrichten - diese Option installiert also beides. "
         "Braucht eine ausreichend starke NVIDIA-Grafikkarte (wird im "
@@ -926,6 +932,13 @@ DE = {
         "Nutzung."
     ),
     "bootstrap.credentials_open_signup_button": "Schlüssel besorgen (öffnet Browser)",
+    "bootstrap.open_browser_title": "Browser öffnen?",
+    "bootstrap.open_browser_text": (
+        "Es wird folgender Link im Standardbrowser geöffnet:\n\n"
+        "{url}\n\n"
+        "Bitte prüfen, ob das wirklich die erwartete Adresse ist, bevor "
+        "fortgefahren wird."
+    ),
     "bootstrap.credentials_key_label": "API-Schlüssel für {provider}",
     "bootstrap.credentials_key_placeholder": "Schlüssel einfügen …",
     "bootstrap.credentials_save_button": "Speichern",
@@ -1464,13 +1477,15 @@ EN = {
     ),
     "bootstrap.help.mode_online_radio": (
         "Translation runs through cloud providers (DeepL, Google, "
-        "OpenAI, Grok)\n\n"
+        "OpenAI, Grok); image editing uses a simpler method here instead "
+        "of AI-based inpainting\n\n"
         "Fastest and simplest install, works on any machine. Needs your "
         "own API key from the chosen provider and an internet connection "
         "while translating."
     ),
     "bootstrap.help.mode_local_radio": (
-        "Image editing runs locally on your graphics card, no cloud\n\n"
+        "Better, AI-powered image editing on this graphics card instead "
+        "of the simpler default method\n\n"
         "Needs a supported NVIDIA graphics card with enough video memory "
         "(checked in the next step) - in return, images never leave this "
         "machine."
@@ -1787,16 +1802,19 @@ EN = {
     "bootstrap.mode_online_desc": (
         "Translation runs through an external provider (DeepL, Google, "
         "OpenAI, or Grok). This costs money per translation, and you'll "
-        "need your own API key from that provider - more on that next. No "
-        "large download needed. Recommended if you don't have a strong "
+        "need your own API key from that provider - more on that next. "
+        "Image editing in embedded images still works here too, just "
+        "with a simpler method instead of AI-based inpainting. No large "
+        "download needed. Recommended if you don't have a strong "
         "graphics card."
     ),
     "bootstrap.mode_local_label": "Local (on this graphics card)",
     "bootstrap.mode_local_desc": (
-        "Applies only to image editing: text embedded in images is "
-        "detected via OCR and redrawn directly on this graphics card "
-        "after translation - no ongoing cost for that part. The actual "
-        "text translation still runs through an external provider "
+        "Improves image editing only: text embedded in images is "
+        "detected via OCR and redrawn using an AI model (LaMa) on this "
+        "graphics card after translation - the result looks cleaner than "
+        "the simpler method already available without this option. The "
+        "actual text translation still runs through an external provider "
         "(DeepL, Google, OpenAI, or Grok) in both modes, at that "
         "provider's usual per-translation cost. Online providers can "
         "still be set up any time in Settings if you want them too. "
@@ -1857,6 +1875,13 @@ EN = {
         "Quick self-service sign-up, pay per use."
     ),
     "bootstrap.credentials_open_signup_button": "Get a key (opens browser)",
+    "bootstrap.open_browser_title": "Open browser?",
+    "bootstrap.open_browser_text": (
+        "The following link will be opened in the default browser:\n\n"
+        "{url}\n\n"
+        "Please check that this is really the expected address before "
+        "continuing."
+    ),
     "bootstrap.credentials_key_label": "API key for {provider}",
     "bootstrap.credentials_key_placeholder": "Paste key …",
     "bootstrap.credentials_save_button": "Save",
@@ -2304,15 +2329,16 @@ FR = {
     ),
     "bootstrap.help.mode_online_radio": (
         "La traduction passe par des fournisseurs cloud (DeepL, Google, "
-        "OpenAI, Grok)\n\n"
+        "OpenAI, Grok) ; le traitement d'image utilise ici une méthode "
+        "plus simple que l'inpainting basé sur l'IA\n\n"
         "Installation la plus rapide et la plus simple, fonctionne sur "
         "n'importe quelle machine. Nécessite votre propre clé API du "
         "fournisseur choisi et une connexion internet pendant la "
         "traduction."
     ),
     "bootstrap.help.mode_local_radio": (
-        "Le traitement d'image s'exécute localement sur la carte "
-        "graphique, sans cloud\n\n"
+        "Traitement d'image amélioré par IA sur cette carte graphique, "
+        "au lieu de la méthode standard plus simple\n\n"
         "Nécessite une carte graphique NVIDIA prise en charge avec "
         "suffisamment de mémoire vidéo (vérifié à l'étape suivante) - en "
         "contrepartie, les images ne quittent jamais cette machine."
@@ -2532,9 +2558,9 @@ FR = {
     "bootstrap.mode_title": "En ligne ou local ?",
     "bootstrap.mode_intro": "Comment souhaitez-vous traduire ? Vous pourrez modifier ce choix à tout moment plus tard dans les paramètres.",
     "bootstrap.mode_online_label": "En ligne (fournisseur cloud)",
-    "bootstrap.mode_online_desc": "La traduction passe par un fournisseur externe (DeepL, Google, OpenAI ou Grok). Cela entraîne des coûts récurrents par traduction, et nécessite votre propre clé API du fournisseur concerné - plus de détails juste après. Aucun téléchargement volumineux n'est nécessaire. Recommandé si vous ne disposez pas d'une carte graphique puissante.",
+    "bootstrap.mode_online_desc": "La traduction passe par un fournisseur externe (DeepL, Google, OpenAI ou Grok). Cela entraîne des coûts récurrents par traduction, et nécessite votre propre clé API du fournisseur concerné - plus de détails juste après. Le traitement d'image sur les images intégrées fonctionne aussi ici, avec une méthode plus simple plutôt que l'inpainting basé sur l'IA. Aucun téléchargement volumineux n'est nécessaire. Recommandé si vous ne disposez pas d'une carte graphique puissante.",
     "bootstrap.mode_local_label": "Local (sur cette carte graphique)",
-    "bootstrap.mode_local_desc": "Concerne uniquement le traitement d'image : le texte intégré aux images est détecté par OCR puis redessiné directement sur cette carte graphique après traduction - aucun coût récurrent pour cette partie. La traduction du texte proprement dite passe, dans les deux modes, par un fournisseur externe (DeepL, Google, OpenAI ou Grok), avec le coût habituel par traduction chez ce fournisseur. Des fournisseurs en ligne peuvent en plus être configurés à tout moment dans les paramètres si vous le souhaitez. Nécessite une carte graphique NVIDIA suffisamment puissante (vérifiée à l'étape suivante) et télécharge environ 2 à 3 Go une seule fois pendant l'installation.",
+    "bootstrap.mode_local_desc": "Améliore uniquement le traitement d'image : le texte intégré aux images est détecté par OCR puis redessiné avec un modèle d'IA (LaMa) directement sur cette carte graphique après traduction - le résultat est plus net que la méthode plus simple disponible sans cette option. La traduction du texte proprement dite passe, dans les deux modes, par un fournisseur externe (DeepL, Google, OpenAI ou Grok), avec le coût habituel par traduction chez ce fournisseur. Des fournisseurs en ligne peuvent en plus être configurés à tout moment dans les paramètres si vous le souhaitez. Nécessite une carte graphique NVIDIA suffisamment puissante (vérifiée à l'étape suivante) et télécharge environ 2 à 3 Go une seule fois pendant l'installation.",
     "bootstrap.gpu_checking": "Vérification de la carte graphique …",
     "bootstrap.gpu_ok": "Trouvée : {name} avec {vram_gb:.0f} Go de mémoire graphique - c'est suffisant.",
     "bootstrap.gpu_insufficient": "Trouvée : {name} avec {vram_gb:.0f} Go de mémoire graphique - au moins {min_gb:.0f} Go sont recommandés. Le mode local sera probablement très lent.",
@@ -2561,6 +2587,13 @@ FR = {
     "bootstrap.credentials_explain_openai": "Inscription rapide en libre-service, facturée à l'usage.",
     "bootstrap.credentials_explain_grok": "Inscription rapide en libre-service, facturée à l'usage.",
     "bootstrap.credentials_open_signup_button": "Obtenir une clé (ouvre le navigateur)",
+    "bootstrap.open_browser_title": "Ouvrir le navigateur ?",
+    "bootstrap.open_browser_text": (
+        "Le lien suivant sera ouvert dans le navigateur par défaut :\n\n"
+        "{url}\n\n"
+        "Veuillez vérifier qu'il s'agit bien de l'adresse attendue avant "
+        "de continuer."
+    ),
     "bootstrap.credentials_key_label": "Clé API pour {provider}",
     "bootstrap.credentials_key_placeholder": "Coller la clé …",
     "bootstrap.credentials_save_button": "Enregistrer",
@@ -3013,14 +3046,15 @@ ES = {
     ),
     "bootstrap.help.mode_online_radio": (
         "La traducción pasa por proveedores en la nube (DeepL, Google, "
-        "OpenAI, Grok)\n\n"
+        "OpenAI, Grok); el procesamiento de imágenes usa aquí un método "
+        "más sencillo en lugar de inpainting basado en IA\n\n"
         "Instalación más rápida y sencilla, funciona en cualquier "
         "equipo. Requiere tu propia clave API del proveedor elegido y "
         "conexión a internet durante la traducción."
     ),
     "bootstrap.help.mode_local_radio": (
-        "El procesamiento de imágenes se ejecuta localmente en la "
-        "tarjeta gráfica, sin nube\n\n"
+        "Procesamiento de imágenes mejorado con IA en esta tarjeta "
+        "gráfica, en lugar del método estándar más sencillo\n\n"
         "Requiere una tarjeta gráfica NVIDIA compatible con suficiente "
         "memoria de vídeo (se comprueba en el siguiente paso); a cambio, "
         "las imágenes nunca salen de este equipo."
@@ -3240,9 +3274,9 @@ ES = {
     "bootstrap.mode_title": "¿En línea o local?",
     "bootstrap.mode_intro": "¿Cómo debe funcionar la traducción? Esto se puede cambiar en cualquier momento más adelante, en Ajustes.",
     "bootstrap.mode_online_label": "En línea (proveedor en la nube)",
-    "bootstrap.mode_online_desc": "La traducción se realiza a través de un proveedor externo (DeepL, Google, OpenAI o Grok). Esto conlleva un coste continuo por traducción, y se necesita una clave de API propia de ese proveedor - más sobre esto a continuación. No requiere una descarga grande. Recomendado si no dispone de una tarjeta gráfica potente.",
+    "bootstrap.mode_online_desc": "La traducción se realiza a través de un proveedor externo (DeepL, Google, OpenAI o Grok). Esto conlleva un coste continuo por traducción, y se necesita una clave de API propia de ese proveedor - más sobre esto a continuación. La edición de imágenes en imágenes incrustadas también funciona aquí, solo que con un método más sencillo en lugar de inpainting basado en IA. No requiere una descarga grande. Recomendado si no dispone de una tarjeta gráfica potente.",
     "bootstrap.mode_local_label": "Local (en esta tarjeta gráfica)",
-    "bootstrap.mode_local_desc": "Se refiere solo a la edición de imágenes: el texto incrustado en imágenes se detecta mediante OCR y se vuelve a dibujar directamente en esta tarjeta gráfica tras la traducción - sin costes continuos por esa parte. La traducción del texto en sí sigue pasando, en ambos modos, por un proveedor externo (DeepL, Google, OpenAI o Grok), con el coste habitual por traducción de ese proveedor. Además, los proveedores en línea se pueden configurar en cualquier momento en Ajustes si lo desea. Requiere una tarjeta gráfica NVIDIA suficientemente potente (se comprobará en el siguiente paso) y descarga aproximadamente 2-3 GB una sola vez durante la instalación.",
+    "bootstrap.mode_local_desc": "Mejora solo la edición de imágenes: el texto incrustado en imágenes se detecta mediante OCR y se vuelve a dibujar con un modelo de IA (LaMa) directamente en esta tarjeta gráfica tras la traducción - el resultado se ve más limpio que el método más sencillo disponible sin esta opción. La traducción del texto en sí sigue pasando, en ambos modos, por un proveedor externo (DeepL, Google, OpenAI o Grok), con el coste habitual por traducción de ese proveedor. Además, los proveedores en línea se pueden configurar en cualquier momento en Ajustes si lo desea. Requiere una tarjeta gráfica NVIDIA suficientemente potente (se comprobará en el siguiente paso) y descarga aproximadamente 2-3 GB una sola vez durante la instalación.",
     "bootstrap.gpu_checking": "Comprobando la tarjeta gráfica…",
     "bootstrap.gpu_ok": "Encontrada: {name} con {vram_gb:.0f} GB de memoria de vídeo - es suficiente.",
     "bootstrap.gpu_insufficient": "Encontrada: {name} con {vram_gb:.0f} GB de memoria de vídeo - se recomiendan al menos {min_gb:.0f} GB. El modo local probablemente será muy lento.",
@@ -3269,6 +3303,13 @@ ES = {
     "bootstrap.credentials_explain_openai": "Registro rápido de autoservicio, de pago según el uso.",
     "bootstrap.credentials_explain_grok": "Registro rápido de autoservicio, de pago según el uso.",
     "bootstrap.credentials_open_signup_button": "Obtener clave (abre el navegador)",
+    "bootstrap.open_browser_title": "¿Abrir el navegador?",
+    "bootstrap.open_browser_text": (
+        "Se abrirá el siguiente enlace en el navegador predeterminado:\n\n"
+        "{url}\n\n"
+        "Por favor, comprueba que es realmente la dirección esperada "
+        "antes de continuar."
+    ),
     "bootstrap.credentials_key_label": "Clave de API para {provider}",
     "bootstrap.credentials_key_placeholder": "Pegar clave…",
     "bootstrap.credentials_save_button": "Guardar",
@@ -3720,14 +3761,15 @@ IT = {
     ),
     "bootstrap.help.mode_online_radio": (
         "La traduzione passa attraverso provider cloud (DeepL, Google, "
-        "OpenAI, Grok)\n\n"
+        "OpenAI, Grok); l'elaborazione delle immagini usa qui un metodo "
+        "più semplice invece dell'inpainting basato su IA\n\n"
         "Installazione più rapida e semplice, funziona su qualsiasi "
         "computer. Richiede una propria chiave API del provider scelto "
         "e una connessione internet durante la traduzione."
     ),
     "bootstrap.help.mode_local_radio": (
-        "L'elaborazione delle immagini avviene localmente sulla scheda "
-        "grafica, senza cloud\n\n"
+        "Elaborazione delle immagini migliorata con IA su questa scheda "
+        "grafica, invece del metodo standard più semplice\n\n"
         "Richiede una scheda grafica NVIDIA supportata con memoria "
         "video sufficiente (verificata al passaggio successivo) - in "
         "cambio, le immagini non lasciano mai questo computer."
@@ -3949,9 +3991,9 @@ IT = {
     "bootstrap.mode_title": "Online o locale?",
     "bootstrap.mode_intro": "Come deve funzionare la traduzione? È possibile modificarlo in qualsiasi momento in seguito, nelle Impostazioni.",
     "bootstrap.mode_online_label": "Online (provider cloud)",
-    "bootstrap.mode_online_desc": "La traduzione avviene tramite un provider esterno (DeepL, Google, OpenAI o Grok). Questo comporta costi correnti per ogni traduzione ed è necessaria una chiave API propria del rispettivo provider - maggiori dettagli tra poco. Non richiede download di grandi dimensioni. Consigliato se non si dispone di una scheda grafica potente.",
+    "bootstrap.mode_online_desc": "La traduzione avviene tramite un provider esterno (DeepL, Google, OpenAI o Grok). Questo comporta costi correnti per ogni traduzione ed è necessaria una chiave API propria del rispettivo provider - maggiori dettagli tra poco. Anche qui l'elaborazione delle immagini incorporate funziona, ma con un metodo più semplice invece dell'inpainting basato su IA. Non richiede download di grandi dimensioni. Consigliato se non si dispone di una scheda grafica potente.",
     "bootstrap.mode_local_label": "Locale (su questa scheda grafica)",
-    "bootstrap.mode_local_desc": "Riguarda solo l'elaborazione delle immagini: il testo incorporato nelle immagini viene riconosciuto tramite OCR e ridisegnato direttamente su questa scheda grafica dopo la traduzione - per questa parte non ci sono costi correnti. La traduzione del testo vero e proprio passa comunque, in entrambe le modalità, attraverso un provider esterno (DeepL, Google, OpenAI o Grok), con il consueto costo per traduzione di quel provider. I provider online possono comunque essere configurati in qualsiasi momento nelle Impostazioni, se lo si desidera. Richiede una scheda grafica NVIDIA sufficientemente potente (verificata nel passaggio successivo) e scarica una tantum circa 2-3 GB durante l'installazione.",
+    "bootstrap.mode_local_desc": "Migliora solo l'elaborazione delle immagini: il testo incorporato nelle immagini viene riconosciuto tramite OCR e ridisegnato con un modello IA (LaMa) direttamente su questa scheda grafica dopo la traduzione - il risultato è più pulito rispetto al metodo più semplice disponibile senza questa opzione. La traduzione del testo vero e proprio passa comunque, in entrambe le modalità, attraverso un provider esterno (DeepL, Google, OpenAI o Grok), con il consueto costo per traduzione di quel provider. I provider online possono comunque essere configurati in qualsiasi momento nelle Impostazioni, se lo si desidera. Richiede una scheda grafica NVIDIA sufficientemente potente (verificata nel passaggio successivo) e scarica una tantum circa 2-3 GB durante l'installazione.",
     "bootstrap.gpu_checking": "Verifica della scheda grafica in corso...",
     "bootstrap.gpu_ok": "Trovata: {name} con {vram_gb:.0f} GB di memoria video - sufficiente.",
     "bootstrap.gpu_insufficient": "Trovata: {name} con {vram_gb:.0f} GB di memoria video - sono consigliati almeno {min_gb:.0f} GB. La modalità locale sarà probabilmente molto lenta.",
@@ -3978,6 +4020,13 @@ IT = {
     "bootstrap.credentials_explain_openai": "Registrazione rapida in autonomia, a pagamento in base all'utilizzo.",
     "bootstrap.credentials_explain_grok": "Registrazione rapida in autonomia, a pagamento in base all'utilizzo.",
     "bootstrap.credentials_open_signup_button": "Ottieni una chiave (apre il browser)",
+    "bootstrap.open_browser_title": "Aprire il browser?",
+    "bootstrap.open_browser_text": (
+        "Verrà aperto il seguente link nel browser predefinito:\n\n"
+        "{url}\n\n"
+        "Verifica che sia davvero l'indirizzo previsto prima di "
+        "continuare."
+    ),
     "bootstrap.credentials_key_label": "Chiave API per {provider}",
     "bootstrap.credentials_key_placeholder": "Incolla la chiave...",
     "bootstrap.credentials_save_button": "Salva",
@@ -4428,14 +4477,15 @@ NL = {
     ),
     "bootstrap.help.mode_online_radio": (
         "Vertalen verloopt via cloudproviders (DeepL, Google, OpenAI, "
-        "Grok)\n\n"
+        "Grok); beeldbewerking gebruikt hier een eenvoudigere methode "
+        "in plaats van AI-gestuurde inpainting\n\n"
         "Snelste en eenvoudigste installatie, werkt op elke computer. "
         "Vereist een eigen API-sleutel van de gekozen provider en een "
         "internetverbinding tijdens het vertalen."
     ),
     "bootstrap.help.mode_local_radio": (
-        "Beeldbewerking gebeurt lokaal op de videokaart, zonder "
-        "cloud\n\n"
+        "Betere, AI-gestuurde beeldbewerking op deze videokaart in "
+        "plaats van de eenvoudigere standaardmethode\n\n"
         "Vereist een ondersteunde NVIDIA-videokaart met voldoende "
         "videogeheugen (wordt in de volgende stap gecontroleerd) - "
         "daarvoor blijven afbeeldingen volledig op deze computer."
@@ -4655,9 +4705,9 @@ NL = {
     "bootstrap.mode_title": "Online of lokaal?",
     "bootstrap.mode_intro": "Hoe moet er worden vertaald? U kunt dit later altijd wijzigen in Instellingen.",
     "bootstrap.mode_online_label": "Online (cloudprovider)",
-    "bootstrap.mode_online_desc": "Vertaling verloopt via een externe provider (DeepL, Google, OpenAI of Grok). Hiervoor lopen doorlopende kosten per vertaling, en is een eigen API-sleutel van de betreffende provider nodig - daarover zo meteen meer. Geen grote download nodig. Aanbevolen als er geen krachtige grafische kaart aanwezig is.",
+    "bootstrap.mode_online_desc": "Vertaling verloopt via een externe provider (DeepL, Google, OpenAI of Grok). Hiervoor lopen doorlopende kosten per vertaling, en is een eigen API-sleutel van de betreffende provider nodig - daarover zo meteen meer. Beeldbewerking in afbeeldingen werkt ook hier, alleen met een eenvoudigere methode in plaats van AI-gestuurde inpainting. Geen grote download nodig. Aanbevolen als er geen krachtige grafische kaart aanwezig is.",
     "bootstrap.mode_local_label": "Lokaal (op deze grafische kaart)",
-    "bootstrap.mode_local_desc": "Geldt alleen voor de beeldbewerking: tekst in afbeeldingen wordt via OCR herkend en na vertaling rechtstreeks op deze grafische kaart opnieuw in de afbeelding getekend - daarvoor lopen geen doorlopende kosten. De eigenlijke tekstvertaling verloopt in beide modi via een externe provider (DeepL, Google, OpenAI of Grok), tegen de gebruikelijke kosten per vertaling bij die provider. Online providers kunt u daarnaast altijd nog instellen in Instellingen, indien gewenst. Vereist een voldoende krachtige NVIDIA-grafische kaart (wordt in de volgende stap gecontroleerd) en downloadt tijdens de installatie eenmalig ca. 2-3 GB.",
+    "bootstrap.mode_local_desc": "Verbetert alleen de beeldbewerking: tekst in afbeeldingen wordt via OCR herkend en na vertaling met een AI-model (LaMa) opnieuw op deze grafische kaart in de afbeelding getekend - het resultaat ziet er properder uit dan de eenvoudigere methode die ook zonder deze optie beschikbaar is. De eigenlijke tekstvertaling verloopt in beide modi via een externe provider (DeepL, Google, OpenAI of Grok), tegen de gebruikelijke kosten per vertaling bij die provider. Online providers kunt u daarnaast altijd nog instellen in Instellingen, indien gewenst. Vereist een voldoende krachtige NVIDIA-grafische kaart (wordt in de volgende stap gecontroleerd) en downloadt tijdens de installatie eenmalig ca. 2-3 GB.",
     "bootstrap.gpu_checking": "Grafische kaart wordt gecontroleerd …",
     "bootstrap.gpu_ok": "Gevonden: {name} met {vram_gb:.0f} GB videogeheugen - dat is voldoende.",
     "bootstrap.gpu_insufficient": "Gevonden: {name} met {vram_gb:.0f} GB videogeheugen - aanbevolen is minimaal {min_gb:.0f} GB. Lokaal zal waarschijnlijk erg traag zijn.",
@@ -4684,6 +4734,13 @@ NL = {
     "bootstrap.credentials_explain_openai": "Snelle zelfregistratie, betaald naar gebruik.",
     "bootstrap.credentials_explain_grok": "Snelle zelfregistratie, betaald naar gebruik.",
     "bootstrap.credentials_open_signup_button": "Sleutel aanvragen (opent browser)",
+    "bootstrap.open_browser_title": "Browser openen?",
+    "bootstrap.open_browser_text": (
+        "De volgende link wordt geopend in de standaardbrowser:\n\n"
+        "{url}\n\n"
+        "Controleer of dit echt het verwachte adres is voordat je "
+        "verder gaat."
+    ),
     "bootstrap.credentials_key_label": "API-sleutel voor {provider}",
     "bootstrap.credentials_key_placeholder": "Sleutel plakken …",
     "bootstrap.credentials_save_button": "Opslaan",
@@ -5134,14 +5191,16 @@ FI = {
     ),
     "bootstrap.help.mode_online_radio": (
         "Kääntäminen tapahtuu pilvipalveluntarjoajien kautta (DeepL, "
-        "Google, OpenAI, Grok)\n\n"
+        "Google, OpenAI, Grok); kuvankäsittely käyttää täällä "
+        "yksinkertaisempaa menetelmää tekoälypohjaisen inpaintingin "
+        "sijaan\n\n"
         "Nopein ja yksinkertaisin asennus, toimii millä tahansa "
         "koneella. Vaatii oman API-avaimen valitulta palveluntarjoajalta "
         "ja internetyhteyden kääntämisen aikana."
     ),
     "bootstrap.help.mode_local_radio": (
-        "Kuvankäsittely tapahtuu paikallisesti näytönohjaimella, ilman "
-        "pilveä\n\n"
+        "Parempi, tekoälypohjainen kuvankäsittely tällä näytönohjaimella "
+        "yksinkertaisemman oletusmenetelmän sijaan\n\n"
         "Vaatii tuetun NVIDIA-näytönohjaimen, jossa on riittävästi "
         "videomuistia (tarkistetaan seuraavassa vaiheessa) - sen sijaan "
         "kuvat eivät koskaan poistu tältä koneelta."
@@ -5362,9 +5421,9 @@ FI = {
     "bootstrap.mode_title": "Verkossa vai paikallisesti?",
     "bootstrap.mode_intro": "Miten käännös tehdään? Tätä voi muuttaa myöhemmin milloin tahansa Asetuksista.",
     "bootstrap.mode_online_label": "Verkossa (pilvipalveluntarjoaja)",
-    "bootstrap.mode_online_desc": "Käännös tehdään ulkoisen palveluntarjoajan kautta (DeepL, Google, OpenAI tai Grok). Tästä aiheutuu jatkuvia kustannuksia per käännös, ja tarvitset oman API-avaimen kyseiseltä palveluntarjoajalta - lisää tästä kohta. Ei vaadi suurta latausta. Suositellaan, jos käytössä ei ole tehokasta näytönohjainta.",
+    "bootstrap.mode_online_desc": "Käännös tehdään ulkoisen palveluntarjoajan kautta (DeepL, Google, OpenAI tai Grok). Tästä aiheutuu jatkuvia kustannuksia per käännös, ja tarvitset oman API-avaimen kyseiseltä palveluntarjoajalta - lisää tästä kohta. Kuvankäsittely upotetuissa kuvissa toimii myös täällä, mutta yksinkertaisemmalla menetelmällä tekoälypohjaisen inpaintingin sijaan. Ei vaadi suurta latausta. Suositellaan, jos käytössä ei ole tehokasta näytönohjainta.",
     "bootstrap.mode_local_label": "Paikallinen (tällä näytönohjaimella)",
-    "bootstrap.mode_local_desc": "Koskee vain kuvankäsittelyä: kuviin upotettu teksti tunnistetaan OCR:llä ja piirretään käännöksen jälkeen suoraan tällä näytönohjaimella takaisin kuvaan - tästä ei aiheudu jatkuvia kustannuksia. Varsinainen tekstin kääntäminen tapahtuu molemmissa tiloissa ulkoisen palveluntarjoajan kautta (DeepL, Google, OpenAI tai Grok), kyseisen palveluntarjoajan tavanomaiseen kääntänkohtaiseen hintaan. Verkkopalveluntarjoajat voi silti ottaa käyttöön milloin tahansa Asetuksista, jos niin haluat. Vaatii riittävän tehokkaan NVIDIA-näytönohjaimen (tarkistetaan seuraavassa vaiheessa) ja lataa asennuksen aikana kertaluonteisesti noin 2-3 Gt.",
+    "bootstrap.mode_local_desc": "Parantaa vain kuvankäsittelyä: kuviin upotettu teksti tunnistetaan OCR:llä ja piirretään käännöksen jälkeen tekoälymallilla (LaMa) suoraan tällä näytönohjaimella takaisin kuvaan - lopputulos näyttää siistimmältä kuin ilman tätä valintaa käytettävissä oleva yksinkertaisempi menetelmä. Varsinainen tekstin kääntäminen tapahtuu molemmissa tiloissa ulkoisen palveluntarjoajan kautta (DeepL, Google, OpenAI tai Grok), kyseisen palveluntarjoajan tavanomaiseen kääntänkohtaiseen hintaan. Verkkopalveluntarjoajat voi silti ottaa käyttöön milloin tahansa Asetuksista, jos niin haluat. Vaatii riittävän tehokkaan NVIDIA-näytönohjaimen (tarkistetaan seuraavassa vaiheessa) ja lataa asennuksen aikana kertaluonteisesti noin 2-3 Gt.",
     "bootstrap.gpu_checking": "Tarkistetaan näytönohjainta …",
     "bootstrap.gpu_ok": "Löydetty: {name}, näytönohjaimen muistia {vram_gb:.0f} Gt - tämä riittää.",
     "bootstrap.gpu_insufficient": "Löydetty: {name}, näytönohjaimen muistia {vram_gb:.0f} Gt - suositus on vähintään {min_gb:.0f} Gt. Paikallinen tila on todennäköisesti hyvin hidas.",
@@ -5391,6 +5450,12 @@ FI = {
     "bootstrap.credentials_explain_openai": "Nopea itsepalvelurekisteröinti, maksullinen käytön mukaan.",
     "bootstrap.credentials_explain_grok": "Nopea itsepalvelurekisteröinti, maksullinen käytön mukaan.",
     "bootstrap.credentials_open_signup_button": "Hanki avain (avaa selaimen)",
+    "bootstrap.open_browser_title": "Avataanko selain?",
+    "bootstrap.open_browser_text": (
+        "Seuraava linkki avataan oletusselaimessa:\n\n"
+        "{url}\n\n"
+        "Tarkista, että osoite on todella oikea, ennen kuin jatkat."
+    ),
     "bootstrap.credentials_key_label": "API-avain palvelulle {provider}",
     "bootstrap.credentials_key_placeholder": "Liitä avain …",
     "bootstrap.credentials_save_button": "Tallenna",
@@ -5835,14 +5900,15 @@ HR = {
     ),
     "bootstrap.help.mode_online_radio": (
         "Prevođenje se odvija putem pružatelja u oblaku (DeepL, Google, "
-        "OpenAI, Grok)\n\n"
+        "OpenAI, Grok); obrada slika ovdje koristi jednostavniju metodu "
+        "umjesto AI inpaintinga\n\n"
         "Najbrža i najjednostavnija instalacija, radi na bilo kojem "
         "računalu. Zahtijeva vlastiti API ključ odabranog pružatelja i "
         "internetsku vezu tijekom prevođenja."
     ),
     "bootstrap.help.mode_local_radio": (
-        "Obrada slika odvija se lokalno na grafičkoj kartici, bez "
-        "oblaka\n\n"
+        "Bolja, AI obrada slika na ovoj grafičkoj kartici umjesto "
+        "jednostavnije zadane metode\n\n"
         "Zahtijeva podržanu NVIDIA grafičku karticu s dovoljno video "
         "memorije (provjerava se u sljedećem koraku) - zauzvrat slike "
         "nikada ne napuštaju ovo računalo."
@@ -6059,9 +6125,9 @@ HR = {
     "bootstrap.mode_title": "Online ili lokalno?",
     "bootstrap.mode_intro": "Kako želite da prijevod radi? To kasnije uvijek možete promijeniti u postavkama.",
     "bootstrap.mode_online_label": "Online (cloud pružatelj)",
-    "bootstrap.mode_online_desc": "Prijevod se odvija putem vanjskog pružatelja (DeepL, Google, OpenAI ili Grok). Za to nastaju tekući troškovi po prijevodu, a potreban je vlastiti API ključ dotičnog pružatelja - o tome više uskoro. Nije potrebno veliko preuzimanje. Preporučeno ako nemate snažnu grafičku karticu.",
+    "bootstrap.mode_online_desc": "Prijevod se odvija putem vanjskog pružatelja (DeepL, Google, OpenAI ili Grok). Za to nastaju tekući troškovi po prijevodu, a potreban je vlastiti API ključ dotičnog pružatelja - o tome više uskoro. Obrada slika u ugrađenim slikama radi i ovdje, samo jednostavnijom metodom umjesto AI inpaintinga. Nije potrebno veliko preuzimanje. Preporučeno ako nemate snažnu grafičku karticu.",
     "bootstrap.mode_local_label": "Lokalno (na ovoj grafičkoj kartici)",
-    "bootstrap.mode_local_desc": "Odnosi se samo na obradu slika: tekst ugrađen u slike prepoznaje se OCR-om i nakon prijevoda ponovno se crta izravno na ovoj grafičkoj kartici - za taj dio ne nastaju tekući troškovi. Sam prijevod teksta u oba načina rada i dalje ide preko vanjskog pružatelja usluge (DeepL, Google, OpenAI ili Grok), uz uobičajeni trošak po prijevodu kod tog pružatelja. Online pružatelje možete dodatno postaviti u bilo kojem trenutku u postavkama ako želite. Potrebna je dovoljno snažna NVIDIA grafička kartica (provjerava se u sljedećem koraku), a tijekom instalacije jednokratno se preuzima oko 2-3 GB.",
+    "bootstrap.mode_local_desc": "Poboljšava samo obradu slika: tekst ugrađen u slike prepoznaje se OCR-om i nakon prijevoda ponovno se crta pomoću AI modela (LaMa) izravno na ovoj grafičkoj kartici - rezultat izgleda čišće nego jednostavnija metoda dostupna i bez ove opcije. Sam prijevod teksta u oba načina rada i dalje ide preko vanjskog pružatelja usluge (DeepL, Google, OpenAI ili Grok), uz uobičajeni trošak po prijevodu kod tog pružatelja. Online pružatelje možete dodatno postaviti u bilo kojem trenutku u postavkama ako želite. Potrebna je dovoljno snažna NVIDIA grafička kartica (provjerava se u sljedećem koraku), a tijekom instalacije jednokratno se preuzima oko 2-3 GB.",
     "bootstrap.gpu_checking": "Provjera grafičke kartice …",
     "bootstrap.gpu_ok": "Pronađeno: {name} s {vram_gb:.0f} GB video memorije - to je dovoljno.",
     "bootstrap.gpu_insufficient": "Pronađeno: {name} s {vram_gb:.0f} GB video memorije - preporučeno je najmanje {min_gb:.0f} GB. Lokalni način rada vjerojatno će biti vrlo spor.",
@@ -6088,6 +6154,13 @@ HR = {
     "bootstrap.credentials_explain_openai": "Brza samostalna registracija, naplata prema korištenju.",
     "bootstrap.credentials_explain_grok": "Brza samostalna registracija, naplata prema korištenju.",
     "bootstrap.credentials_open_signup_button": "Nabavi ključ (otvara preglednik)",
+    "bootstrap.open_browser_title": "Otvoriti preglednik?",
+    "bootstrap.open_browser_text": (
+        "Sljedeća poveznica će se otvoriti u zadanom pregledniku:\n\n"
+        "{url}\n\n"
+        "Provjerite je li to doista očekivana adresa prije nego što "
+        "nastavite."
+    ),
     "bootstrap.credentials_key_label": "API ključ za {provider}",
     "bootstrap.credentials_key_placeholder": "Umetni ključ …",
     "bootstrap.credentials_save_button": "Spremi",
@@ -6531,14 +6604,15 @@ RU = {
     ),
     "bootstrap.help.mode_online_radio": (
         "Перевод выполняется через облачных поставщиков (DeepL, Google, "
-        "OpenAI, Grok)\n\n"
+        "OpenAI, Grok); обработка изображений здесь использует более "
+        "простой метод вместо ИИ-инпейнтинга\n\n"
         "Самая быстрая и простая установка, работает на любом "
         "компьютере. Требует собственный API-ключ выбранного "
         "поставщика и подключение к интернету во время перевода."
     ),
     "bootstrap.help.mode_local_radio": (
-        "Обработка изображений выполняется локально на видеокарте, без "
-        "облака\n\n"
+        "Улучшенная, основанная на ИИ обработка изображений на этой "
+        "видеокарте вместо более простого стандартного метода\n\n"
         "Требует поддерживаемую видеокарту NVIDIA с достаточным "
         "объёмом видеопамяти (проверяется на следующем шаге) - зато "
         "изображения никогда не покидают этот компьютер."
@@ -6756,9 +6830,9 @@ RU = {
     "bootstrap.mode_title": "Онлайн или локально?",
     "bootstrap.mode_intro": "Как должен выполняться перевод? Это можно в любой момент изменить позже в настройках.",
     "bootstrap.mode_online_label": "Онлайн (облачный поставщик)",
-    "bootstrap.mode_online_desc": "Перевод выполняется через внешнего поставщика (DeepL, Google, OpenAI или Grok). За это взимается плата за каждый перевод, и потребуется собственный ключ API соответствующего поставщика — подробнее об этом далее. Большая загрузка не требуется. Рекомендуется, если нет мощной видеокарты.",
+    "bootstrap.mode_online_desc": "Перевод выполняется через внешнего поставщика (DeepL, Google, OpenAI или Grok). За это взимается плата за каждый перевод, и потребуется собственный ключ API соответствующего поставщика — подробнее об этом далее. Обработка изображений во встроенных картинках работает и здесь, только более простым способом вместо ИИ-инпейнтинга. Большая загрузка не требуется. Рекомендуется, если нет мощной видеокарты.",
     "bootstrap.mode_local_label": "Локально (на этой видеокарте)",
-    "bootstrap.mode_local_desc": "Касается только обработки изображений: встроенный в изображения текст распознаётся с помощью OCR и после перевода перерисовывается прямо на этой видеокарте — за эту часть текущие расходы не возникают. Сам перевод текста в обоих режимах по-прежнему выполняется через внешнего поставщика (DeepL, Google, OpenAI или Grok) по его обычным расценкам за перевод. При желании онлайн-поставщиков можно дополнительно в любое время настроить в настройках. Требуется достаточно мощная видеокарта NVIDIA (проверяется на следующем шаге), и во время установки один раз загружается около 2-3 ГБ.",
+    "bootstrap.mode_local_desc": "Улучшает только обработку изображений: встроенный в изображения текст распознаётся с помощью OCR и после перевода перерисовывается с помощью ИИ-модели (LaMa) прямо на этой видеокарте — результат выглядит чище, чем при более простом способе, доступном и без этой опции. Сам перевод текста в обоих режимах по-прежнему выполняется через внешнего поставщика (DeepL, Google, OpenAI или Grok) по его обычным расценкам за перевод. При желании онлайн-поставщиков можно дополнительно в любое время настроить в настройках. Требуется достаточно мощная видеокарта NVIDIA (проверяется на следующем шаге), и во время установки один раз загружается около 2-3 ГБ.",
     "bootstrap.gpu_checking": "Проверка видеокарты…",
     "bootstrap.gpu_ok": "Найдено: {name} с {vram_gb:.0f} ГБ видеопамяти — этого достаточно.",
     "bootstrap.gpu_insufficient": "Найдено: {name} с {vram_gb:.0f} ГБ видеопамяти — рекомендуется не менее {min_gb:.0f} ГБ. Локальный режим, вероятно, будет работать очень медленно.",
@@ -6785,6 +6859,13 @@ RU = {
     "bootstrap.credentials_explain_openai": "Быстрая самостоятельная регистрация, оплата по факту использования.",
     "bootstrap.credentials_explain_grok": "Быстрая самостоятельная регистрация, оплата по факту использования.",
     "bootstrap.credentials_open_signup_button": "Получить ключ (откроется браузер)",
+    "bootstrap.open_browser_title": "Открыть браузер?",
+    "bootstrap.open_browser_text": (
+        "В браузере по умолчанию будет открыта следующая ссылка:\n\n"
+        "{url}\n\n"
+        "Проверьте, что это действительно ожидаемый адрес, прежде чем "
+        "продолжить."
+    ),
     "bootstrap.credentials_key_label": "Ключ API для {provider}",
     "bootstrap.credentials_key_placeholder": "Вставьте ключ…",
     "bootstrap.credentials_save_button": "Сохранить",
