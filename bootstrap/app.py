@@ -296,14 +296,32 @@ class BootstrapApp(tk.Tk):
     def _on_cancel(self) -> None:
         """Closes the wizard after confirmation - the whole install
         (or just the wizard itself, before or after installing) is
-        abandoned. Does not attempt to clean up any partial
-        install_root() state left behind (see the stronger
-        confirmation text shown while an install is running) -
-        re-running the setup afterwards overwrites/completes it the
-        same way a second normal run always could.
+        abandoned.
+
+        07.09.2026 (Michael: "bleiben scheinbar alle bis dahin
+        installierte Daten/Ordner erhalten... die sollten eigentlich
+        weg sein, oder nicht?"): now actually removes whatever this
+        run created - venv, downloaded app source, marker files, and
+        (if the install got that far) the Start Menu/dock/launcher
+        entry and, on Windows, the Add/Remove Programs registry entry
+        - via bootstrap/uninstall.py::perform_uninstall(), the exact
+        same removal logic the standalone uninstaller uses. Safe to
+        call unconditionally even when nothing was created yet
+        (cancelling on the very first screen): every step inside
+        perform_uninstall() is already its own no-op/best-effort on a
+        missing install_root(). Cancelling WHILE an install is
+        actively running (self._installing) is the one case this
+        cannot fully guarantee - the background worker thread's
+        subprocess (pip, venv creation, ...) is not killed here, so a
+        file it still has open at that exact moment can survive the
+        cleanup below; the confirmation text for that case is worded
+        accordingly.
         """
         key = "bootstrap.cancel_confirm_installing" if self._installing else "bootstrap.cancel_confirm"
         if messagebox.askyesno(self.controller.text("bootstrap.cancel_title"), self.controller.text(key)):
+            from bootstrap import uninstall
+
+            uninstall.perform_uninstall()
             self.destroy()
 
     def report_callback_exception(self, exc, val, tb) -> None:

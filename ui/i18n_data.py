@@ -806,12 +806,14 @@ DE = {
     "bootstrap.cancel_title": "Installation abbrechen?",
     "bootstrap.cancel_confirm": (
         "Der Einrichtungsassistent wird geschlossen, ohne dass "
-        "PDF-Translator fertig eingerichtet ist. Fortfahren?"
+        "PDF-Translator fertig eingerichtet ist. Bereits angelegte "
+        "Dateien werden dabei automatisch wieder entfernt. Fortfahren?"
     ),
     "bootstrap.cancel_confirm_installing": (
-        "Die Installation läuft gerade. Ein Abbruch jetzt kann "
-        "unvollständige Dateien zurücklassen, die vor einem erneuten "
-        "Versuch von Hand gelöscht werden müssen. Trotzdem abbrechen?"
+        "Die Installation läuft gerade. Beim Abbrechen werden bereits "
+        "angelegte Dateien automatisch wieder entfernt - in seltenen "
+        "Fällen kann dabei eine gerade verwendete Datei zurückbleiben. "
+        "Trotzdem abbrechen?"
     ),
     # elevated_warning_* (06.09.2026, siehe bootstrap/app.py::
     # _warn_and_exit_if_elevated): einziger Text in diesem Katalog mit
@@ -1763,12 +1765,14 @@ EN = {
     "bootstrap.cancel_title": "Cancel installation?",
     "bootstrap.cancel_confirm": (
         "The setup wizard will close without PDF-Translator being fully "
-        "set up. Continue?"
+        "set up. Any files already created will be removed "
+        "automatically. Continue?"
     ),
     "bootstrap.cancel_confirm_installing": (
-        "The installation is currently running. Cancelling now may "
-        "leave incomplete files behind that would need to be deleted "
-        "by hand before trying again. Cancel anyway?"
+        "The installation is currently running. Cancelling will "
+        "automatically remove any files already created - in rare "
+        "cases a file still in use at that exact moment may be left "
+        "behind. Cancel anyway?"
     ),
     "bootstrap.elevated_warning_title": "PDF-Translator Setup - Administrator Privileges",
     "bootstrap.elevated_warning_text": (
@@ -2529,12 +2533,14 @@ FR = {
     "bootstrap.cancel_title": "Annuler l'installation ?",
     "bootstrap.cancel_confirm": (
         "L'assistant d'installation va se fermer sans que PDF-Translator "
-        "soit entièrement configuré. Continuer ?"
+        "soit entièrement configuré. Les fichiers déjà créés seront "
+        "supprimés automatiquement. Continuer ?"
     ),
     "bootstrap.cancel_confirm_installing": (
-        "L'installation est en cours. L'annuler maintenant peut laisser "
-        "des fichiers incomplets qu'il faudra supprimer manuellement "
-        "avant de réessayer. Annuler quand même ?"
+        "L'installation est en cours. L'annuler supprimera "
+        "automatiquement les fichiers déjà créés - dans de rares cas, "
+        "un fichier encore utilisé à cet instant précis peut subsister. "
+        "Annuler quand même ?"
     ),
     "bootstrap.elevated_warning_title": "PDF-Translator Setup - Droits administrateur",
     "bootstrap.elevated_warning_text": (
@@ -3245,12 +3251,14 @@ ES = {
     "bootstrap.cancel_title": "¿Cancelar la instalación?",
     "bootstrap.cancel_confirm": (
         "El asistente de instalación se cerrará sin que PDF-Translator "
-        "quede completamente configurado. ¿Continuar?"
+        "quede completamente configurado. Los archivos ya creados se "
+        "eliminarán automáticamente. ¿Continuar?"
     ),
     "bootstrap.cancel_confirm_installing": (
-        "La instalación está en curso. Cancelarla ahora puede dejar "
-        "archivos incompletos que habría que borrar manualmente antes "
-        "de volver a intentarlo. ¿Cancelar de todos modos?"
+        "La instalación está en curso. Cancelar eliminará "
+        "automáticamente los archivos ya creados - en casos raros, un "
+        "archivo en uso justo en ese momento podría no eliminarse. "
+        "¿Cancelar de todos modos?"
     ),
     "bootstrap.elevated_warning_title": "PDF-Translator Setup - Privilegios de administrador",
     "bootstrap.elevated_warning_text": (
@@ -3961,12 +3969,13 @@ IT = {
     "bootstrap.cancel_title": "Annullare l'installazione?",
     "bootstrap.cancel_confirm": (
         "La procedura guidata si chiuderà senza che PDF-Translator sia "
-        "completamente configurato. Continuare?"
+        "completamente configurato. I file già creati verranno rimossi "
+        "automaticamente. Continuare?"
     ),
     "bootstrap.cancel_confirm_installing": (
-        "L'installazione è in corso. Annullarla ora potrebbe lasciare "
-        "file incompleti da eliminare manualmente prima di riprovare. "
-        "Annullare comunque?"
+        "L'installazione è in corso. Annullare rimuoverà automaticamente "
+        "i file già creati - in rari casi un file ancora in uso in quel "
+        "momento potrebbe non essere rimosso. Annullare comunque?"
     ),
     "bootstrap.elevated_warning_title": "PDF-Translator Setup - Diritti di amministratore",
     "bootstrap.elevated_warning_text": (
@@ -4676,12 +4685,14 @@ NL = {
     "bootstrap.cancel_title": "Installatie annuleren?",
     "bootstrap.cancel_confirm": (
         "De installatiewizard wordt gesloten zonder dat PDF-Translator "
-        "volledig is ingesteld. Doorgaan?"
+        "volledig is ingesteld. Reeds aangemaakte bestanden worden "
+        "automatisch verwijderd. Doorgaan?"
     ),
     "bootstrap.cancel_confirm_installing": (
-        "De installatie is nu bezig. Nu annuleren kan onvolledige "
-        "bestanden achterlaten die voor een nieuwe poging handmatig "
-        "verwijderd moeten worden. Toch annuleren?"
+        "De installatie is nu bezig. Annuleren verwijdert automatisch "
+        "reeds aangemaakte bestanden - in zeldzame gevallen kan een "
+        "bestand dat op dat moment nog in gebruik is, achterblijven. "
+        "Toch annuleren?"
     ),
     "bootstrap.elevated_warning_title": "PDF-Translator Setup - Beheerdersrechten",
     "bootstrap.elevated_warning_text": (
@@ -5391,12 +5402,14 @@ FI = {
     "bootstrap.cancel_title": "Peruutetaanko asennus?",
     "bootstrap.cancel_confirm": (
         "Asennusohjattu toiminto suljetaan, vaikka PDF-Translatoria ei "
-        "ole vielä otettu täysin käyttöön. Jatketaanko?"
+        "ole vielä otettu täysin käyttöön. Jo luodut tiedostot poistetaan "
+        "automaattisesti. Jatketaanko?"
     ),
     "bootstrap.cancel_confirm_installing": (
-        "Asennus on parhaillaan käynnissä. Peruuttaminen nyt saattaa "
-        "jättää jälkeensä keskeneräisiä tiedostoja, jotka pitää poistaa "
-        "käsin ennen uutta yritystä. Peruutetaanko silti?"
+        "Asennus on parhaillaan käynnissä. Peruuttaminen poistaa "
+        "automaattisesti jo luodut tiedostot - harvinaisissa tapauksissa "
+        "juuri sillä hetkellä käytössä ollut tiedosto voi jäädä jäljelle. "
+        "Peruutetaanko silti?"
     ),
     "bootstrap.elevated_warning_title": "PDF-Translator Setup - Järjestelmänvalvojan oikeudet",
     "bootstrap.elevated_warning_text": (
@@ -6097,12 +6110,14 @@ HR = {
     "bootstrap.cancel_title": "Prekinuti instalaciju?",
     "bootstrap.cancel_confirm": (
         "Čarobnjak za postavljanje zatvorit će se, a PDF-Translator "
-        "neće biti u potpunosti postavljen. Nastaviti?"
+        "neće biti u potpunosti postavljen. Već stvorene datoteke bit "
+        "će automatski uklonjene. Nastaviti?"
     ),
     "bootstrap.cancel_confirm_installing": (
-        "Instalacija je trenutno u tijeku. Prekid sada može ostaviti "
-        "nepotpune datoteke koje će prije novog pokušaja trebati ručno "
-        "izbrisati. Ipak prekinuti?"
+        "Instalacija je trenutno u tijeku. Prekidom će se automatski "
+        "ukloniti već stvorene datoteke - u rijetkim slučajevima "
+        "datoteka koja se u tom trenutku koristi može ostati. Ipak "
+        "prekinuti?"
     ),
     "bootstrap.elevated_warning_title": "PDF-Translator Setup - Administratorska prava",
     "bootstrap.elevated_warning_text": (
@@ -6800,12 +6815,14 @@ RU = {
     "bootstrap.cancel_title": "Прервать установку?",
     "bootstrap.cancel_confirm": (
         "Мастер установки закроется, а PDF-Translator не будет "
-        "полностью настроен. Продолжить?"
+        "полностью настроен. Уже созданные файлы будут удалены "
+        "автоматически. Продолжить?"
     ),
     "bootstrap.cancel_confirm_installing": (
-        "Установка сейчас выполняется. Прерывание может оставить "
-        "незавершённые файлы, которые перед повторной попыткой "
-        "придётся удалить вручную. Всё равно прервать?"
+        "Установка сейчас выполняется. При прерывании уже созданные "
+        "файлы будут удалены автоматически — в редких случаях файл, "
+        "используемый именно в этот момент, может остаться. Всё равно "
+        "прервать?"
     ),
     "bootstrap.elevated_warning_title": "PDF-Translator Setup - Права администратора",
     "bootstrap.elevated_warning_text": (
