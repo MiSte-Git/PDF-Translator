@@ -159,6 +159,17 @@ def hex_to_rgb(value: HEX) -> RGB:
     return int(v[0:2], 16), int(v[2:4], 16), int(v[4:6], 16)
 
 
+# 14.10.2026 (Michael: Hinweis PaddleOCR nicht installiert sollte einen
+# duennen roten Rahmen bekommen, damit er deutlicher auffaellt): Inline-
+# Hinweise direkt unter einem Feld (provider_hint, ocr_engine_hint,
+# inpainting_backend_hint in ui/app.py). Nur Rahmenfarbe, kein Hintergrund
+# und keine Textfarbe - der Text muss unter hellem wie dunklem Palette
+# lesbar bleiben (siehe start_hint-Kommentar in ui/app.py). Rot = blockiert
+# den Lauf (fehlt etwas), Amber = nicht blockierende Warnung.
+HINT_ERROR_STYLE = "font-weight: bold; padding: 4px 6px; border: 1px solid #d64545; border-radius: 4px;"
+HINT_WARNING_STYLE = "font-weight: bold; padding: 4px 6px; border: 1px solid #d9a520; border-radius: 4px;"
+
+
 def surface_colors(is_dark: bool) -> dict[str, HEX]:
     return SURFACE_DARK if is_dark else SURFACE_LIGHT
 

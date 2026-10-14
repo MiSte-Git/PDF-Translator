@@ -43,7 +43,7 @@ from ui.models import AnalysisResult, EmbeddedImageMode, TranslationMode, Transl
 from ui.pdf_job import PdfJobResult
 from ui.pptx_job import PresentationJobResult
 from ui.settings import credential_status, save_credential
-from ui.theme import build_stylesheet, palette_colors
+from ui.theme import HINT_ERROR_STYLE, HINT_WARNING_STYLE, build_stylesheet, palette_colors
 from ui.word_job import WordJobResult
 from ui.workers import (
     AnalysisWorker,
@@ -680,7 +680,7 @@ class MainWindow(QMainWindow):
         self.provider_hint = QLabel()
         self.provider_hint.setWordWrap(True)
         self.provider_hint.setTextFormat(Qt.RichText)
-        self.provider_hint.setStyleSheet("font-weight: bold; padding-left: 2px;")
+        self.provider_hint.setStyleSheet(HINT_ERROR_STYLE)
         self.provider_hint.linkActivated.connect(lambda _href: self._open_settings(self.provider.currentText()))
         self.source_lang = QLineEdit()
         self.target_lang = QLineEdit("DE")
@@ -739,14 +739,14 @@ class MainWindow(QMainWindow):
         self.ocr_engine.currentIndexChanged.connect(self._ocr_engine_changed)
         self.ocr_engine_hint = QLabel()
         self.ocr_engine_hint.setWordWrap(True)
-        self.ocr_engine_hint.setStyleSheet("font-weight: bold; padding-left: 2px;")
+        self.ocr_engine_hint.setStyleSheet(HINT_ERROR_STYLE)
         self.inpainting_backend = QComboBox()
         for key in INPAINTING_BACKEND_FACTORIES:
             self.inpainting_backend.addItem("", key)
         self.inpainting_backend.currentIndexChanged.connect(self._inpainting_backend_changed)
         self.inpainting_backend_hint = QLabel()
         self.inpainting_backend_hint.setWordWrap(True)
-        self.inpainting_backend_hint.setStyleSheet("font-weight: bold; padding-left: 2px;")
+        self.inpainting_backend_hint.setStyleSheet(HINT_ERROR_STYLE)
 
         self.form = QFormLayout()
         self.form_labels = [QLabel() for _ in range(13)]
@@ -1418,6 +1418,7 @@ class MainWindow(QMainWindow):
             return
         available = backend is None or inpainting_backend_available(backend)
         hint_text = "" if available else self.language.text("inpainting_backend.unavailable")
+        hint_style = HINT_ERROR_STYLE
         # 01.09.2026 (Michael: "GPU Schwelle auf den realistischen Wert
         # anheben. Mit dem Hinweis, dass es auch mit geringerem Wert
         # laufen kann, aber ohne Gewähr."): GPU_MIN_VRAM_GB no longer
@@ -1430,6 +1431,8 @@ class MainWindow(QMainWindow):
                 hint_text = self.language.text(
                     "inpainting_backend.below_recommended_vram", vram_gb=vram, min_gb=GPU_MIN_VRAM_GB
                 )
+                hint_style = HINT_WARNING_STYLE
+        self.inpainting_backend_hint.setStyleSheet(hint_style)
         self.inpainting_backend_hint.setText(hint_text)
         self.inpainting_backend_hint.setVisible(is_images and bool(hint_text))
 
