@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from _version import __version__
 from bootstrap.desktop_integration import APP_WM_CLASS
-from bootstrap.release_source import UpdateInfo
+from bootstrap.release_source import REPO_NAME, REPO_OWNER, UpdateInfo
 from pipeline.app_logging import LOG_FILE, configure_logging
 from pipeline.images.inpainting import GPU_MIN_VRAM_GB, gpu_vram_gb
 from pipeline.pdf.translate_pdf import PdfTranslationStats
@@ -54,6 +54,12 @@ from ui.workers import (
     UpdateCheckWorker,
     WordTranslationWorker,
 )
+
+# Shown in the Hilfe -> Ueber... box (MainWindow._about()).
+ABOUT_AUTHOR = "Michael Stegmann"
+ABOUT_COPYRIGHT_YEAR = "2026"
+ABOUT_REPO_URL = f"https://github.com/{REPO_OWNER}/{REPO_NAME}"
+ABOUT_LICENSE_URL = "https://www.gnu.org/licenses/gpl-3.0.html"
 
 log = logging.getLogger(__name__)
 
@@ -1078,7 +1084,7 @@ class MainWindow(QMainWindow):
         for widget, tooltip_key, whatsthis_key in self._help_widgets:
             widget.setToolTip(t(tooltip_key))
             widget.setWhatsThis(t(whatsthis_key))
-        self.setWindowTitle(t("app.title"))
+        self.setWindowTitle(f"{t('app.title')} {__version__}")
         self.merge_box.setTitle(t("merge_box.group"))
         self.config_box.setTitle(t("config.group"))
         for index, mode in enumerate(MODE_KEYS): self.mode.setItemText(index, t(MODE_KEYS[mode]))
@@ -1267,11 +1273,33 @@ class MainWindow(QMainWindow):
         )
 
     def _about(self) -> None:
-        QMessageBox.about(
-            self,
-            self.language.text("menu.help.about"),
-            self.language.text("about.body", app_name=self.language.text("app.title"), version=__version__),
+        # 14.10.2026 (Michael: Version im Titel + About-Box erweitern):
+        # eigene QMessageBox statt QMessageBox.about(), damit der Text als
+        # Rich Text mit klickbaren Links (Repo, Lizenz) erscheint und der
+        # Schliessen-Button wie alle anderen Standard-Buttons aus
+        # ui/i18n_data.py uebersetzt wird (siehe SettingsDialog.retranslate()).
+        t = self.language.text
+        box = QMessageBox(self)
+        box.setWindowTitle(t("menu.help.about"))
+        box.setTextFormat(Qt.RichText)
+        box.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        box.setText(
+            t(
+                "about.body",
+                app_name=t("app.title"),
+                version=__version__,
+                year=ABOUT_COPYRIGHT_YEAR,
+                author=ABOUT_AUTHOR,
+                repo_url=ABOUT_REPO_URL,
+                license_url=ABOUT_LICENSE_URL,
+            )
         )
+        icon = self.windowIcon()
+        if not icon.isNull():
+            box.setIconPixmap(icon.pixmap(64, 64))
+        box.setStandardButtons(QMessageBox.Close)
+        box.button(QMessageBox.Close).setText(t("correction.close"))
+        box.exec()
 
     def _update_provider_credential_hint(self) -> None:
         provider = self.provider.currentText()

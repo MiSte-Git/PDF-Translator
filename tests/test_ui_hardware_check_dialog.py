@@ -197,15 +197,24 @@ def test_about_uses_current_language_and_version(qapp, monkeypatch, tmp_path):
     window = MainWindow()
     try:
         captured = {}
-        monkeypatch.setattr(
-            app_module.QMessageBox,
-            "about",
-            lambda parent, title, text: captured.update(title=title, text=text),
-        )
+
+        def fake_exec(box):
+            captured.update(
+                title=box.windowTitle(),
+                text=box.text(),
+                close=box.button(app_module.QMessageBox.Close).text(),
+            )
+            return 0
+
+        monkeypatch.setattr(app_module.QMessageBox, "exec", fake_exec)
         window._about()
         assert captured["title"] == "Über …"
         assert "Document Translator" in captured["text"]
         assert app_module.__version__ in captured["text"]
+        assert app_module.ABOUT_REPO_URL in captured["text"]
+        assert "GNU GPL v3" in captured["text"]
+        assert captured["close"] == window.language.text("correction.close")
+        assert window.windowTitle() == f"Document Translator {app_module.__version__}"
     finally:
         window.close()
 
