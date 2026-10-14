@@ -142,8 +142,9 @@ def test_help_menu_has_three_actions_in_german(qapp, monkeypatch, tmp_path):
     window = MainWindow()
     try:
         assert window.help_menu.title() == "Hilfe"
-        labels = [action.text() for action in window.help_menu.actions()]
+        labels = [action.text() for action in window.help_menu.actions() if not action.isSeparator()]
         assert labels == [
+            "Benutzerhandbuch …",
             "Hardware-Test anzeigen/wiederholen …",
             "Nach Updates suchen …",
             "Direkthilfe",
@@ -159,8 +160,9 @@ def test_help_menu_retranslates_on_language_change(qapp, monkeypatch, tmp_path):
     try:
         window.language.set_language("en")
         assert window.help_menu.title() == "Help"
-        labels = [action.text() for action in window.help_menu.actions()]
+        labels = [action.text() for action in window.help_menu.actions() if not action.isSeparator()]
         assert labels == [
+            "User manual …",
             "Show/repeat hardware test …",
             "Check for updates …",
             "What's This?",

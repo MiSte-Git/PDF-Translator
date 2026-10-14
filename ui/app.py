@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import html
 import json
 import logging
 import os
@@ -43,6 +44,7 @@ from ui.models import AnalysisResult, EmbeddedImageMode, TranslationMode, Transl
 from ui.pdf_job import PdfJobResult
 from ui.pptx_job import PresentationJobResult
 from ui.settings import credential_status, save_credential
+from ui.widgets.hint_label import HintLabel
 from ui.theme import HINT_ERROR_STYLE, HINT_WARNING_STYLE, build_stylesheet, palette_colors
 from ui.word_job import WordJobResult
 from ui.workers import (
@@ -74,6 +76,25 @@ APP_ICON_PATH = Path(__file__).resolve().parent.parent / "assets" / "icon.png"
 # Sprachcode als Text zurueck statt zu crashen (gleiche Vorsicht wie beim
 # App-Icon oben).
 FLAGS_DIR = Path(__file__).resolve().parent.parent / "assets" / "flags"
+
+# Benutzerhandbuch (14.10.2026, Michael: "Dann sollten wir das pdf in alle
+# Sprachen uebersetzen und in der App verlinken. Ja, bitte Hinweise dann auf
+# das Handbuch verlinken."): docs/pdf/manual-<lang>.pdf, gebaut von
+# tools/build_manual.py aus docs/<lang>/manual.md und mit ins Repo
+# committet (das Release ist ein git archive, die installierte App hat kein
+# pandoc/LaTeX). Fallback: Englisch, dann Deutsch.
+MANUAL_DIR = Path(__file__).resolve().parent.parent / "docs" / "pdf"
+MANUAL_FALLBACK_LANGUAGES = ("en", "de")
+
+
+def manual_path(language: str) -> Path | None:
+    """The user manual PDF for `language`, falling back to English and then
+    German; None if no manual PDF exists at all (e.g. an old checkout)."""
+    for code in (language, *MANUAL_FALLBACK_LANGUAGES):
+        candidate = MANUAL_DIR / f"manual-{code}.pdf"
+        if candidate.is_file():
+            return candidate
+    return None
 
 MODE_KEYS = {
     TranslationMode.PDF: "mode.pdf",
@@ -677,7 +698,7 @@ class MainWindow(QMainWindow):
         # run. This label appears immediately next to the provider field
         # instead, with an inline link straight into Settings on the right
         # provider.
-        self.provider_hint = QLabel()
+        self.provider_hint = HintLabel()
         self.provider_hint.setWordWrap(True)
         self.provider_hint.setTextFormat(Qt.RichText)
         self.provider_hint.setStyleSheet(HINT_ERROR_STYLE)
@@ -737,16 +758,20 @@ class MainWindow(QMainWindow):
         for key in OCR_ENGINE_FACTORIES:
             self.ocr_engine.addItem("", key)
         self.ocr_engine.currentIndexChanged.connect(self._ocr_engine_changed)
-        self.ocr_engine_hint = QLabel()
+        self.ocr_engine_hint = HintLabel()
         self.ocr_engine_hint.setWordWrap(True)
         self.ocr_engine_hint.setStyleSheet(HINT_ERROR_STYLE)
+        self.ocr_engine_hint.setTextFormat(Qt.RichText)
+        self.ocr_engine_hint.linkActivated.connect(lambda _href: self._open_manual())
         self.inpainting_backend = QComboBox()
         for key in INPAINTING_BACKEND_FACTORIES:
             self.inpainting_backend.addItem("", key)
         self.inpainting_backend.currentIndexChanged.connect(self._inpainting_backend_changed)
-        self.inpainting_backend_hint = QLabel()
+        self.inpainting_backend_hint = HintLabel()
         self.inpainting_backend_hint.setWordWrap(True)
         self.inpainting_backend_hint.setStyleSheet(HINT_ERROR_STYLE)
+        self.inpainting_backend_hint.setTextFormat(Qt.RichText)
+        self.inpainting_backend_hint.linkActivated.connect(lambda _href: self._open_manual())
 
         self.form = QFormLayout()
         self.form_labels = [QLabel() for _ in range(13)]
@@ -1218,6 +1243,10 @@ class MainWindow(QMainWindow):
         t = self.language.text
         self.help_menu.setTitle(t("menu.help"))
         self.help_menu.clear()
+        manual_action = self.help_menu.addAction(t("menu.help.manual"))
+        manual_action.setShortcut(QKeySequence(QKeySequence.HelpContents))
+        manual_action.triggered.connect(self._open_manual)
+        self.help_menu.addSeparator()
         hw_check_action = self.help_menu.addAction(t("menu.help.hw_check"))
         hw_check_action.triggered.connect(self._open_hardware_check)
         update_action = self.help_menu.addAction(t("menu.help.check_updates"))
@@ -1235,6 +1264,26 @@ class MainWindow(QMainWindow):
         whats_this_action.triggered.connect(QWhatsThis.enterWhatsThisMode)
         about_action = self.help_menu.addAction(t("menu.help.about"))
         about_action.triggered.connect(self._about)
+
+    def _open_manual(self) -> None:
+        path = manual_path(self.language.language)
+        if path is None:
+            QMessageBox.warning(
+                self,
+                self.language.text("menu.help.manual"),
+                self.language.text("manual.missing", path=MANUAL_DIR / f"manual-{self.language.language}.pdf"),
+            )
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def _hint_with_manual_link(self, text: str) -> str:
+        """Rich text for an inline field hint plus a link into the user
+        manual (chapter 4 covers OCR engines and rewrite methods) - see
+        _open_manual(). Empty text stays empty (hint hidden)."""
+        if not text:
+            return ""
+        link = html.escape(self.language.text("manual.hint_link"))
+        return f'{html.escape(text)}<br><a href="manual">{link}</a>'
 
     def _open_hardware_check(self) -> None:
         dialog = HardwareCheckDialog(self.language, self)
@@ -1387,7 +1436,7 @@ class MainWindow(QMainWindow):
         engine = self.ocr_engine.currentData()
         available = engine is None or ocr_engine_available(engine)
         self.ocr_engine_hint.setText(
-            "" if available else self.language.text(f"ocr_engine.{engine}.unavailable")
+            self._hint_with_manual_link("" if available else self.language.text(f"ocr_engine.{engine}.unavailable"))
         )
         self.ocr_engine_hint.setVisible(is_images and not available)
 
@@ -1433,7 +1482,7 @@ class MainWindow(QMainWindow):
                 )
                 hint_style = HINT_WARNING_STYLE
         self.inpainting_backend_hint.setStyleSheet(hint_style)
-        self.inpainting_backend_hint.setText(hint_text)
+        self.inpainting_backend_hint.setText(self._hint_with_manual_link(hint_text))
         self.inpainting_backend_hint.setVisible(is_images and bool(hint_text))
 
     def _choose_sources(self) -> None:
