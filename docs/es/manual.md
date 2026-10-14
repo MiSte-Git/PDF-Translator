@@ -1,14 +1,14 @@
 ---
-title: "PDF-Translator – Manual de usuario"
+title: "Document Translator – Manual de usuario"
 lang: es
 header-includes:
   - \usepackage{float}
   - \floatplacement{figure}{H}
 ---
 
-# PDF-Translator – Manual de usuario
+# Document Translator – Manual de usuario
 
-Este manual describe todos los controles de PDF-Translator: el asistente de
+Este manual describe todos los controles de Document Translator: el asistente de
 configuración (instalador) y la aplicación propiamente dicha. Se basa en los
 mismos textos de ayuda que la aplicación muestra directamente (información
 emergente al pasar el ratón y un texto más detallado mediante Ayuda → ¿Qué
@@ -20,10 +20,6 @@ mediante **Ayuda → Manual de usuario…** – automáticamente en el idioma de
 interfaz seleccionado en ese momento. Los avisos que aparecen directamente
 debajo de un campo (p. ej. «PaddleOCR no está instalado») también enlazan
 aquí.
-
-*Nota: las capturas de pantalla muestran la interfaz en alemán. En el texto,
-los nombres de los campos se indican exactamente como aparecen en la
-interfaz en español.*
 
 ## Índice
 
@@ -46,11 +42,11 @@ interfaz en español.*
 
 ## 1. Asistente de configuración (instalación)
 
-El asistente de configuración instala PDF-Translator una sola vez en este
+El asistente de configuración instala Document Translator una sola vez en este
 ordenador. No necesita derechos de administrador/root, ya que todo se
 instala en una carpeta personal propiedad del usuario.
 
-![Pantalla inicial del asistente de configuración](../screenshots/01_sprache.png)
+![Pantalla inicial del asistente de configuración](../screenshots/es/01_sprache.png)
 
 **Idioma.** El idioma elegido en la primera pantalla se aplica de inmediato a
 todas las demás pantallas del asistente. Es independiente del idioma de la
@@ -81,7 +77,7 @@ documentos:
   contienen fotos u otros fondos complejos; de lo contrario, no es
   imprescindible.
 
-![«¿En línea o local?» – pantalla de selección](../screenshots/02_online_lokal.png)
+![«¿En línea o local?» – pantalla de selección](../screenshots/es/02_online_lokal.png)
 
 Si la comprobación de la GPU da un resultado negativo (no se encontró una
 tarjeta compatible o el controlador está desactualizado), el asistente
@@ -104,9 +100,9 @@ introducido. El asistente también puede completarse sin clave; sin embargo,
 hasta que no se haya guardado al menos una clave, ninguna traducción
 funcionará.
 
-![Elegir proveedores para las claves de API](../screenshots/03_api_schluessel_auswahl.png)
+![Elegir proveedores para las claves de API](../screenshots/es/03_api_schluessel_auswahl.png)
 
-![Introducir la clave de API de un proveedor](../screenshots/04_api_schluessel_eingabe.png)
+![Introducir la clave de API de un proveedor](../screenshots/es/04_api_schluessel_eingabe.png)
 
 *Aviso de seguridad al abrir el navegador:* antes de que el asistente abra un
 enlace en el navegador predeterminado, la dirección de destino se muestra de
@@ -130,12 +126,12 @@ aplicación mediante **«Iniciar ahora»**.
 
 ## 2. La aplicación de un vistazo
 
-Tras la instalación se abre la aplicación PDF-Translator con un formulario
+Tras la instalación se abre la aplicación Document Translator con un formulario
 para la ejecución de la traducción. Los capítulos siguientes recorren su
 manejo de arriba abajo, en el orden en que está dispuesto en la ventana. El
 número de versión actual aparece en la barra de título de la ventana.
 
-![Ventana principal en el modo «Traducir PDF»](../screenshots/app_01_hauptfenster.png)
+![Ventana principal en el modo «Traducir PDF»](../screenshots/es/app_01_hauptfenster.png)
 
 ---
 
@@ -219,7 +215,7 @@ que se ven en la captura siguiente con sus valores predeterminados
 (Tesseract y superposición de caja); ambos se explican a continuación uno por
 uno:
 
-![Los campos «Motor de OCR» y «Método de reescritura» en el modo «Traducir imágenes individuales», aquí con sus valores predeterminados Tesseract y superposición de caja](../screenshots/app_02_bilder_modus.png)
+![Los campos «Motor de OCR» y «Método de reescritura» en el modo «Traducir imágenes individuales», aquí con sus valores predeterminados Tesseract y superposición de caja](../screenshots/es/app_02_bilder_modus.png)
 
 **Campo «Motor de OCR»: reconocimiento de texto.** Reconoce el texto de las
 imágenes antes de traducirlo y reescribirlo. Hay tres motores disponibles (la
@@ -228,7 +224,7 @@ captura anterior muestra el primero):
 - **Tesseract (local)** (predeterminado). Funciona completamente en local,
   sin proveedor en la nube ni clave de API propia, pero necesita que el
   propio software Tesseract esté instalado en este ordenador (véase
-  README.md). Reconoce el texto línea por línea; después, PDF-Translator
+  README.md). Reconoce el texto línea por línea; después, Document Translator
   agrupa las líneas en párrafos por sí mismo.
 - **Google Cloud Vision (nube, detección de párrafos)**. Funciona a través
   del servicio en la nube de Google y usa la misma clave de API que el
@@ -414,7 +410,7 @@ documento se abre uno de dos diálogos de distinta complejidad:
   ejecución se tradujeron varias imágenes a la vez, la aplicación pregunta
   primero cuál de ellas debe corregirse.
 
-![Diálogo de corrección de imágenes con tabla original/traducción, editor y vista previa de la imagen](../screenshots/app_05_bildkorrektur.png)
+![Diálogo de corrección de imágenes con tabla original/traducción, editor y vista previa de la imagen](../screenshots/es/app_05_bildkorrektur.png)
 
 El diálogo de corrección de imágenes muestra a la izquierda la imagen con un
 cuadro de color por cada pasaje de texto reconocido y a la derecha una tabla
@@ -566,7 +562,7 @@ indican por separado.
 
 Con el botón **«Ajustes…»** se accede a:
 
-![Diálogo de ajustes](../screenshots/app_03_einstellungen.png)
+![Diálogo de ajustes](../screenshots/es/app_03_einstellungen.png)
 
 **Acceso a la API.** Primero se elige en el campo **«Proveedor»** (DeepL,
 Google, OpenAI, Grok) a qué proveedor se refieren el estado, la nueva clave y
@@ -625,13 +621,13 @@ misma comprobación que realizó el instalador; útil tras una actualización de
 controlador o un cambio de tarjeta gráfica, sin tener que reinstalar la
 aplicación.
 
-![Diálogo de la prueba de hardware](../screenshots/app_04_hardware_test.png)
+![Diálogo de la prueba de hardware](../screenshots/es/app_04_hardware_test.png)
 
 ---
 
 ## 14. Actualizaciones e información de versión
 
-Si al iniciar se encuentra una versión más reciente de PDF-Translator, aparece
+Si al iniciar se encuentra una versión más reciente de Document Translator, aparece
 automáticamente un aviso («Actualización disponible: …»). Al hacer clic se
 ofrece instalar la nueva versión. Con **Ayuda → Buscar actualizaciones…**
 puede iniciarse la comprobación manualmente en cualquier momento.

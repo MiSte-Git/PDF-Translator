@@ -803,14 +803,14 @@ DE = {
     # Begründung). Startsprache wird nach Systemsprache vorausgewählt,
     # Fallback Englisch (nicht Deutsch) bei nicht unterstützter
     # Systemsprache - bootstrap/system_lang.py.
-    "bootstrap.window_title": "PDF-Translator einrichten",
+    "bootstrap.window_title": "Document Translator einrichten",
     "bootstrap.back_button": "Zurück",
     "bootstrap.next_button": "Weiter",
     "bootstrap.cancel_button": "Abbrechen",
     "bootstrap.cancel_title": "Installation abbrechen?",
     "bootstrap.cancel_confirm": (
         "Der Einrichtungsassistent wird geschlossen, ohne dass "
-        "PDF-Translator fertig eingerichtet ist. Bereits angelegte "
+        "Document Translator fertig eingerichtet ist. Bereits angelegte "
         "Dateien werden dabei automatisch wieder entfernt. Fortfahren?"
     ),
     "bootstrap.cancel_confirm_installing": (
@@ -825,9 +825,9 @@ DE = {
     # dieser Text geht an ctypes' MessageBoxW (kein ttk-Label mit
     # wraplength, das selbst umbricht), läuft außerdem VOR jeder
     # tkinter-Initialisierung.
-    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Administratorrechte",
+    "bootstrap.elevated_warning_title": "Document Translator Setup - Administratorrechte",
     "bootstrap.elevated_warning_text": (
-        "PDF-Translator wurde als Administrator gestartet.\n\n"
+        "Document Translator wurde als Administrator gestartet.\n\n"
         "Das ist nicht nötig und richtet die Installation so ein, dass "
         "sie beim normalen (nicht-administrativen) Start später nicht "
         "mehr funktioniert.\n\n"
@@ -836,15 +836,15 @@ DE = {
         "ausführen\").\n\n"
         "Diese Meldung lässt sich mit Strg+C kopieren."
     ),
-    "bootstrap.uninstall_title": "PDF-Translator deinstallieren",
+    "bootstrap.uninstall_title": "Document Translator deinstallieren",
     "bootstrap.uninstall_confirm": (
-        "PDF-Translator inklusive aller lokal gespeicherten Einstellungen "
+        "Document Translator inklusive aller lokal gespeicherten Einstellungen "
         "und API-Schlüssel entfernen?"
     ),
-    "bootstrap.uninstall_done": "PDF-Translator wurde entfernt.",
+    "bootstrap.uninstall_done": "Document Translator wurde entfernt.",
     "bootstrap.welcome_title": "Willkommen",
     "bootstrap.welcome_text": (
-        "Dieser Assistent richtet PDF-Translator auf diesem Rechner ein - "
+        "Dieser Assistent richtet Document Translator auf diesem Rechner ein - "
         "ganz ohne Kommandozeile. Er lädt die benötigten Komponenten "
         "herunter und legt am Ende einen Eintrag im Anwendungsmenü an."
     ),
@@ -953,7 +953,7 @@ DE = {
     "bootstrap.credentials_continue_button": "Weiter",
     "bootstrap.finish_title": "Fertig",
     "bootstrap.finish_text": (
-        "PDF-Translator ist eingerichtet und im Anwendungsmenü zu finden."
+        "Document Translator ist eingerichtet und im Anwendungsmenü zu finden."
     ),
     "bootstrap.finish_download_size": "Tatsächlich heruntergeladen: ca. {size_gb:.1f} GB.",
     "bootstrap.finish_launch_button": "Jetzt starten",
@@ -1102,7 +1102,7 @@ DE = {
     "update_hint.tooltip": "Neue Version verfügbar",
     "update_hint.whatsthis": (
         "Erscheint automatisch, wenn beim Start eine neuere Version von "
-        "PDF-Translator gefunden wurde. Anklicken bietet die "
+        "Document Translator gefunden wurde. Anklicken bietet die "
         "Installation der neuen Version an."
     ),
     "flag_row.whatsthis": (
@@ -1766,13 +1766,13 @@ EN = {
         "{matches} match(es) out of {scanned} DOCX file(s) searched ({errors} unreadable)."
     ),
     "word_merge_search.status_cancelled": "Cancelled: {matches} match(es) out of {scanned} DOCX file(s) searched.",
-    "bootstrap.window_title": "Set up PDF-Translator",
+    "bootstrap.window_title": "Set up Document Translator",
     "bootstrap.back_button": "Back",
     "bootstrap.next_button": "Next",
     "bootstrap.cancel_button": "Cancel",
     "bootstrap.cancel_title": "Cancel installation?",
     "bootstrap.cancel_confirm": (
-        "The setup wizard will close without PDF-Translator being fully "
+        "The setup wizard will close without Document Translator being fully "
         "set up. Any files already created will be removed "
         "automatically. Continue?"
     ),
@@ -1782,9 +1782,9 @@ EN = {
         "cases a file still in use at that exact moment may be left "
         "behind. Cancel anyway?"
     ),
-    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Administrator Privileges",
+    "bootstrap.elevated_warning_title": "Document Translator Setup - Administrator Privileges",
     "bootstrap.elevated_warning_text": (
-        "PDF-Translator was started as Administrator.\n\n"
+        "Document Translator was started as Administrator.\n\n"
         "This is not necessary and will set things up in a way that "
         "stops the app working later when started normally (without "
         "admin rights).\n\n"
@@ -1792,15 +1792,15 @@ EN = {
         "normal double-click (without \"Run as administrator\").\n\n"
         "This message can be copied with Ctrl+C."
     ),
-    "bootstrap.uninstall_title": "Uninstall PDF-Translator",
+    "bootstrap.uninstall_title": "Uninstall Document Translator",
     "bootstrap.uninstall_confirm": (
-        "Remove PDF-Translator, including all locally stored settings "
+        "Remove Document Translator, including all locally stored settings "
         "and API keys?"
     ),
-    "bootstrap.uninstall_done": "PDF-Translator has been removed.",
+    "bootstrap.uninstall_done": "Document Translator has been removed.",
     "bootstrap.welcome_title": "Welcome",
     "bootstrap.welcome_text": (
-        "This wizard sets up PDF-Translator on this computer - no command "
+        "This wizard sets up Document Translator on this computer - no command "
         "line needed. It downloads the required components and adds an "
         "entry to your application menu at the end."
     ),
@@ -1901,7 +1901,7 @@ EN = {
     "bootstrap.credentials_skip_all_button": "Later, in Settings",
     "bootstrap.credentials_continue_button": "Next",
     "bootstrap.finish_title": "Done",
-    "bootstrap.finish_text": "PDF-Translator is set up and ready to find in your application menu.",
+    "bootstrap.finish_text": "Document Translator is set up and ready to find in your application menu.",
     "bootstrap.finish_download_size": "Actually downloaded: about {size_gb:.1f} GB.",
     "bootstrap.finish_launch_button": "Launch now",
     "bootstrap.finish_close_button": "Close",
@@ -2031,7 +2031,7 @@ EN = {
     ),
     "update_hint.tooltip": "A new version is available",
     "update_hint.whatsthis": (
-        "Appears automatically when a newer version of PDF-Translator "
+        "Appears automatically when a newer version of Document Translator "
         "was found at startup. Clicking it offers to install the new "
         "version."
     ),
@@ -2538,13 +2538,13 @@ FR = {
     "word_merge_search.status_done": "{matches} résultat(s) sur {scanned} fichier(s) DOCX analysé(s).",
     "word_merge_search.status_done_with_errors": "{matches} résultat(s) sur {scanned} fichier(s) DOCX analysé(s) ({errors} illisible(s)).",
     "word_merge_search.status_cancelled": "Annulé : {matches} résultat(s) sur {scanned} fichier(s) DOCX analysé(s).",
-    "bootstrap.window_title": "Configurer PDF-Translator",
+    "bootstrap.window_title": "Configurer Document Translator",
     "bootstrap.back_button": "Précédent",
     "bootstrap.next_button": "Suivant",
     "bootstrap.cancel_button": "Annuler",
     "bootstrap.cancel_title": "Annuler l'installation ?",
     "bootstrap.cancel_confirm": (
-        "L'assistant d'installation va se fermer sans que PDF-Translator "
+        "L'assistant d'installation va se fermer sans que Document Translator "
         "soit entièrement configuré. Les fichiers déjà créés seront "
         "supprimés automatiquement. Continuer ?"
     ),
@@ -2554,9 +2554,9 @@ FR = {
         "un fichier encore utilisé à cet instant précis peut subsister. "
         "Annuler quand même ?"
     ),
-    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Droits administrateur",
+    "bootstrap.elevated_warning_title": "Document Translator Setup - Droits administrateur",
     "bootstrap.elevated_warning_text": (
-        "PDF-Translator a été démarré en tant qu'administrateur.\n\n"
+        "Document Translator a été démarré en tant qu'administrateur.\n\n"
         "Ce n'est pas nécessaire et cela empêchera l'application de "
         "fonctionner plus tard lors d'un démarrage normal (sans droits "
         "administrateur).\n\n"
@@ -2564,14 +2564,14 @@ FR = {
         "double-clic normal (sans « Exécuter en tant qu'administrateur »).\n\n"
         "Ce message peut être copié avec Ctrl+C."
     ),
-    "bootstrap.uninstall_title": "Désinstaller PDF-Translator",
+    "bootstrap.uninstall_title": "Désinstaller Document Translator",
     "bootstrap.uninstall_confirm": (
-        "Supprimer PDF-Translator, y compris tous les paramètres et clés "
+        "Supprimer Document Translator, y compris tous les paramètres et clés "
         "API stockés localement ?"
     ),
-    "bootstrap.uninstall_done": "PDF-Translator a été supprimé.",
+    "bootstrap.uninstall_done": "Document Translator a été supprimé.",
     "bootstrap.welcome_title": "Bienvenue",
-    "bootstrap.welcome_text": "Cet assistant configure PDF-Translator sur cet ordinateur - sans aucune ligne de commande. Il télécharge les composants nécessaires et crée, à la fin, une entrée dans le menu des applications.",
+    "bootstrap.welcome_text": "Cet assistant configure Document Translator sur cet ordinateur - sans aucune ligne de commande. Il télécharge les composants nécessaires et crée, à la fin, une entrée dans le menu des applications.",
     "bootstrap.language_label": "Langue",
     "bootstrap.mode_title": "En ligne ou local ?",
     "bootstrap.mode_intro": "Comment souhaitez-vous traduire ? Vous pourrez modifier ce choix à tout moment plus tard dans les paramètres.",
@@ -2619,7 +2619,7 @@ FR = {
     "bootstrap.credentials_skip_all_button": "Plus tard, dans les paramètres",
     "bootstrap.credentials_continue_button": "Suivant",
     "bootstrap.finish_title": "Terminé",
-    "bootstrap.finish_text": "PDF-Translator est configuré et disponible dans le menu des applications.",
+    "bootstrap.finish_text": "Document Translator est configuré et disponible dans le menu des applications.",
     "bootstrap.finish_download_size": "Réellement téléchargé : environ {size_gb:.1f} Go.",
     "bootstrap.finish_launch_button": "Lancer maintenant",
     "bootstrap.finish_close_button": "Fermer",
@@ -2759,7 +2759,7 @@ FR = {
     "update_hint.tooltip": "Une nouvelle version est disponible",
     "update_hint.whatsthis": (
         "Apparaît automatiquement lorsqu'une version plus récente de "
-        "PDF-Translator a été trouvée au démarrage. Cliquer dessus "
+        "Document Translator a été trouvée au démarrage. Cliquer dessus "
         "propose d'installer la nouvelle version."
     ),
     "flag_row.whatsthis": (
@@ -3260,13 +3260,13 @@ ES = {
     "word_merge_search.status_done": "{matches} coincidencia(s) de {scanned} archivo(s) DOCX examinados.",
     "word_merge_search.status_done_with_errors": "{matches} coincidencia(s) de {scanned} archivo(s) DOCX examinados ({errors} ilegibles).",
     "word_merge_search.status_cancelled": "Cancelado: {matches} coincidencia(s) de {scanned} archivo(s) DOCX examinados.",
-    "bootstrap.window_title": "Configurar PDF-Translator",
+    "bootstrap.window_title": "Configurar Document Translator",
     "bootstrap.back_button": "Atrás",
     "bootstrap.next_button": "Siguiente",
     "bootstrap.cancel_button": "Cancelar",
     "bootstrap.cancel_title": "¿Cancelar la instalación?",
     "bootstrap.cancel_confirm": (
-        "El asistente de instalación se cerrará sin que PDF-Translator "
+        "El asistente de instalación se cerrará sin que Document Translator "
         "quede completamente configurado. Los archivos ya creados se "
         "eliminarán automáticamente. ¿Continuar?"
     ),
@@ -3276,9 +3276,9 @@ ES = {
         "archivo en uso justo en ese momento podría no eliminarse. "
         "¿Cancelar de todos modos?"
     ),
-    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Privilegios de administrador",
+    "bootstrap.elevated_warning_title": "Document Translator Setup - Privilegios de administrador",
     "bootstrap.elevated_warning_text": (
-        "PDF-Translator se inició como administrador.\n\n"
+        "Document Translator se inició como administrador.\n\n"
         "Esto no es necesario y hará que la aplicación deje de "
         "funcionar más adelante al iniciarla normalmente (sin derechos "
         "de administrador).\n\n"
@@ -3286,14 +3286,14 @@ ES = {
         "doble clic normal (sin \"Ejecutar como administrador\").\n\n"
         "Este mensaje se puede copiar con Ctrl+C."
     ),
-    "bootstrap.uninstall_title": "Desinstalar PDF-Translator",
+    "bootstrap.uninstall_title": "Desinstalar Document Translator",
     "bootstrap.uninstall_confirm": (
-        "¿Eliminar PDF-Translator, incluidos todos los ajustes y claves "
+        "¿Eliminar Document Translator, incluidos todos los ajustes y claves "
         "API guardados localmente?"
     ),
-    "bootstrap.uninstall_done": "PDF-Translator se ha eliminado.",
+    "bootstrap.uninstall_done": "Document Translator se ha eliminado.",
     "bootstrap.welcome_title": "Bienvenido",
-    "bootstrap.welcome_text": "Este asistente configura PDF-Translator en este equipo, sin necesidad de usar la línea de comandos. Descarga los componentes necesarios y, al final, crea una entrada en el menú de aplicaciones.",
+    "bootstrap.welcome_text": "Este asistente configura Document Translator en este equipo, sin necesidad de usar la línea de comandos. Descarga los componentes necesarios y, al final, crea una entrada en el menú de aplicaciones.",
     "bootstrap.language_label": "Idioma",
     "bootstrap.mode_title": "¿En línea o local?",
     "bootstrap.mode_intro": "¿Cómo debe funcionar la traducción? Esto se puede cambiar en cualquier momento más adelante, en Ajustes.",
@@ -3341,7 +3341,7 @@ ES = {
     "bootstrap.credentials_skip_all_button": "Más tarde, en Ajustes",
     "bootstrap.credentials_continue_button": "Siguiente",
     "bootstrap.finish_title": "Listo",
-    "bootstrap.finish_text": "PDF-Translator está configurado y disponible en el menú de aplicaciones.",
+    "bootstrap.finish_text": "Document Translator está configurado y disponible en el menú de aplicaciones.",
     "bootstrap.finish_download_size": "Descargado realmente: aprox. {size_gb:.1f} GB.",
     "bootstrap.finish_launch_button": "Iniciar ahora",
     "bootstrap.finish_close_button": "Cerrar",
@@ -3480,7 +3480,7 @@ ES = {
     "update_hint.tooltip": "Hay una nueva versión disponible",
     "update_hint.whatsthis": (
         "Aparece automáticamente cuando al iniciar se encuentra una "
-        "versión más reciente de PDF-Translator. Al hacer clic se ofrece "
+        "versión más reciente de Document Translator. Al hacer clic se ofrece "
         "instalar la nueva versión."
     ),
     "flag_row.whatsthis": (
@@ -3982,13 +3982,13 @@ IT = {
     "word_merge_search.status_done": "{matches} corrispondenza/e su {scanned} file DOCX analizzati.",
     "word_merge_search.status_done_with_errors": "{matches} corrispondenza/e su {scanned} file DOCX analizzati ({errors} illeggibili).",
     "word_merge_search.status_cancelled": "Annullato: {matches} corrispondenza/e su {scanned} file DOCX analizzati.",
-    "bootstrap.window_title": "Configura PDF-Translator",
+    "bootstrap.window_title": "Configura Document Translator",
     "bootstrap.back_button": "Indietro",
     "bootstrap.next_button": "Avanti",
     "bootstrap.cancel_button": "Annulla",
     "bootstrap.cancel_title": "Annullare l'installazione?",
     "bootstrap.cancel_confirm": (
-        "La procedura guidata si chiuderà senza che PDF-Translator sia "
+        "La procedura guidata si chiuderà senza che Document Translator sia "
         "completamente configurato. I file già creati verranno rimossi "
         "automaticamente. Continuare?"
     ),
@@ -3997,9 +3997,9 @@ IT = {
         "i file già creati - in rari casi un file ancora in uso in quel "
         "momento potrebbe non essere rimosso. Annullare comunque?"
     ),
-    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Diritti di amministratore",
+    "bootstrap.elevated_warning_title": "Document Translator Setup - Diritti di amministratore",
     "bootstrap.elevated_warning_text": (
-        "PDF-Translator è stato avviato come amministratore.\n\n"
+        "Document Translator è stato avviato come amministratore.\n\n"
         "Non è necessario e farà sì che l'app smetta di funzionare in "
         "seguito quando avviata normalmente (senza diritti di "
         "amministratore).\n\n"
@@ -4008,14 +4008,14 @@ IT = {
         "amministratore\").\n\n"
         "Questo messaggio può essere copiato con Ctrl+C."
     ),
-    "bootstrap.uninstall_title": "Disinstalla PDF-Translator",
+    "bootstrap.uninstall_title": "Disinstalla Document Translator",
     "bootstrap.uninstall_confirm": (
-        "Rimuovere PDF-Translator, comprese tutte le impostazioni e le "
+        "Rimuovere Document Translator, comprese tutte le impostazioni e le "
         "chiavi API salvate localmente?"
     ),
-    "bootstrap.uninstall_done": "PDF-Translator è stato rimosso.",
+    "bootstrap.uninstall_done": "Document Translator è stato rimosso.",
     "bootstrap.welcome_title": "Benvenuto",
-    "bootstrap.welcome_text": "Questa procedura guidata configura PDF-Translator su questo computer - senza bisogno della riga di comando. Scarica i componenti necessari e alla fine crea una voce nel menu delle applicazioni.",
+    "bootstrap.welcome_text": "Questa procedura guidata configura Document Translator su questo computer - senza bisogno della riga di comando. Scarica i componenti necessari e alla fine crea una voce nel menu delle applicazioni.",
     "bootstrap.language_label": "Lingua",
     "bootstrap.mode_title": "Online o locale?",
     "bootstrap.mode_intro": "Come deve funzionare la traduzione? È possibile modificarlo in qualsiasi momento in seguito, nelle Impostazioni.",
@@ -4063,7 +4063,7 @@ IT = {
     "bootstrap.credentials_skip_all_button": "Più tardi, nelle Impostazioni",
     "bootstrap.credentials_continue_button": "Avanti",
     "bootstrap.finish_title": "Completato",
-    "bootstrap.finish_text": "PDF-Translator è configurato ed è disponibile nel menu delle applicazioni.",
+    "bootstrap.finish_text": "Document Translator è configurato ed è disponibile nel menu delle applicazioni.",
     "bootstrap.finish_download_size": "Effettivamente scaricato: circa {size_gb:.1f} GB.",
     "bootstrap.finish_launch_button": "Avvia ora",
     "bootstrap.finish_close_button": "Chiudi",
@@ -4202,7 +4202,7 @@ IT = {
     "update_hint.tooltip": "È disponibile una nuova versione",
     "update_hint.whatsthis": (
         "Appare automaticamente quando all'avvio viene trovata una "
-        "versione più recente di PDF-Translator. Cliccandolo si propone "
+        "versione più recente di Document Translator. Cliccandolo si propone "
         "di installare la nuova versione."
     ),
     "flag_row.whatsthis": (
@@ -4702,13 +4702,13 @@ NL = {
     "word_merge_search.status_done": "{matches} treffer(s) van {scanned} doorzochte DOCX-bestand(en).",
     "word_merge_search.status_done_with_errors": "{matches} treffer(s) van {scanned} doorzochte DOCX-bestand(en) ({errors} onleesbaar).",
     "word_merge_search.status_cancelled": "Geannuleerd: {matches} treffer(s) van {scanned} doorzochte DOCX-bestand(en).",
-    "bootstrap.window_title": "PDF-Translator instellen",
+    "bootstrap.window_title": "Document Translator instellen",
     "bootstrap.back_button": "Terug",
     "bootstrap.next_button": "Volgende",
     "bootstrap.cancel_button": "Annuleren",
     "bootstrap.cancel_title": "Installatie annuleren?",
     "bootstrap.cancel_confirm": (
-        "De installatiewizard wordt gesloten zonder dat PDF-Translator "
+        "De installatiewizard wordt gesloten zonder dat Document Translator "
         "volledig is ingesteld. Reeds aangemaakte bestanden worden "
         "automatisch verwijderd. Doorgaan?"
     ),
@@ -4718,9 +4718,9 @@ NL = {
         "bestand dat op dat moment nog in gebruik is, achterblijven. "
         "Toch annuleren?"
     ),
-    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Beheerdersrechten",
+    "bootstrap.elevated_warning_title": "Document Translator Setup - Beheerdersrechten",
     "bootstrap.elevated_warning_text": (
-        "PDF-Translator is gestart als beheerder.\n\n"
+        "Document Translator is gestart als beheerder.\n\n"
         "Dat is niet nodig en zorgt ervoor dat de app later niet meer "
         "werkt bij een normale start (zonder beheerdersrechten).\n\n"
         "Sluit dit venster en start de installatie opnieuw met een "
@@ -4728,14 +4728,14 @@ NL = {
         "uitvoeren\").\n\n"
         "Dit bericht kan worden gekopieerd met Ctrl+C."
     ),
-    "bootstrap.uninstall_title": "PDF-Translator verwijderen",
+    "bootstrap.uninstall_title": "Document Translator verwijderen",
     "bootstrap.uninstall_confirm": (
-        "PDF-Translator verwijderen, inclusief alle lokaal opgeslagen "
+        "Document Translator verwijderen, inclusief alle lokaal opgeslagen "
         "instellingen en API-sleutels?"
     ),
-    "bootstrap.uninstall_done": "PDF-Translator is verwijderd.",
+    "bootstrap.uninstall_done": "Document Translator is verwijderd.",
     "bootstrap.welcome_title": "Welkom",
-    "bootstrap.welcome_text": "Deze wizard installeert PDF-Translator op deze computer - volledig zonder opdrachtregel. Hij downloadt de benodigde onderdelen en maakt aan het einde een item aan in het toepassingenmenu.",
+    "bootstrap.welcome_text": "Deze wizard installeert Document Translator op deze computer - volledig zonder opdrachtregel. Hij downloadt de benodigde onderdelen en maakt aan het einde een item aan in het toepassingenmenu.",
     "bootstrap.language_label": "Taal",
     "bootstrap.mode_title": "Online of lokaal?",
     "bootstrap.mode_intro": "Hoe moet er worden vertaald? U kunt dit later altijd wijzigen in Instellingen.",
@@ -4783,7 +4783,7 @@ NL = {
     "bootstrap.credentials_skip_all_button": "Later, in Instellingen",
     "bootstrap.credentials_continue_button": "Volgende",
     "bootstrap.finish_title": "Klaar",
-    "bootstrap.finish_text": "PDF-Translator is ingesteld en te vinden in het toepassingenmenu.",
+    "bootstrap.finish_text": "Document Translator is ingesteld en te vinden in het toepassingenmenu.",
     "bootstrap.finish_download_size": "Daadwerkelijk gedownload: ca. {size_gb:.1f} GB.",
     "bootstrap.finish_launch_button": "Nu starten",
     "bootstrap.finish_close_button": "Sluiten",
@@ -4922,7 +4922,7 @@ NL = {
     "update_hint.tooltip": "Er is een nieuwe versie beschikbaar",
     "update_hint.whatsthis": (
         "Verschijnt automatisch wanneer bij het opstarten een nieuwere "
-        "versie van PDF-Translator is gevonden. Erop klikken biedt aan "
+        "versie van Document Translator is gevonden. Erop klikken biedt aan "
         "de nieuwe versie te installeren."
     ),
     "flag_row.whatsthis": (
@@ -5423,13 +5423,13 @@ FI = {
     "word_merge_search.status_done": "{matches} osumaa {scanned} tutkitusta DOCX-tiedostosta.",
     "word_merge_search.status_done_with_errors": "{matches} osumaa {scanned} tutkitusta DOCX-tiedostosta ({errors} ei luettavissa).",
     "word_merge_search.status_cancelled": "Peruutettu: {matches} osumaa {scanned} tutkitusta DOCX-tiedostosta.",
-    "bootstrap.window_title": "Määritä PDF-Translator",
+    "bootstrap.window_title": "Määritä Document Translator",
     "bootstrap.back_button": "Takaisin",
     "bootstrap.next_button": "Seuraava",
     "bootstrap.cancel_button": "Peruuta",
     "bootstrap.cancel_title": "Peruutetaanko asennus?",
     "bootstrap.cancel_confirm": (
-        "Asennusohjattu toiminto suljetaan, vaikka PDF-Translatoria ei "
+        "Asennusohjattu toiminto suljetaan, vaikka Document Translatoria ei "
         "ole vielä otettu täysin käyttöön. Jo luodut tiedostot poistetaan "
         "automaattisesti. Jatketaanko?"
     ),
@@ -5439,9 +5439,9 @@ FI = {
         "juuri sillä hetkellä käytössä ollut tiedosto voi jäädä jäljelle. "
         "Peruutetaanko silti?"
     ),
-    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Järjestelmänvalvojan oikeudet",
+    "bootstrap.elevated_warning_title": "Document Translator Setup - Järjestelmänvalvojan oikeudet",
     "bootstrap.elevated_warning_text": (
-        "PDF-Translator käynnistettiin järjestelmänvalvojana.\n\n"
+        "Document Translator käynnistettiin järjestelmänvalvojana.\n\n"
         "Tämä ei ole tarpeen, ja se johtaa siihen, ettei sovellus enää "
         "toimi myöhemmin normaalisti käynnistettynä (ilman "
         "järjestelmänvalvojan oikeuksia).\n\n"
@@ -5450,14 +5450,14 @@ FI = {
         "järjestelmänvalvojana\").\n\n"
         "Tämän viestin voi kopioida painamalla Ctrl+C."
     ),
-    "bootstrap.uninstall_title": "Poista PDF-Translator",
+    "bootstrap.uninstall_title": "Poista Document Translator",
     "bootstrap.uninstall_confirm": (
-        "Poistetaanko PDF-Translator, mukaan lukien kaikki "
+        "Poistetaanko Document Translator, mukaan lukien kaikki "
         "paikallisesti tallennetut asetukset ja API-avaimet?"
     ),
-    "bootstrap.uninstall_done": "PDF-Translator on poistettu.",
+    "bootstrap.uninstall_done": "Document Translator on poistettu.",
     "bootstrap.welcome_title": "Tervetuloa",
-    "bootstrap.welcome_text": "Tämä ohjattu toiminto määrittää PDF-Translatorin tälle tietokoneelle - ilman komentoriviä. Se lataa tarvittavat komponentit ja lisää lopuksi merkinnän sovellusvalikkoon.",
+    "bootstrap.welcome_text": "Tämä ohjattu toiminto määrittää Document Translatorin tälle tietokoneelle - ilman komentoriviä. Se lataa tarvittavat komponentit ja lisää lopuksi merkinnän sovellusvalikkoon.",
     "bootstrap.language_label": "Kieli",
     "bootstrap.mode_title": "Verkossa vai paikallisesti?",
     "bootstrap.mode_intro": "Miten käännös tehdään? Tätä voi muuttaa myöhemmin milloin tahansa Asetuksista.",
@@ -5504,7 +5504,7 @@ FI = {
     "bootstrap.credentials_skip_all_button": "Myöhemmin, Asetuksista",
     "bootstrap.credentials_continue_button": "Seuraava",
     "bootstrap.finish_title": "Valmis",
-    "bootstrap.finish_text": "PDF-Translator on määritetty ja löytyy sovellusvalikosta.",
+    "bootstrap.finish_text": "Document Translator on määritetty ja löytyy sovellusvalikosta.",
     "bootstrap.finish_download_size": "Todellisuudessa ladattu: noin {size_gb:.1f} Gt.",
     "bootstrap.finish_launch_button": "Käynnistä nyt",
     "bootstrap.finish_close_button": "Sulje",
@@ -5637,7 +5637,7 @@ FI = {
     "update_hint.tooltip": "Uusi versio on saatavilla",
     "update_hint.whatsthis": (
         "Ilmestyy automaattisesti, kun käynnistyksen yhteydessä löytyy "
-        "uudempi PDF-Translator-versio. Klikkaaminen tarjoaa uuden "
+        "uudempi Document Translator -versio. Klikkaaminen tarjoaa uuden "
         "version asentamista."
     ),
     "flag_row.whatsthis": (
@@ -6135,13 +6135,13 @@ HR = {
     "word_merge_search.status_done": "{matches} podudaranja od {scanned} pretraženih DOCX datoteka.",
     "word_merge_search.status_done_with_errors": "{matches} podudaranja od {scanned} pretraženih DOCX datoteka ({errors} nečitljivo).",
     "word_merge_search.status_cancelled": "Otkazano: {matches} podudaranja od {scanned} pretraženih DOCX datoteka.",
-    "bootstrap.window_title": "Postavljanje PDF-Translatora",
+    "bootstrap.window_title": "Postavljanje Document Translatora",
     "bootstrap.back_button": "Natrag",
     "bootstrap.next_button": "Dalje",
     "bootstrap.cancel_button": "Odustani",
     "bootstrap.cancel_title": "Prekinuti instalaciju?",
     "bootstrap.cancel_confirm": (
-        "Čarobnjak za postavljanje zatvorit će se, a PDF-Translator "
+        "Čarobnjak za postavljanje zatvorit će se, a Document Translator "
         "neće biti u potpunosti postavljen. Već stvorene datoteke bit "
         "će automatski uklonjene. Nastaviti?"
     ),
@@ -6151,23 +6151,23 @@ HR = {
         "datoteka koja se u tom trenutku koristi može ostati. Ipak "
         "prekinuti?"
     ),
-    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Administratorska prava",
+    "bootstrap.elevated_warning_title": "Document Translator Setup - Administratorska prava",
     "bootstrap.elevated_warning_text": (
-        "PDF-Translator je pokrenut kao administrator.\n\n"
+        "Document Translator je pokrenut kao administrator.\n\n"
         "To nije potrebno i uzrokovat će da aplikacija kasnije ne radi "
         "kada se pokrene normalno (bez administratorskih prava).\n\n"
         "Zatvorite ovaj prozor i ponovno pokrenite instalaciju običnim "
         "dvoklikom (bez \"Pokreni kao administrator\").\n\n"
         "Ova se poruka može kopirati pomoću Ctrl+C."
     ),
-    "bootstrap.uninstall_title": "Deinstaliraj PDF-Translator",
+    "bootstrap.uninstall_title": "Deinstaliraj Document Translator",
     "bootstrap.uninstall_confirm": (
-        "Ukloniti PDF-Translator, uključujući sve lokalno pohranjene "
+        "Ukloniti Document Translator, uključujući sve lokalno pohranjene "
         "postavke i API ključeve?"
     ),
-    "bootstrap.uninstall_done": "PDF-Translator je uklonjen.",
+    "bootstrap.uninstall_done": "Document Translator je uklonjen.",
     "bootstrap.welcome_title": "Dobrodošli",
-    "bootstrap.welcome_text": "Ovaj čarobnjak postavlja PDF-Translator na ovo računalo - bez potrebe za naredbenim retkom. Preuzima potrebne komponente i na kraju stvara stavku u izborniku aplikacija.",
+    "bootstrap.welcome_text": "Ovaj čarobnjak postavlja Document Translator na ovo računalo - bez potrebe za naredbenim retkom. Preuzima potrebne komponente i na kraju stvara stavku u izborniku aplikacija.",
     "bootstrap.language_label": "Jezik",
     "bootstrap.mode_title": "Online ili lokalno?",
     "bootstrap.mode_intro": "Kako želite da prijevod radi? To kasnije uvijek možete promijeniti u postavkama.",
@@ -6215,7 +6215,7 @@ HR = {
     "bootstrap.credentials_skip_all_button": "Kasnije, u postavkama",
     "bootstrap.credentials_continue_button": "Dalje",
     "bootstrap.finish_title": "Gotovo",
-    "bootstrap.finish_text": "PDF-Translator je postavljen i dostupan je u izborniku aplikacija.",
+    "bootstrap.finish_text": "Document Translator je postavljen i dostupan je u izborniku aplikacija.",
     "bootstrap.finish_download_size": "Stvarno preuzeto: oko {size_gb:.1f} GB.",
     "bootstrap.finish_launch_button": "Pokreni sada",
     "bootstrap.finish_close_button": "Zatvori",
@@ -6348,7 +6348,7 @@ HR = {
     "update_hint.tooltip": "Dostupna je nova verzija",
     "update_hint.whatsthis": (
         "Prikazuje se automatski kada se pri pokretanju pronađe novija "
-        "verzija PDF-Translatora. Klik nudi instalaciju nove verzije."
+        "verzija Document Translatora. Klik nudi instalaciju nove verzije."
     ),
     "flag_row.whatsthis": (
         "Odmah i trajno mijenja jezik samog sučelja - ne jezike "
@@ -6844,13 +6844,13 @@ RU = {
     "word_merge_search.status_done": "Найдено совпадений: {matches} из {scanned} проверенных файл(ов) DOCX.",
     "word_merge_search.status_done_with_errors": "Найдено совпадений: {matches} из {scanned} проверенных файл(ов) DOCX ({errors} не удалось прочитать).",
     "word_merge_search.status_cancelled": "Отменено: найдено совпадений {matches} из {scanned} проверенных файл(ов) DOCX.",
-    "bootstrap.window_title": "Настройка PDF-Translator",
+    "bootstrap.window_title": "Настройка Document Translator",
     "bootstrap.back_button": "Назад",
     "bootstrap.next_button": "Далее",
     "bootstrap.cancel_button": "Отмена",
     "bootstrap.cancel_title": "Прервать установку?",
     "bootstrap.cancel_confirm": (
-        "Мастер установки закроется, а PDF-Translator не будет "
+        "Мастер установки закроется, а Document Translator не будет "
         "полностью настроен. Уже созданные файлы будут удалены "
         "автоматически. Продолжить?"
     ),
@@ -6860,9 +6860,9 @@ RU = {
         "используемый именно в этот момент, может остаться. Всё равно "
         "прервать?"
     ),
-    "bootstrap.elevated_warning_title": "PDF-Translator Setup - Права администратора",
+    "bootstrap.elevated_warning_title": "Document Translator Setup - Права администратора",
     "bootstrap.elevated_warning_text": (
-        "PDF-Translator был запущен от имени администратора.\n\n"
+        "Document Translator был запущен от имени администратора.\n\n"
         "Это не требуется и приведёт к тому, что приложение позже "
         "перестанет запускаться в обычном режиме (без прав "
         "администратора).\n\n"
@@ -6871,14 +6871,14 @@ RU = {
         "администратора\").\n\n"
         "Это сообщение можно скопировать с помощью Ctrl+C."
     ),
-    "bootstrap.uninstall_title": "Удалить PDF-Translator",
+    "bootstrap.uninstall_title": "Удалить Document Translator",
     "bootstrap.uninstall_confirm": (
-        "Удалить PDF-Translator, включая все локально сохранённые "
+        "Удалить Document Translator, включая все локально сохранённые "
         "настройки и ключи API?"
     ),
-    "bootstrap.uninstall_done": "PDF-Translator удалён.",
+    "bootstrap.uninstall_done": "Document Translator удалён.",
     "bootstrap.welcome_title": "Добро пожаловать",
-    "bootstrap.welcome_text": "Этот мастер настроит PDF-Translator на этом компьютере — полностью без командной строки. Он загрузит необходимые компоненты и в конце добавит запись в меню приложений.",
+    "bootstrap.welcome_text": "Этот мастер настроит Document Translator на этом компьютере — полностью без командной строки. Он загрузит необходимые компоненты и в конце добавит запись в меню приложений.",
     "bootstrap.language_label": "Язык",
     "bootstrap.mode_title": "Онлайн или локально?",
     "bootstrap.mode_intro": "Как должен выполняться перевод? Это можно в любой момент изменить позже в настройках.",
@@ -6926,7 +6926,7 @@ RU = {
     "bootstrap.credentials_skip_all_button": "Позже, в настройках",
     "bootstrap.credentials_continue_button": "Далее",
     "bootstrap.finish_title": "Готово",
-    "bootstrap.finish_text": "PDF-Translator настроен и доступен в меню приложений.",
+    "bootstrap.finish_text": "Document Translator настроен и доступен в меню приложений.",
     "bootstrap.finish_download_size": "Фактически загружено: около {size_gb:.1f} ГБ.",
     "bootstrap.finish_launch_button": "Запустить сейчас",
     "bootstrap.finish_close_button": "Закрыть",
@@ -7066,7 +7066,7 @@ RU = {
     "update_hint.tooltip": "Доступна новая версия",
     "update_hint.whatsthis": (
         "Появляется автоматически, если при запуске найдена более новая "
-        "версия PDF-Translator. Нажатие предлагает установить новую "
+        "версия Document Translator. Нажатие предлагает установить новую "
         "версию."
     ),
     "flag_row.whatsthis": (

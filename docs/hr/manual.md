@@ -1,14 +1,14 @@
 ---
-title: "PDF-Translator – Korisnički priručnik"
+title: "Document Translator – Korisnički priručnik"
 lang: hr
 header-includes:
   - \usepackage{float}
   - \floatplacement{figure}{H}
 ---
 
-# PDF-Translator – Korisnički priručnik
+# Document Translator – Korisnički priručnik
 
-Ovaj priručnik opisuje sve kontrole programa PDF-Translator: čarobnjak za
+Ovaj priručnik opisuje sve kontrole programa Document Translator: čarobnjak za
 postavljanje (instalacijski program) i samu aplikaciju. Temelji se na istim
 tekstovima pomoći koje aplikacija prikazuje izravno (opis alata pri prelasku
 mišem te detaljniji tekst putem Pomoć → Što je ovo? ili Shift+F1 i zatim
@@ -19,9 +19,6 @@ U aplikaciji se ovaj priručnik može u svakom trenutku otvoriti putem
 **Pomoć → Korisnički priručnik …** – automatski na jeziku sučelja koji je
 trenutačno odabran. Napomene koje se pojavljuju izravno ispod nekog polja
 (npr. „PaddleOCR nije instaliran”) također vode ovamo.
-
-*Napomena: snimke zaslona prikazuju sučelje na njemačkom jeziku. U tekstu su
-nazivi polja navedeni točno onako kako se pojavljuju u hrvatskom sučelju.*
 
 ## Sadržaj
 
@@ -44,11 +41,11 @@ nazivi polja navedeni točno onako kako se pojavljuju u hrvatskom sučelju.*
 
 ## 1. Čarobnjak za postavljanje (instalacija)
 
-Čarobnjak za postavljanje jednokratno instalira PDF-Translator na ovo
+Čarobnjak za postavljanje jednokratno instalira Document Translator na ovo
 računalo. Ne zahtijeva administratorska/root prava jer se sve instalira u
 osobnu mapu korisnika.
 
-![Početni zaslon čarobnjaka za postavljanje](../screenshots/01_sprache.png)
+![Početni zaslon čarobnjaka za postavljanje](../screenshots/hr/01_sprache.png)
 
 **Jezik.** Jezik odabran na prvom zaslonu odmah vrijedi za sve daljnje
 zaslone čarobnjaka. Neovisan je o jeziku same aplikacije, koja ima vlastiti
@@ -74,7 +71,7 @@ odabir jezika (vidi poglavlje 12).
   prevedeni dokumenti sadrže fotografije ili druge složene pozadine; inače
   nije nužno potrebna.
 
-![„Online ili lokalno?” – zaslon za odabir](../screenshots/02_online_lokal.png)
+![„Online ili lokalno?” – zaslon za odabir](../screenshots/hr/02_online_lokal.png)
 
 Ako provjera GPU-a ne uspije (nije pronađena podržana kartica ili je
 upravljački program zastario), čarobnjak nudi dvije mogućnosti: **„Ipak
@@ -95,9 +92,9 @@ gumb **„Spremi”** stvarno pohranjuje unos. Čarobnjak se može dovršiti i b
 ključa; međutim, dok se ne pohrani barem jedan ključ, nijedan prijevod neće
 raditi.
 
-![Odabir pružatelja za API ključeve](../screenshots/03_api_schluessel_auswahl.png)
+![Odabir pružatelja za API ključeve](../screenshots/hr/03_api_schluessel_auswahl.png)
 
-![Unos API ključa za pružatelja](../screenshots/04_api_schluessel_eingabe.png)
+![Unos API ključa za pružatelja](../screenshots/hr/04_api_schluessel_eingabe.png)
 
 *Sigurnosna napomena pri otvaranju preglednika:* prije nego što čarobnjak
 otvori poveznicu u zadanom pregledniku, ciljna adresa još se jednom prikazuje
@@ -120,12 +117,12 @@ povezati s pokretanjem aplikacije.
 
 ## 2. Pregled aplikacije
 
-Nakon instalacije otvara se sama aplikacija PDF-Translator s obrascem za
+Nakon instalacije otvara se sama aplikacija Document Translator s obrascem za
 pokretanje prijevoda. Sljedeća poglavlja prolaze kroz rukovanje odozgo prema
 dolje, onim redoslijedom kojim je raspoređeno u prozoru. Trenutačni broj
 verzije nalazi se u naslovnoj traci prozora.
 
-![Glavni prozor u načinu „Prevedi PDF”](../screenshots/app_01_hauptfenster.png)
+![Glavni prozor u načinu „Prevedi PDF”](../screenshots/hr/app_01_hauptfenster.png)
 
 ---
 
@@ -202,7 +199,7 @@ dva polja, **„OCR alat”** i **„Metoda prepisivanja”**, prikazana na snim
 zaslona ispod sa svojim zadanim vrijednostima (Tesseract i preklapanje
 okvirom) – oba se zatim zasebno objašnjavaju:
 
-![Polja „OCR alat” i „Metoda prepisivanja” u načinu „Prevedi pojedinačne slike”, ovdje sa zadanim vrijednostima Tesseract i preklapanje okvirom](../screenshots/app_02_bilder_modus.png)
+![Polja „OCR alat” i „Metoda prepisivanja” u načinu „Prevedi pojedinačne slike”, ovdje sa zadanim vrijednostima Tesseract i preklapanje okvirom](../screenshots/hr/app_02_bilder_modus.png)
 
 **Polje „OCR alat” – prepoznavanje teksta.** Prepoznaje tekst na slikama
 prije nego što se prevede i ponovno upiše. Na raspolaganju su tri alata
@@ -211,7 +208,7 @@ prije nego što se prevede i ponovno upiše. Na raspolaganju su tri alata
 - **Tesseract (lokalno)** (zadano). Radi potpuno lokalno, bez cloud
   pružatelja i bez vlastitog API ključa – ali zahtijeva da je sam softver
   Tesseract instaliran na ovom računalu (vidi README.md). Prepoznaje tekst
-  redak po redak; PDF-Translator zatim sam grupira retke u odlomke.
+  redak po redak; Document Translator zatim sam grupira retke u odlomke.
 - **Google Cloud Vision (cloud, prepoznavanje odlomaka)**. Radi putem
   Googleove cloud usluge i koristi isti API ključ kao pružatelj prijevoda
   „Google” (poglavlja 3/11) – odlomke prepoznaje izravno kao takve umjesto da
@@ -394,7 +391,7 @@ Ovisno o vrsti dokumenta otvara se jedan od dva dijaloga različite složenosti:
   veličina na slici. Ako je u jednom pokretanju prevedeno više datoteka
   odjednom, aplikacija najprije pita koju od datoteka treba ispraviti.
 
-![Dijalog za ispravak slike s tablicom original/prijevod, uređivačem i pregledom slike](../screenshots/app_05_bildkorrektur.png)
+![Dijalog za ispravak slike s tablicom original/prijevod, uređivačem i pregledom slike](../screenshots/hr/app_05_bildkorrektur.png)
 
 Dijalog za ispravak slike lijevo prikazuje sliku s obojenim okvirom za svaki
 prepoznati dio teksta, a desno tablicu s izvornim i prevedenim tekstom.
@@ -540,7 +537,7 @@ pretraženih datoteka; nečitljive datoteke navode se zasebno.
 
 Gumbom **„Postavke …”** dostupno je sljedeće:
 
-![Dijalog postavki](../screenshots/app_03_einstellungen.png)
+![Dijalog postavki](../screenshots/hr/app_03_einstellungen.png)
 
 **Pristup API-ju.** Najprije se u polju **„Pružatelj usluge”** (DeepL,
 Google, OpenAI, Grok) odabire na kojeg se pružatelja odnose stanje, novi
@@ -595,13 +592,13 @@ ista provjera koju je obavio i instalacijski program – korisno nakon
 ažuriranja upravljačkog programa ili zamjene grafičke kartice, bez ponovne
 instalacije aplikacije.
 
-![Dijalog testa hardvera](../screenshots/app_04_hardware_test.png)
+![Dijalog testa hardvera](../screenshots/hr/app_04_hardware_test.png)
 
 ---
 
 ## 14. Nadogradnje i podaci o verziji
 
-Ako se pri pokretanju pronađe novija verzija programa PDF-Translator,
+Ako se pri pokretanju pronađe novija verzija programa Document Translator,
 automatski se pojavljuje napomena („Dostupna nadogradnja: …”). Klikom na nju
 nudi se instalacija nove verzije. Putem **Pomoć → Provjeri nadogradnje …**
 provjera se može u bilo kojem trenutku pokrenuti i ručno.

@@ -1,14 +1,14 @@
 ---
-title: "PDF-Translator – Gebruikershandleiding"
+title: "Document Translator – Gebruikershandleiding"
 lang: nl
 header-includes:
   - \usepackage{float}
   - \floatplacement{figure}{H}
 ---
 
-# PDF-Translator – Gebruikershandleiding
+# Document Translator – Gebruikershandleiding
 
-Deze handleiding beschrijft alle bedieningselementen van PDF-Translator: de
+Deze handleiding beschrijft alle bedieningselementen van Document Translator: de
 installatiewizard (installer) en de eigenlijke app. Ze is gebaseerd op
 dezelfde helpteksten die de applicatie zelf toont (tooltip bij het aanwijzen
 met de muis, uitgebreide tekst via Help → Wat is dit? of Shift+F1 en
@@ -20,9 +20,6 @@ In de app kan deze handleiding op elk moment worden geopend via
 gebruikersinterface die op dat moment is ingesteld. Meldingen die direct
 onder een veld verschijnen (bijv. „PaddleOCR is niet geïnstalleerd”) linken
 eveneens hiernaartoe.
-
-*Opmerking: de schermafbeeldingen tonen de Duitse interface. In de tekst
-worden de veldnamen precies zo genoemd als in de Nederlandse interface.*
 
 ## Inhoud
 
@@ -45,11 +42,11 @@ worden de veldnamen precies zo genoemd als in de Nederlandse interface.*
 
 ## 1. Installatiewizard (installatie)
 
-De installatiewizard installeert PDF-Translator eenmalig op deze computer.
+De installatiewizard installeert Document Translator eenmalig op deze computer.
 Er zijn geen beheerders-/rootrechten nodig, omdat alles in een persoonlijke
 map van de gebruiker wordt geïnstalleerd.
 
-![Startscherm van de installatiewizard](../screenshots/01_sprache.png)
+![Startscherm van de installatiewizard](../screenshots/nl/01_sprache.png)
 
 **Taal.** De taal die op het eerste scherm wordt gekozen, geldt direct voor
 alle volgende schermen van de wizard. Ze staat los van de taal van de app
@@ -77,7 +74,7 @@ worden bewerkt:
   betere beeldkwaliteit wanneer vertaalde documenten foto's of andere
   complexe achtergronden bevatten; anders niet per se nodig.
 
-![„Online of lokaal?” – keuzescherm](../screenshots/02_online_lokal.png)
+![„Online of lokaal?” – keuzescherm](../screenshots/nl/02_online_lokal.png)
 
 Valt de GPU-controle negatief uit (geen ondersteunde kaart gevonden of
 verouderd stuurprogramma), dan biedt de wizard twee mogelijkheden: **„Toch
@@ -98,9 +95,9 @@ hier wordt geplakt. Pas de knop **„Opslaan”** neemt de invoer echt over. De
 wizard kan ook zonder sleutel worden afgerond; zonder ten minste één
 opgeslagen sleutel werkt daarna echter nog geen enkele vertaling.
 
-![Providers voor API-sleutels kiezen](../screenshots/03_api_schluessel_auswahl.png)
+![Providers voor API-sleutels kiezen](../screenshots/nl/03_api_schluessel_auswahl.png)
 
-![API-sleutel voor een provider invoeren](../screenshots/04_api_schluessel_eingabe.png)
+![API-sleutel voor een provider invoeren](../screenshots/nl/04_api_schluessel_eingabe.png)
 
 *Veiligheidsopmerking bij het openen van de browser:* voordat de wizard een
 link in de standaardbrowser opent, wordt het doeladres nog een keer in
@@ -124,12 +121,12 @@ met het starten van de app.
 
 ## 2. De app in één oogopslag
 
-Na de installatie opent de eigenlijke PDF-Translator-app met een formulier
+Na de installatie opent de eigenlijke Document Translator-app met een formulier
 voor de vertaaltaak. De volgende hoofdstukken lopen de bediening van boven
 naar beneden door, in de volgorde waarin ze in het venster is opgebouwd. Het
 huidige versienummer staat in de titelbalk van het venster.
 
-![Hoofdvenster in de modus „PDF vertalen”](../screenshots/app_01_hauptfenster.png)
+![Hoofdvenster in de modus „PDF vertalen”](../screenshots/nl/app_01_hauptfenster.png)
 
 ---
 
@@ -212,7 +209,7 @@ zijn twee extra velden, **„OCR-engine”** en **„Terugschrijfmethode”**, o
 schermafbeelding hieronder te zien met hun standaardwaarden (Tesseract en
 vak-overlay) – beide worden hierna afzonderlijk toegelicht:
 
-![De velden „OCR-engine” en „Terugschrijfmethode” in de modus „Losse afbeeldingen vertalen”, hier met hun standaardwaarden Tesseract en vak-overlay](../screenshots/app_02_bilder_modus.png)
+![De velden „OCR-engine” en „Terugschrijfmethode” in de modus „Losse afbeeldingen vertalen”, hier met hun standaardwaarden Tesseract en vak-overlay](../screenshots/nl/app_02_bilder_modus.png)
 
 **Veld „OCR-engine” – tekstherkenning.** Herkent tekst in de afbeeldingen
 voordat die wordt vertaald en teruggeschreven. Er zijn drie engines
@@ -221,7 +218,7 @@ beschikbaar (de schermafbeelding hierboven toont de eerste):
 - **Tesseract (lokaal)** (standaard). Draait volledig lokaal, zonder
   cloudprovider of eigen API-sleutel – maar heeft daarvoor de
   Tesseract-software zelf nodig op deze computer (zie README.md). Herkent
-  tekst regel voor regel; PDF-Translator groepeert de regels daarna zelf tot
+  tekst regel voor regel; Document Translator groepeert de regels daarna zelf tot
   alinea's.
 - **Google Cloud Vision (cloud, alineaherkenning)**. Draait via de clouddienst
   van Google en gebruikt dezelfde API-sleutel als de vertaalprovider
@@ -411,7 +408,7 @@ verschillende omvang:
   in een afbeeldingstaak meerdere bestanden tegelijk vertaald, dan vraagt de
   app eerst welk bestand moet worden gecorrigeerd.
 
-![Dialoogvenster voor afbeeldingscorrectie met tabel origineel/vertaling, editor en afbeeldingsvoorbeeld](../screenshots/app_05_bildkorrektur.png)
+![Dialoogvenster voor afbeeldingscorrectie met tabel origineel/vertaling, editor en afbeeldingsvoorbeeld](../screenshots/nl/app_05_bildkorrektur.png)
 
 Het correctievenster voor afbeeldingen toont links de afbeelding met een
 gekleurd vak per herkende tekstpassage, rechts een tabel met originele en
@@ -561,7 +558,7 @@ doorzochte bestanden; onleesbare bestanden worden apart vermeld.
 
 Via de knop **„Instellingen …”** zijn bereikbaar:
 
-![Dialoogvenster Instellingen](../screenshots/app_03_einstellungen.png)
+![Dialoogvenster Instellingen](../screenshots/nl/app_03_einstellungen.png)
 
 **API-toegang.** Eerst wordt in het veld **„Provider”** gekozen (DeepL,
 Google, OpenAI, Grok) voor welke provider status, nieuwe sleutel en
@@ -620,13 +617,13 @@ worden herhaald die ook de installer heeft uitgevoerd – zinvol na een update
 van het stuurprogramma of een wissel van grafische kaart, zonder de app
 opnieuw te hoeven installeren.
 
-![Dialoogvenster Hardwaretest](../screenshots/app_04_hardware_test.png)
+![Dialoogvenster Hardwaretest](../screenshots/nl/app_04_hardware_test.png)
 
 ---
 
 ## 14. Updates en versie-informatie
 
-Wordt bij het starten een nieuwere versie van PDF-Translator gevonden, dan
+Wordt bij het starten een nieuwere versie van Document Translator gevonden, dan
 verschijnt automatisch een melding („Update beschikbaar: …”). Erop klikken
 biedt de installatie van de nieuwe versie aan. Via **Help → Controleren op
 updates …** kan de controle ook op elk moment handmatig worden gestart.

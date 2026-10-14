@@ -1,14 +1,14 @@
 ---
-title: "PDF-Translator – Benutzerhandbuch"
+title: "Document Translator – Benutzerhandbuch"
 lang: de
 header-includes:
   - \usepackage{float}
   - \floatplacement{figure}{H}
 ---
 
-# PDF-Translator – Benutzerhandbuch
+# Document Translator – Benutzerhandbuch
 
-Dieses Handbuch beschreibt alle Bedienelemente von PDF-Translator: den
+Dieses Handbuch beschreibt alle Bedienelemente von Document Translator: den
 Einrichtungsassistenten (Installer) und die eigentliche App. Es basiert auf
 denselben Hilfetexten, die auch direkt in der Anwendung angezeigt werden
 (Tooltip beim Überfahren mit der Maus, ausführlicher Text über
@@ -43,11 +43,11 @@ ebenfalls hierher.
 
 ## 1. Einrichtungsassistent (Installation)
 
-Der Einrichtungsassistent richtet PDF-Translator einmalig auf diesem Rechner
+Der Einrichtungsassistent richtet Document Translator einmalig auf diesem Rechner
 ein. Er benötigt keine Administrator-/Root-Rechte, da alles in einem
 persönlichen, benutzereigenen Ordner installiert wird.
 
-![Startbildschirm des Einrichtungsassistenten](../screenshots/01_sprache.png)
+![Startbildschirm des Einrichtungsassistenten](../screenshots/de/01_sprache.png)
 
 **Sprache.** Die Sprachauswahl auf dem ersten Bildschirm wirkt sofort auf alle
 weiteren Bildschirme des Assistenten. Sie ist unabhängig von der Sprache der
@@ -76,7 +76,7 @@ werden:
   Bildqualität, wenn übersetzte Dokumente Fotos oder andere komplexe
   Hintergründe enthalten, sonst nicht zwingend nötig.
 
-![„Online oder lokal?“ – Auswahlbildschirm](../screenshots/02_online_lokal.png)
+![„Online oder lokal?“ – Auswahlbildschirm](../screenshots/de/02_online_lokal.png)
 
 Fällt die GPU-Prüfung negativ aus (keine unterstützte Karte gefunden oder
 Treiber veraltet), bietet der Assistent zwei Wege an: **„Trotzdem lokal
@@ -98,9 +98,9 @@ der Schlüssel erzeugt, der anschließend hier eingefügt wird. Erst der Button
 der Assistent ebenfalls abschließen; ohne mindestens einen hinterlegten
 Schlüssel funktioniert danach allerdings noch keine Übersetzung.
 
-![Anbieter für API-Schlüssel auswählen](../screenshots/03_api_schluessel_auswahl.png)
+![Anbieter für API-Schlüssel auswählen](../screenshots/de/03_api_schluessel_auswahl.png)
 
-![API-Schlüssel für einen Anbieter eingeben](../screenshots/04_api_schluessel_eingabe.png)
+![API-Schlüssel für einen Anbieter eingeben](../screenshots/de/04_api_schluessel_eingabe.png)
 
 *Sicherheitshinweis beim Öffnen des Browsers:* Bevor der Assistent einen Link
 im Standardbrowser öffnet, wird die Ziel-Adresse noch einmal im Klartext
@@ -124,12 +124,12 @@ starten“** direkt mit dem Start der App kombinieren.
 
 ## 2. Die App im Überblick
 
-Nach der Installation öffnet sich die eigentliche PDF-Translator-App mit einem
+Nach der Installation öffnet sich die eigentliche Document-Translator-App mit einem
 Formular für den Übersetzungslauf. Die folgenden Kapitel gehen die Bedienung
 von oben nach unten durch, so wie sie im Fenster angeordnet ist. Die
 aktuelle Versionsnummer steht in der Titelleiste des Fensters.
 
-![Hauptfenster im Modus „PDF übersetzen“](../screenshots/app_01_hauptfenster.png)
+![Hauptfenster im Modus „PDF übersetzen“](../screenshots/de/app_01_hauptfenster.png)
 
 ---
 
@@ -214,7 +214,7 @@ zusätzlich zwei weitere Felder, **„OCR-Engine“** und
 (Tesseract bzw. Box-Overlay) zu sehen – beide werden im Anschluss einzeln
 erklärt:
 
-![Die Felder „OCR-Engine“ und „Rückschreibe-Methode“ im Modus „Einzelne Bilder übersetzen“, hier mit ihren Vorgabewerten Tesseract und Box-Overlay](../screenshots/app_02_bilder_modus.png)
+![Die Felder „OCR-Engine“ und „Rückschreibe-Methode“ im Modus „Einzelne Bilder übersetzen“, hier mit ihren Vorgabewerten Tesseract und Box-Overlay](../screenshots/de/app_02_bilder_modus.png)
 
 **Feld „OCR-Engine“ – Texterkennung.** Erkennt Text in den Bildern, bevor er
 übersetzt und zurückgeschrieben wird. Drei Engines stehen zur Auswahl (im
@@ -223,7 +223,7 @@ Screenshot oben steht gerade die erste):
 - **Tesseract (lokal)** (Vorgabe). Läuft komplett lokal, ohne
   Cloud-Anbieter oder eigenen API-Schlüssel – braucht dafür die
   Tesseract-Software selbst installiert auf diesem Rechner (siehe
-  README.md). Erkennt Text zeilenweise; PDF-Translator gruppiert die Zeilen
+  README.md). Erkennt Text zeilenweise; Document Translator gruppiert die Zeilen
   danach selbst zu Absätzen.
 - **Google Cloud Vision (Cloud, Absatzerkennung)**. Läuft über Googles
   Cloud-Dienst und nutzt denselben API-Schlüssel wie der
@@ -417,7 +417,7 @@ aufwendigen Dialogen:
   Bilder-Lauf mehrere Dateien auf einmal übersetzt, fragt die App zunächst,
   welche der Dateien korrigiert werden soll.
 
-![Bildkorrektur-Dialog mit Original-/Übersetzungs-Tabelle, Editor und Bild-Vorschau](../screenshots/app_05_bildkorrektur.png)
+![Bildkorrektur-Dialog mit Original-/Übersetzungs-Tabelle, Editor und Bild-Vorschau](../screenshots/de/app_05_bildkorrektur.png)
 
 Der Bildkorrektur-Dialog zeigt links das Bild mit einer farbigen Box je
 erkannter Textstelle, rechts eine Tabelle mit Original- und Übersetzungstext.
@@ -572,7 +572,7 @@ ausgewiesen.
 
 Über den Button **„Einstellungen …“** erreichbar sind:
 
-![Einstellungen-Dialog](../screenshots/app_03_einstellungen.png)
+![Einstellungen-Dialog](../screenshots/de/app_03_einstellungen.png)
 
 **API-Zugang.** Zunächst wird im Feld **„Anbieter“** gewählt (DeepL, Google,
 OpenAI, Grok), für welchen Anbieter Status, neuer Schlüssel und Speicherort
@@ -629,13 +629,13 @@ funktioniert lokales Inpainting trotzdem – nur langsamer, auf der CPU. Über
 Installer durchgeführt hat – sinnvoll nach einem Treiber-Update oder
 Grafikkarten-Wechsel, ohne die App neu installieren zu müssen.
 
-![Hardware-Test-Dialog](../screenshots/app_04_hardware_test.png)
+![Hardware-Test-Dialog](../screenshots/de/app_04_hardware_test.png)
 
 ---
 
 ## 14. Updates und Versionsinfo
 
-Wird beim Start eine neuere Version von PDF-Translator gefunden, erscheint
+Wird beim Start eine neuere Version von Document Translator gefunden, erscheint
 automatisch ein Hinweis („Update verfügbar: …“). Anklicken bietet die
 Installation der neuen Version an. Über **Hilfe → Nach Updates suchen …**
 lässt sich die Prüfung auch jederzeit von Hand anstoßen.

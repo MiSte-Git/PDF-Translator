@@ -44,6 +44,15 @@ _WINDOW_SIZE = "500x440"
 # 30% less area).
 _TEXT_WRAP = 440
 
+# 14.10.2026 (found while generating the manual screenshots in all 9
+# languages): the two option descriptions on the "Online oder lokal?"
+# screen are indented by _OPTION_INDENT under their radio button, but used
+# the full _TEXT_WRAP - indent plus the always-visible scrollbar left only
+# about 425 px, so every line was cut off at the right edge (in every
+# language, the German screenshot from 07.09.2026 shows it too).
+_OPTION_INDENT = 24
+_INDENTED_TEXT_WRAP = _TEXT_WRAP - _OPTION_INDENT - 8
+
 # bootstrap.finish_* only - see _show_finish(): far less content than
 # every other screen (one line of text, two buttons, no Abbrechen -
 # _show_finish() never calls self._cancel_button()), so the shared
@@ -465,8 +474,8 @@ class BootstrapApp(tk.Tk):
             )
             online_radio.pack(anchor="w")
             _tip(online_radio, self.controller.text("bootstrap.help.mode_online_radio"))
-            ttk.Label(online_frame, text=self.controller.text("bootstrap.mode_online_desc"), wraplength=_TEXT_WRAP, justify="left").pack(
-                anchor="w", padx=(24, 0)
+            ttk.Label(online_frame, text=self.controller.text("bootstrap.mode_online_desc"), wraplength=_INDENTED_TEXT_WRAP, justify="left").pack(
+                anchor="w", padx=(_OPTION_INDENT, 0)
             )
 
             local_frame = ttk.Frame(frame)
@@ -481,8 +490,8 @@ class BootstrapApp(tk.Tk):
             local_radio.pack(anchor="w")
             _tip(local_radio, self.controller.text("bootstrap.help.mode_local_radio"))
             local_desc_key = "bootstrap.gpu_mac_unsupported" if is_mac else "bootstrap.mode_local_desc"
-            ttk.Label(local_frame, text=self.controller.text(local_desc_key), wraplength=_TEXT_WRAP, justify="left").pack(
-                anchor="w", padx=(24, 0)
+            ttk.Label(local_frame, text=self.controller.text(local_desc_key), wraplength=_INDENTED_TEXT_WRAP, justify="left").pack(
+                anchor="w", padx=(_OPTION_INDENT, 0)
             )
 
             def on_next() -> None:

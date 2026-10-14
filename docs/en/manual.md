@@ -1,14 +1,14 @@
 ---
-title: "PDF-Translator – User Manual"
+title: "Document Translator – User Manual"
 lang: en
 header-includes:
   - \usepackage{float}
   - \floatplacement{figure}{H}
 ---
 
-# PDF-Translator – User Manual
+# Document Translator – User Manual
 
-This manual describes every control in PDF-Translator: the setup wizard
+This manual describes every control in Document Translator: the setup wizard
 (installer) and the app itself. It is based on the same help texts that the
 application shows directly (a tooltip when hovering with the mouse, and a
 longer text via Help → What's This? or Shift+F1 followed by a click on an
@@ -19,9 +19,6 @@ Inside the app, this manual can be opened at any time via
 **Help → User manual …** – automatically in the interface language currently
 selected. Notices that appear directly below a field (e.g. "PaddleOCR is not
 installed") also link here.
-
-*Note: the screenshots show the German interface. Field names are given in
-the text exactly as they appear in the English interface.*
 
 ## Contents
 
@@ -44,11 +41,11 @@ the text exactly as they appear in the English interface.*
 
 ## 1. Setup wizard (installation)
 
-The setup wizard installs PDF-Translator once on this computer. It does not
+The setup wizard installs Document Translator once on this computer. It does not
 need administrator/root rights, because everything is installed into a
 personal folder owned by the user.
 
-![Start screen of the setup wizard](../screenshots/01_sprache.png)
+![Start screen of the setup wizard](../screenshots/en/01_sprache.png)
 
 **Language.** The language chosen on the first screen applies immediately to
 all further screens of the wizard. It is independent of the language of the
@@ -74,7 +71,7 @@ app itself, which has its own language selection (see chapter 12).
   image quality when translated documents contain photos or other complex
   backgrounds; otherwise it is not strictly needed.
 
-![“Online or local?” – selection screen](../screenshots/02_online_lokal.png)
+![“Online or local?” – selection screen](../screenshots/en/02_online_lokal.png)
 
 If the GPU check fails (no supported card found or driver outdated), the
 wizard offers two options: **"Continue with local anyway"** (useful if the
@@ -93,9 +90,9 @@ created and then pasted here. Only the **"Save"** button actually stores the
 input. The wizard can also be completed without a key; however, no
 translation will work until at least one key has been stored.
 
-![Choosing providers for API keys](../screenshots/03_api_schluessel_auswahl.png)
+![Choosing providers for API keys](../screenshots/en/03_api_schluessel_auswahl.png)
 
-![Entering the API key for a provider](../screenshots/04_api_schluessel_eingabe.png)
+![Entering the API key for a provider](../screenshots/en/04_api_schluessel_eingabe.png)
 
 *Security note when opening the browser:* Before the wizard opens a link in
 the default browser, the target address is shown once more in plain text and
@@ -118,12 +115,12 @@ without starting the app, or combined directly with starting the app via
 
 ## 2. The app at a glance
 
-After installation, the PDF-Translator app opens with a form for the
+After installation, the Document Translator app opens with a form for the
 translation run. The following chapters go through it from top to bottom, in
 the order in which it is laid out in the window. The current version number
 is shown in the window's title bar.
 
-![Main window in “Translate PDF” mode](../screenshots/app_01_hauptfenster.png)
+![Main window in “Translate PDF” mode](../screenshots/en/app_01_hauptfenster.png)
 
 ---
 
@@ -200,7 +197,7 @@ additional fields, **"OCR engine"** and **"Rewrite method"**, shown in the
 screenshot below with their default values (Tesseract and box overlay) –
 both are explained one by one afterwards:
 
-![The fields “OCR engine” and “Rewrite method” in “Translate individual images” mode, here with their default values Tesseract and box overlay](../screenshots/app_02_bilder_modus.png)
+![The fields “OCR engine” and “Rewrite method” in “Translate individual images” mode, here with their default values Tesseract and box overlay](../screenshots/en/app_02_bilder_modus.png)
 
 **Field "OCR engine" – text recognition.** Recognises the text in the images
 before it is translated and written back. Three engines are available (the
@@ -209,7 +206,7 @@ screenshot above shows the first one):
 - **Tesseract (local)** (default). Runs completely locally, without a cloud
   provider or API key of its own – but needs the Tesseract software itself
   installed on this computer (see README.md). Recognises text line by line;
-  PDF-Translator then groups the lines into paragraphs itself.
+  Document Translator then groups the lines into paragraphs itself.
 - **Google Cloud Vision (cloud, paragraph detection)**. Runs through Google's
   cloud service and uses the same API key as the "Google" translation
   provider (chapters 3/11) – it recognises paragraphs as such instead of
@@ -386,7 +383,7 @@ document type, one of two dialogs of different complexity opens:
   once in an image run, the app first asks which of the files should be
   corrected.
 
-![Image correction dialog with original/translation table, editor and image preview](../screenshots/app_05_bildkorrektur.png)
+![Image correction dialog with original/translation table, editor and image preview](../screenshots/en/app_05_bildkorrektur.png)
 
 The image correction dialog shows the image on the left with a coloured box
 for each recognised text passage, and on the right a table with original and
@@ -524,7 +521,7 @@ files searched; unreadable files are listed separately.
 
 The **"Settings …"** button gives access to:
 
-![Settings dialog](../screenshots/app_03_einstellungen.png)
+![Settings dialog](../screenshots/en/app_03_einstellungen.png)
 
 **API Access.** First, the field **"Provider"** selects (DeepL, Google,
 OpenAI, Grok) which provider the status, new key and storage below apply to –
@@ -577,13 +574,13 @@ slowly, on the CPU. **"Check again"** repeats the same check that the
 installer performed – useful after a driver update or a change of graphics
 card, without having to reinstall the app.
 
-![Hardware test dialog](../screenshots/app_04_hardware_test.png)
+![Hardware test dialog](../screenshots/en/app_04_hardware_test.png)
 
 ---
 
 ## 14. Updates and version information
 
-If a newer version of PDF-Translator is found at start-up, a notice appears
+If a newer version of Document Translator is found at start-up, a notice appears
 automatically ("Update available: …"). Clicking it offers to install the new
 version. **Help → Check for updates …** triggers the check manually at any
 time.

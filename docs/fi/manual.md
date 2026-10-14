@@ -1,14 +1,14 @@
 ---
-title: "PDF-Translator – Käyttöohje"
+title: "Document Translator – Käyttöohje"
 lang: fi
 header-includes:
   - \usepackage{float}
   - \floatplacement{figure}{H}
 ---
 
-# PDF-Translator – Käyttöohje
+# Document Translator – Käyttöohje
 
-Tämä ohje kuvaa kaikki PDF-Translatorin käyttöelementit: asennusohjelman
+Tämä ohje kuvaa kaikki Document Translatorin käyttöelementit: asennusohjelman
 (ohjattu asennus) ja varsinaisen sovelluksen. Se perustuu samoihin
 ohjeteksteihin, jotka sovellus näyttää suoraan (työkaluvihje hiiren ollessa
 elementin päällä sekä pidempi teksti kohdasta Ohje → Mikä tämä on? tai
@@ -19,10 +19,6 @@ Sovelluksessa tämän ohjeen voi avata milloin tahansa kohdasta
 **Ohje → Käyttöohje …** – automaattisesti sillä käyttöliittymän kielellä,
 joka on kulloinkin valittuna. Myös suoraan kentän alle tulevat ilmoitukset
 (esim. ”PaddleOCR ei ole asennettu”) linkittävät tänne.
-
-*Huomautus: kuvakaappaukset näyttävät saksankielisen käyttöliittymän.
-Tekstissä kenttien nimet on kirjoitettu täsmälleen niin kuin ne näkyvät
-suomenkielisessä käyttöliittymässä.*
 
 ## Sisällys
 
@@ -45,11 +41,11 @@ suomenkielisessä käyttöliittymässä.*
 
 ## 1. Ohjattu asennus
 
-Ohjattu asennus asentaa PDF-Translatorin kerran tälle tietokoneelle. Se ei
+Ohjattu asennus asentaa Document Translatorin kerran tälle tietokoneelle. Se ei
 tarvitse järjestelmänvalvojan/root-oikeuksia, koska kaikki asennetaan
 käyttäjän omaan, henkilökohtaiseen kansioon.
 
-![Ohjatun asennuksen aloitusnäyttö](../screenshots/01_sprache.png)
+![Ohjatun asennuksen aloitusnäyttö](../screenshots/fi/01_sprache.png)
 
 **Kieli.** Ensimmäisessä näytössä valittu kieli koskee heti kaikkia
 ohjatun asennuksen seuraavia näyttöjä. Se on riippumaton itse sovelluksen
@@ -78,7 +74,7 @@ käsitellään:
   kuvanlaatu, kun käännetyissä asiakirjoissa on valokuvia tai muita
   monimutkaisia taustoja; muuten se ei ole välttämätön.
 
-![”Verkossa vai paikallisesti?” – valintanäyttö](../screenshots/02_online_lokal.png)
+![”Verkossa vai paikallisesti?” – valintanäyttö](../screenshots/fi/02_online_lokal.png)
 
 Jos GPU-tarkistus epäonnistuu (tuettua korttia ei löytynyt tai ajuri on
 vanhentunut), ohjattu asennus tarjoaa kaksi vaihtoehtoa: **”Jatka silti
@@ -98,9 +94,9 @@ se liitetään sitten tähän. Vasta **”Tallenna”**-painike tallentaa syött
 todella. Ohjatun asennuksen voi viedä loppuun myös ilman avainta; ennen kuin
 vähintään yksi avain on tallennettu, mikään käännös ei kuitenkaan toimi.
 
-![Palveluntarjoajien valinta API-avaimia varten](../screenshots/03_api_schluessel_auswahl.png)
+![Palveluntarjoajien valinta API-avaimia varten](../screenshots/fi/03_api_schluessel_auswahl.png)
 
-![Palveluntarjoajan API-avaimen syöttäminen](../screenshots/04_api_schluessel_eingabe.png)
+![Palveluntarjoajan API-avaimen syöttäminen](../screenshots/fi/04_api_schluessel_eingabe.png)
 
 *Turvallisuushuomautus selainta avattaessa:* ennen kuin ohjattu asennus
 avaa linkin oletusselaimessa, kohdeosoite näytetään vielä kerran
@@ -124,12 +120,12 @@ käynnistykseen painikkeella **”Käynnistä nyt”**.
 
 ## 2. Sovellus lyhyesti
 
-Asennuksen jälkeen avautuu varsinainen PDF-Translator-sovellus, jossa on
+Asennuksen jälkeen avautuu varsinainen Document Translator -sovellus, jossa on
 lomake käännösajoa varten. Seuraavat luvut käyvät käytön läpi ylhäältä alas
 siinä järjestyksessä, jossa elementit ovat ikkunassa. Nykyinen versionumero
 näkyy ikkunan otsikkorivillä.
 
-![Pääikkuna tilassa ”Käännä PDF”](../screenshots/app_01_hauptfenster.png)
+![Pääikkuna tilassa ”Käännä PDF”](../screenshots/fi/app_01_hauptfenster.png)
 
 ---
 
@@ -210,7 +206,7 @@ kenttää, **”OCR-moottori”** ja **”Takaisinkirjoitusmenetelmä”**, jotk
 näkyvät alla olevassa kuvakaappauksessa oletusarvoineen (Tesseract ja
 laatikkopeite) – molemmat selitetään seuraavaksi yksitellen:
 
-![Kentät ”OCR-moottori” ja ”Takaisinkirjoitusmenetelmä” tilassa ”Käännä yksittäiset kuvat”, tässä oletusarvoillaan Tesseract ja laatikkopeite](../screenshots/app_02_bilder_modus.png)
+![Kentät ”OCR-moottori” ja ”Takaisinkirjoitusmenetelmä” tilassa ”Käännä yksittäiset kuvat”, tässä oletusarvoillaan Tesseract ja laatikkopeite](../screenshots/fi/app_02_bilder_modus.png)
 
 **Kenttä ”OCR-moottori” – tekstintunnistus.** Tunnistaa kuvien tekstin
 ennen kuin se käännetään ja kirjoitetaan takaisin. Valittavana on kolme
@@ -219,7 +215,7 @@ moottoria (yllä olevassa kuvakaappauksessa on valittuna ensimmäinen):
 - **Tesseract (paikallinen)** (oletus). Toimii kokonaan paikallisesti, ilman
   pilvipalvelua tai omaa API-avainta – mutta vaatii, että itse
   Tesseract-ohjelmisto on asennettu tälle tietokoneelle (ks. README.md).
-  Tunnistaa tekstin rivi kerrallaan; PDF-Translator ryhmittelee rivit sen
+  Tunnistaa tekstin rivi kerrallaan; Document Translator ryhmittelee rivit sen
   jälkeen itse kappaleiksi.
 - **Google Cloud Vision (pilvi, kappaleentunnistus)**. Toimii Googlen
   pilvipalvelun kautta ja käyttää samaa API-avainta kuin käännöspalvelu
@@ -400,7 +396,7 @@ mukaan avautuu toinen kahdesta eri laajuisesta valintaikkunasta:
   on oltava oikein. Jos kuva-ajossa käännettiin useita tiedostoja kerralla,
   sovellus kysyy ensin, mikä tiedostoista korjataan.
 
-![Kuvan korjausikkuna, jossa alkuperäinen/käännös-taulukko, editori ja kuvan esikatselu](../screenshots/app_05_bildkorrektur.png)
+![Kuvan korjausikkuna, jossa alkuperäinen/käännös-taulukko, editori ja kuvan esikatselu](../screenshots/fi/app_05_bildkorrektur.png)
 
 Kuvan korjausikkuna näyttää vasemmalla kuvan, jossa on värillinen laatikko
 jokaisen tunnistetun tekstikohdan kohdalla, ja oikealla taulukon
@@ -551,7 +547,7 @@ tiedostojen määrän; lukukelvottomat tiedostot ilmoitetaan erikseen.
 
 Painikkeella **”Asetukset …”** pääsee seuraaviin:
 
-![Asetukset-ikkuna](../screenshots/app_03_einstellungen.png)
+![Asetukset-ikkuna](../screenshots/fi/app_03_einstellungen.png)
 
 **API-käyttö.** Ensin valitaan kentässä **”Palveluntarjoaja”** (DeepL,
 Google, OpenAI, Grok), mitä palveluntarjoajaa alla oleva tila, uusi avain ja
@@ -606,13 +602,13 @@ inpainting toimii silti – vain hitaammin, suorittimella. Painikkeella
 asennusohjelma teki – hyödyllistä ajuripäivityksen tai näytönohjaimen
 vaihdon jälkeen, ilman että sovellusta tarvitsee asentaa uudelleen.
 
-![Laitteistotestin ikkuna](../screenshots/app_04_hardware_test.png)
+![Laitteistotestin ikkuna](../screenshots/fi/app_04_hardware_test.png)
 
 ---
 
 ## 14. Päivitykset ja versiotiedot
 
-Jos käynnistyksen yhteydessä löytyy PDF-Translatorin uudempi versio,
+Jos käynnistyksen yhteydessä löytyy Document Translatorin uudempi versio,
 näkyviin tulee automaattisesti ilmoitus (”Päivitys saatavilla: …”). Sen
 napsauttaminen tarjoaa uuden version asentamista. Kohdasta **Ohje →
 Tarkista päivitykset …** tarkistuksen voi käynnistää myös käsin milloin

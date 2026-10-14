@@ -1,14 +1,14 @@
 ---
-title: "PDF-Translator – Manuale utente"
+title: "Document Translator – Manuale utente"
 lang: it
 header-includes:
   - \usepackage{float}
   - \floatplacement{figure}{H}
 ---
 
-# PDF-Translator – Manuale utente
+# Document Translator – Manuale utente
 
-Questo manuale descrive tutti i comandi di PDF-Translator: la procedura
+Questo manuale descrive tutti i comandi di Document Translator: la procedura
 guidata di configurazione (programma di installazione) e l'applicazione vera
 e propria. Si basa sugli stessi testi di aiuto che l'applicazione mostra
 direttamente (descrizione comandi al passaggio del mouse e testo più
@@ -20,9 +20,6 @@ Nell'applicazione, questo manuale si apre in qualsiasi momento tramite
 **Guida → Manuale utente...** – automaticamente nella lingua dell'interfaccia
 attualmente impostata. Anche gli avvisi che compaiono direttamente sotto un
 campo (ad es. «PaddleOCR non è installato») rimandano qui.
-
-*Nota: le schermate mostrano l'interfaccia in tedesco. Nel testo, i nomi dei
-campi sono indicati esattamente come compaiono nell'interfaccia italiana.*
 
 ## Indice
 
@@ -45,11 +42,11 @@ campi sono indicati esattamente come compaiono nell'interfaccia italiana.*
 
 ## 1. Procedura guidata di configurazione (installazione)
 
-La procedura guidata installa PDF-Translator una sola volta su questo
+La procedura guidata installa Document Translator una sola volta su questo
 computer. Non richiede diritti di amministratore/root, perché tutto viene
 installato in una cartella personale di proprietà dell'utente.
 
-![Schermata iniziale della procedura guidata](../screenshots/01_sprache.png)
+![Schermata iniziale della procedura guidata](../screenshots/it/01_sprache.png)
 
 **Lingua.** La lingua scelta nella prima schermata vale subito per tutte le
 schermate successive della procedura. È indipendente dalla lingua
@@ -79,7 +76,7 @@ documenti:
   contengono foto o altri sfondi complessi; altrimenti non è strettamente
   necessaria.
 
-![«Online o locale?» – schermata di selezione](../screenshots/02_online_lokal.png)
+![«Online o locale?» – schermata di selezione](../screenshots/it/02_online_lokal.png)
 
 Se la verifica della GPU ha esito negativo (nessuna scheda supportata trovata
 o driver obsoleto), la procedura offre due strade: **«Continua comunque in
@@ -101,9 +98,9 @@ provider – lì si genera la chiave, che poi si incolla qui. Solo il pulsante
 completare anche senza chiave; tuttavia, finché non è memorizzata almeno una
 chiave, nessuna traduzione funzionerà.
 
-![Scegliere i provider per le chiavi API](../screenshots/03_api_schluessel_auswahl.png)
+![Scegliere i provider per le chiavi API](../screenshots/it/03_api_schluessel_auswahl.png)
 
-![Inserire la chiave API di un provider](../screenshots/04_api_schluessel_eingabe.png)
+![Inserire la chiave API di un provider](../screenshots/it/04_api_schluessel_eingabe.png)
 
 *Avviso di sicurezza all'apertura del browser:* prima che la procedura apra
 un link nel browser predefinito, l'indirizzo di destinazione viene mostrato
@@ -127,12 +124,12 @@ dell'applicazione tramite **«Avvia ora»**.
 
 ## 2. L'applicazione in sintesi
 
-Dopo l'installazione si apre l'applicazione PDF-Translator con un modulo per
+Dopo l'installazione si apre l'applicazione Document Translator con un modulo per
 l'esecuzione della traduzione. I capitoli seguenti lo percorrono dall'alto
 verso il basso, nell'ordine in cui è disposto nella finestra. Il numero di
 versione attuale è indicato nella barra del titolo della finestra.
 
-![Finestra principale in modalità «Traduci PDF»](../screenshots/app_01_hauptfenster.png)
+![Finestra principale in modalità «Traduci PDF»](../screenshots/it/app_01_hauptfenster.png)
 
 ---
 
@@ -213,7 +210,7 @@ campi aggiuntivi, **«Motore OCR»** e **«Metodo di riscrittura»**, mostrati
 nella schermata seguente con i loro valori predefiniti (Tesseract e
 sovrapposizione box) – entrambi vengono spiegati di seguito uno per uno:
 
-![I campi «Motore OCR» e «Metodo di riscrittura» in modalità «Traduci singole immagini», qui con i loro valori predefiniti Tesseract e sovrapposizione box](../screenshots/app_02_bilder_modus.png)
+![I campi «Motore OCR» e «Metodo di riscrittura» in modalità «Traduci singole immagini», qui con i loro valori predefiniti Tesseract e sovrapposizione box](../screenshots/it/app_02_bilder_modus.png)
 
 **Campo «Motore OCR» – riconoscimento del testo.** Riconosce il testo nelle
 immagini prima che venga tradotto e riscritto. Sono disponibili tre motori
@@ -222,7 +219,7 @@ immagini prima che venga tradotto e riscritto. Sono disponibili tre motori
 - **Tesseract (locale)** (predefinito). Funziona completamente in locale,
   senza provider cloud né chiave API propria – ma richiede che il software
   Tesseract stesso sia installato su questo computer (vedi README.md).
-  Riconosce il testo riga per riga; PDF-Translator raggruppa poi da sé le
+  Riconosce il testo riga per riga; Document Translator raggruppa poi da sé le
   righe in paragrafi.
 - **Google Cloud Vision (cloud, rilevamento paragrafi)**. Funziona tramite il
   servizio cloud di Google e usa la stessa chiave API del provider di
@@ -411,7 +408,7 @@ di documento si apre una di due finestre di dialogo di diversa complessità:
   un'esecuzione sono stati tradotti più file contemporaneamente,
   l'applicazione chiede prima quale file correggere.
 
-![Finestra di correzione delle immagini con tabella originale/traduzione, editor e anteprima dell'immagine](../screenshots/app_05_bildkorrektur.png)
+![Finestra di correzione delle immagini con tabella originale/traduzione, editor e anteprima dell'immagine](../screenshots/it/app_05_bildkorrektur.png)
 
 La finestra di correzione delle immagini mostra a sinistra l'immagine con un
 riquadro colorato per ogni passaggio di testo riconosciuto, a destra una
@@ -560,7 +557,7 @@ file esaminati; i file illeggibili sono indicati separatamente.
 
 Con il pulsante **«Impostazioni...»** si accede a:
 
-![Finestra delle impostazioni](../screenshots/app_03_einstellungen.png)
+![Finestra delle impostazioni](../screenshots/it/app_03_einstellungen.png)
 
 **Accesso API.** Per prima cosa si sceglie nel campo **«Provider»** (DeepL,
 Google, OpenAI, Grok) a quale provider si riferiscono lo stato, la nuova
@@ -617,13 +614,13 @@ sulla CPU. Con **«Verifica di nuovo»** si ripete la stessa verifica eseguita
 dal programma di installazione – utile dopo un aggiornamento del driver o un
 cambio di scheda grafica, senza dover reinstallare l'applicazione.
 
-![Finestra del test hardware](../screenshots/app_04_hardware_test.png)
+![Finestra del test hardware](../screenshots/it/app_04_hardware_test.png)
 
 ---
 
 ## 14. Aggiornamenti e informazioni sulla versione
 
-Se all'avvio viene trovata una versione più recente di PDF-Translator,
+Se all'avvio viene trovata una versione più recente di Document Translator,
 compare automaticamente un avviso («Aggiornamento disponibile: …»). Facendo
 clic viene proposta l'installazione della nuova versione. Con **Guida → Cerca
 aggiornamenti...** si può avviare la verifica manualmente in qualsiasi
